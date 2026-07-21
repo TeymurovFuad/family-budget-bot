@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import auth, get_display_currency, log
 from log_decorators import log_call
 from data import load_rates, load_reference_data, now_utc
-from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, _excel_write_lock
+from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, RowMovedError, _excel_write_lock
 from formatters import format_pln_as_currency, format_amount
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
 
@@ -162,12 +162,19 @@ async def edit_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     new_value = ctx.user_data["edit_new_value"]
     row_idx   = txn["_row_idx"]
     excel_col = EDIT_FIELD_MAP[field]
+    expected  = {"Date": txn.get("Date"), "Value": txn.get("Value"), "Description": txn.get("Description")}
 
     try:
         async with _excel_write_lock:
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, update_transaction_field, row_idx, excel_col, new_value)
+            await loop.run_in_executor(None, update_transaction_field, row_idx, excel_col, new_value, expected)
         await update.message.reply_text("✅ Updated.", reply_markup=ReplyKeyboardRemove())
+    except RowMovedError:
+        log.warning("Edit aborted, row %d moved before it could be applied", row_idx)
+        await update.message.reply_text(
+            "⚠️ That transaction moved (another edit/delete happened first). Please run /edit again.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
     except Exception as e:
         log.exception("edit_confirm failed")
         await update.message.reply_text(f"❌ Failed to save: {e}", reply_markup=ReplyKeyboardRemove())

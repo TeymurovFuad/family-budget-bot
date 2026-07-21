@@ -22,6 +22,7 @@ from file_storage import (
 )
 from excel_ops import _do_append_transaction, replay_recovery_queue
 from models import Transaction, AddTransactionState, MONTH_NAMES
+from file_storage import delete_transaction_row, update_transaction_field, RowMovedError
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -678,6 +679,80 @@ class TestDoAppendTransactionExhaustive:
 # ══════════════════════════════════════════════════════════════════════════════
 # excel_ops.py — replay_recovery_queue()
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestRowMovedGuard:
+    """
+    Regression: /delete and /edit captured a row index at pick time and
+    applied it minutes later. If another delete/edit shifted rows in between,
+    the stale index would silently delete/edit the wrong transaction. Now
+    delete_transaction_row/update_transaction_field re-verify a date/value/
+    description snapshot under the write lock and raise RowMovedError if the
+    row no longer matches.
+    """
+
+    def _append(self, excel_path, day, value, desc):
+        _do_append_transaction(Transaction(
+            date=datetime.date(2024, 6, day),
+            value=value,
+            currency="PLN",
+            transaction_type="Expense",
+            category="Groceries",
+            description=desc,
+        ))
+
+    def test_delete_succeeds_when_snapshot_matches(self, excel_path):
+        self._append(excel_path, 1, 10.0, "first")
+        self._append(excel_path, 2, 20.0, "second")
+        expected = {"Date": datetime.date(2024, 6, 2), "Value": 20.0, "Description": "second"}
+        delete_transaction_row(3, expected)
+        remaining = get_recent_transactions(excel_path)
+        assert len(remaining) == 1
+        assert remaining[0]["Description"] == "first"
+
+    def test_delete_raises_row_moved_error_when_row_shifted(self, excel_path):
+        self._append(excel_path, 1, 10.0, "first")
+        self._append(excel_path, 2, 20.0, "second")
+        # Simulate a concurrent delete of row 2 shifting "second" up to row 2.
+        wb = openpyxl.load_workbook(excel_path)
+        wb["MasterData"].delete_rows(2)
+        wb.save(excel_path)
+
+        # Caller still thinks "second" is at row 3 (stale snapshot).
+        stale_expected = {"Date": datetime.date(2024, 6, 2), "Value": 20.0, "Description": "second"}
+        with pytest.raises(RowMovedError):
+            delete_transaction_row(3, stale_expected)
+        # Nothing was deleted — "second" (now at row 2) is still present.
+        remaining = get_recent_transactions(excel_path)
+        assert len(remaining) == 1
+        assert remaining[0]["Description"] == "second"
+
+    def test_delete_without_expected_snapshot_still_works(self, excel_path):
+        """Backward-compatible: omitting `expected` skips verification."""
+        self._append(excel_path, 1, 10.0, "only")
+        delete_transaction_row(2)
+        assert get_recent_transactions(excel_path) == []
+
+    def test_update_field_succeeds_when_snapshot_matches(self, excel_path):
+        self._append(excel_path, 1, 10.0, "first")
+        expected = {"Date": datetime.date(2024, 6, 1), "Value": 10.0, "Description": "first"}
+        update_transaction_field(2, "Value", 99.0, expected)
+        result = get_recent_transactions(excel_path)
+        assert result[0]["Value"] == 99.0
+
+    def test_update_field_raises_row_moved_error_when_row_shifted(self, excel_path):
+        self._append(excel_path, 1, 10.0, "first")
+        self._append(excel_path, 2, 20.0, "second")
+        wb = openpyxl.load_workbook(excel_path)
+        wb["MasterData"].delete_rows(2)
+        wb.save(excel_path)
+
+        stale_expected = {"Date": datetime.date(2024, 6, 2), "Value": 20.0, "Description": "second"}
+        with pytest.raises(RowMovedError):
+            update_transaction_field(3, "Value", 999.0, stale_expected)
+        # The value at the shifted row must be untouched.
+        result = get_recent_transactions(excel_path)
+        assert result[0]["Value"] == 20.0
 
 
 class TestReplayRecoveryQueue:

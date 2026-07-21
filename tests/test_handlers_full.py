@@ -55,6 +55,8 @@ from handlers.edit_conv import (
 )
 from handlers.bulk_conv import cmd_bulk, bulk_receive, bulk_confirm, _format_bulk_preview
 from handlers.quick_conv import handle_quick_add, quick_confirm
+from handlers.delete_conv import cmd_delete, delete_pick
+from file_storage import RowMovedError
 from telegram.ext import ConversationHandler
 
 
@@ -973,6 +975,79 @@ class TestEditConvConfirm:
         sent = upd.message.reply_text.call_args.args[0]
         assert "Updated" in sent or "✅" in sent
 
+    async def test_passes_expected_snapshot_to_update_transaction_field(self):
+        """
+        Regression: edit_confirm must re-verify date/value/description under
+        the write lock before applying, to guard against a stale row index
+        (see file_storage.RowMovedError). Verify the snapshot is threaded
+        through to update_transaction_field.
+        """
+        ctx = self._make_ctx()
+        upd = make_update("Yes")
+        mock_update_field = MagicMock()
+        with patch("handlers.edit_conv.update_transaction_field", mock_update_field), \
+             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+            await edit_confirm(upd, ctx)
+        args = mock_update_field.call_args.args
+        assert args[0] == SAMPLE_TXN["_row_idx"]
+        expected_snapshot = args[3]
+        assert expected_snapshot["Date"] == SAMPLE_TXN["Date"]
+        assert expected_snapshot["Value"] == SAMPLE_TXN["Value"]
+        assert expected_snapshot["Description"] == SAMPLE_TXN["Description"]
+
+    async def test_row_moved_error_reports_friendly_message_and_ends(self):
+        ctx = self._make_ctx()
+        upd = make_update("Yes")
+        with patch("handlers.edit_conv.update_transaction_field",
+                    MagicMock(side_effect=RowMovedError("moved"))), \
+             patch("handlers.edit_conv._excel_write_lock",
+                   MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock(return_value=False))):
+            result = await edit_confirm(upd, ctx)
+        assert result == ConversationHandler.END
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "moved" in sent.lower()
+        assert "/edit" in sent
+
+
+class TestDeleteConvPick:
+    def _make_ctx(self):
+        ctx = make_ctx()
+        ctx.user_data["delete_candidates"] = [SAMPLE_TXN]
+        return ctx
+
+    async def test_valid_pick_deletes_and_ends(self):
+        ctx = self._make_ctx()
+        upd = make_update("1")
+        mock_delete = AsyncMock()
+        with patch("handlers.delete_conv.async_delete_transaction_row", mock_delete):
+            result = await delete_pick(upd, ctx)
+        assert result == ConversationHandler.END
+        mock_delete.assert_awaited_once()
+        call_args = mock_delete.call_args.args
+        assert call_args[0] == SAMPLE_TXN["_row_idx"]
+        expected_snapshot = call_args[1]
+        assert expected_snapshot["Date"] == SAMPLE_TXN["Date"]
+        assert expected_snapshot["Value"] == SAMPLE_TXN["Value"]
+        assert expected_snapshot["Description"] == SAMPLE_TXN["Description"]
+        assert "delete_candidates" not in ctx.user_data
+
+    async def test_row_moved_error_reports_friendly_message_and_ends(self):
+        ctx = self._make_ctx()
+        upd = make_update("1")
+        with patch("handlers.delete_conv.async_delete_transaction_row",
+                    AsyncMock(side_effect=RowMovedError("moved"))):
+            result = await delete_pick(upd, ctx)
+        assert result == ConversationHandler.END
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "moved" in sent.lower()
+        assert "/delete" in sent
+
+    async def test_out_of_range_stays(self):
+        ctx = self._make_ctx()
+        upd = make_update("9")
+        result = await delete_pick(upd, ctx)
+        assert result == states.DELETE_PICK
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5 — handlers/bulk_conv.py
@@ -1218,6 +1293,71 @@ class TestBulkConvConfirm:
         assert result == ConversationHandler.END
         sent = upd.message.reply_text.call_args.args[0]
         assert "Write failed" in sent or "0" in sent
+
+    async def test_partial_save_keeps_only_failed_rows_in_draft(self):
+        """
+        Regression: rows that fail Transaction construction used to be lost
+        entirely because _delete_bulk_draft wiped the whole draft even when
+        the rest of the batch saved fine. Now only the failed rows survive.
+        """
+        from handlers.bulk_conv import _user_draft_path, _load_user_draft
+
+        ctx = self._make_ctx()
+        good_row = {"date": "2024-06-15", "value": 50, "currency": "PLN",
+                    "type": "Expense", "category": "Groceries", "description": "shop", "person": ""}
+        bad_row = {"date": "2024-06-16", "value": "not-a-number", "currency": "PLN",
+                   "type": "Expense", "category": "Other", "description": "broken", "person": ""}
+        ctx.user_data["bulk_parsed"] = [good_row, bad_row]
+        upd = make_update("Yes", user_id=99001)
+
+        with patch("handlers.bulk_conv.async_append_batch", AsyncMock()):
+            result = await bulk_confirm(upd, ctx)
+
+        assert result == ConversationHandler.END
+        remaining = _load_user_draft(99001)
+        assert len(remaining) == 1
+        assert remaining[0]["description"] == "broken"
+
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "Saved 1" in sent
+        assert "kept in your draft" in sent
+
+    async def test_full_batch_write_failure_keeps_entire_draft(self):
+        """If the whole batch write fails, nothing was saved — keep every row,
+        including ones that parsed fine, so the user can retry cleanly."""
+        from handlers.bulk_conv import _load_user_draft
+
+        ctx = self._make_ctx()
+        rows = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "shop", "person": ""},
+            {"date": "2024-06-16", "value": 20, "currency": "PLN",
+             "type": "Expense", "category": "Other", "description": "coffee", "person": ""},
+        ]
+        ctx.user_data["bulk_parsed"] = list(rows)
+        upd = make_update("Yes", user_id=99002)
+
+        with patch("handlers.bulk_conv.async_append_batch", AsyncMock(side_effect=RuntimeError("boom"))):
+            result = await bulk_confirm(upd, ctx)
+
+        assert result == ConversationHandler.END
+        remaining = _load_user_draft(99002)
+        assert len(remaining) == 2
+
+    async def test_all_rows_valid_and_saved_deletes_draft(self):
+        from handlers.bulk_conv import _load_user_draft
+
+        ctx = self._make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "shop", "person": ""}
+        ]
+        upd = make_update("Yes", user_id=99003)
+
+        with patch("handlers.bulk_conv.async_append_batch", AsyncMock()):
+            await bulk_confirm(upd, ctx)
+
+        assert _load_user_draft(99003) == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

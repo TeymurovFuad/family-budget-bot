@@ -358,6 +358,89 @@ class TestReplayRecoveryQueue:
         from excel_ops import replay_recovery_queue
         replay_recovery_queue()  # must not raise
 
+    def test_replay_deletes_queue_file_after_success(self, excel_path, monkeypatch, tmp_path):
+        import file_storage
+        from excel_ops import replay_recovery_queue
+        from file_storage import append_to_recovery_queue
+
+        queue_path = tmp_path / "recovery_queue.json"
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+        import excel_ops
+        monkeypatch.setattr(excel_ops, "RECOVERY_QUEUE_PATH", queue_path, raising=False)
+
+        append_to_recovery_queue({
+            "date": datetime.date(2024, 6, 1), "year": 2024, "month": "Jun",
+            "value": 42.0, "type": "Expense", "category": "Groceries",
+            "description": "recovered", "person": "", "is_recurring": False,
+            "currency": "PLN",
+        })
+        assert queue_path.exists()
+        replay_recovery_queue()
+        assert not queue_path.exists()
+
+    def test_corrupt_queue_file_is_quarantined_not_raised(self, excel_path, monkeypatch, tmp_path):
+        import file_storage
+        from file_storage import flush_recovery_queue
+
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("{not valid json")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        rows = flush_recovery_queue()  # must not raise
+
+        assert rows == []
+        assert not queue_path.exists()
+        corrupt_path = queue_path.with_name(queue_path.name + ".corrupt")
+        assert corrupt_path.exists()
+        assert corrupt_path.read_text() == "{not valid json"
+
+    def test_replay_startup_survives_corrupt_queue_file(self, excel_path, monkeypatch, tmp_path):
+        """replay_recovery_queue() must not raise on startup when the queue file is corrupt."""
+        import file_storage
+        from excel_ops import replay_recovery_queue
+
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("not json at all }{")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        replay_recovery_queue()  # must not raise, corrupt file quarantined instead
+
+        corrupt_path = queue_path.with_name(queue_path.name + ".corrupt")
+        assert corrupt_path.exists()
+
+    def test_failed_replay_leaves_rows_recoverable(self, excel_path, monkeypatch, tmp_path):
+        """
+        If the replay attempt itself fails (e.g. the workbook can't be opened),
+        the pending rows must survive as a re-queued file, not be lost.
+        """
+        import file_storage
+        import excel_ops
+        from excel_ops import replay_recovery_queue
+        from file_storage import append_to_recovery_queue
+
+        queue_path = tmp_path / "recovery_queue.json"
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        append_to_recovery_queue({
+            "date": datetime.date(2024, 6, 1), "year": 2024, "month": "Jun",
+            "value": 42.0, "type": "Expense", "category": "Groceries",
+            "description": "recovered", "person": "", "is_recurring": False,
+            "currency": "PLN",
+        })
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("simulated crash mid-replay")
+
+        monkeypatch.setattr(excel_ops, "ExcelFileContext", _boom)
+
+        replay_recovery_queue()  # must not raise; row should be re-queued
+
+        assert queue_path.exists()
+        import json
+        requeued = json.loads(queue_path.read_text())
+        assert len(requeued) == 1
+        assert requeued[0]["description"] == "recovered"
+
 
 # ── atomic_save ────────────────────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ from file_storage import (
     update_currency_rates_in_excel,
     append_to_recovery_queue,
     flush_recovery_queue,
+    delete_recovery_queue_file,
     _excel_write_lock,
 )
 from models import Transaction
@@ -48,10 +49,10 @@ async def append_transaction(transaction: Transaction) -> None:
             raise
 
 
-async def async_delete_transaction_row(row_idx: int) -> None:
+async def async_delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
-        await loop.run_in_executor(None, delete_transaction_row, row_idx)
+        await loop.run_in_executor(None, delete_transaction_row, row_idx, expected)
 
 
 async def async_update_currency_rates(new_rates: dict) -> None:
@@ -115,5 +116,9 @@ def replay_recovery_queue() -> None:
     except Exception as e:
         log.error("Recovery queue: replay aborted, re-queueing all rows: %s", e)
         failed = pending
+
+    # Replay attempt is fully finished (success or failure) — safe to drop
+    # the old queue file now and persist only the rows that still failed.
+    delete_recovery_queue_file()
     for row in failed:
         append_to_recovery_queue(row)

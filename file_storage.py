@@ -63,6 +63,51 @@ from excel_schema import ListsSchema, MasterDataSchema, find_col, col_indices, h
 _excel_write_lock = asyncio.Lock()
 
 
+class RowMovedError(Exception):
+    """
+    Raised when a row picked in /delete or /edit no longer matches what the
+    user saw at pick time — another write shifted rows in between, so the
+    row index is stale. Callers should abort instead of silently mutating
+    the wrong transaction.
+    """
+
+
+def _row_matches_snapshot(ws, headers: dict, row_idx: int, expected: dict) -> bool:
+    """
+    Best-effort check that MasterData row `row_idx` still holds the same
+    date/value/description the user saw when they picked it. Used to guard
+    against the row having shifted due to a concurrent delete/edit.
+    """
+    if row_idx < 2 or row_idx > ws.max_row:
+        return False
+
+    for col_name in ("Date", "Value", "Description"):
+        if col_name not in expected:
+            continue
+        col_idx = headers.get(col_name)
+        if col_idx is None:
+            continue
+        current = ws.cell(row_idx, col_idx).value
+        target = expected[col_name]
+
+        if col_name == "Date":
+            current_cmp = current.date() if hasattr(current, "date") else current
+            target_cmp = target.date() if hasattr(target, "date") else target
+        elif col_name == "Value":
+            try:
+                current_cmp = round(float(current), 2)
+                target_cmp = round(float(target), 2)
+            except (TypeError, ValueError):
+                current_cmp, target_cmp = current, target
+        else:
+            current_cmp = str(current or "")
+            target_cmp = str(target or "")
+
+        if current_cmp != target_cmp:
+            return False
+    return True
+
+
 def atomic_save(wb, path) -> None:
     """
     Crash-safe workbook save: write to a sibling temp file, keep a rolling
@@ -116,19 +161,50 @@ RECOVERY_QUEUE_PATH = settings.RECOVERY_QUEUE_PATH
 
 
 def append_to_recovery_queue(row: dict) -> None:
+    """Append a row to the recovery queue with a crash-safe atomic write."""
+    import os
+
     queue = []
     if RECOVERY_QUEUE_PATH.exists():
-        queue = json.loads(RECOVERY_QUEUE_PATH.read_text())
+        try:
+            queue = json.loads(RECOVERY_QUEUE_PATH.read_text())
+        except (json.JSONDecodeError, ValueError) as e:
+            log.error("Recovery queue file is corrupt, starting a new queue: %s", e)
+            queue = []
     queue.append(row)
-    RECOVERY_QUEUE_PATH.write_text(json.dumps(queue, default=str))
+    tmp = RECOVERY_QUEUE_PATH.with_name(RECOVERY_QUEUE_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(queue, default=str))
+    os.replace(tmp, RECOVERY_QUEUE_PATH)
 
 
 def flush_recovery_queue() -> list[dict]:
+    """
+    Read pending recovery rows WITHOUT deleting the file. The caller must
+    call delete_recovery_queue_file() only after the rows have been fully
+    replayed, so a crash mid-replay can't lose queued data.
+
+    If the file contains invalid JSON (e.g. from a crash mid-write before
+    this module wrote atomically), it is quarantined with a `.corrupt`
+    suffix and an empty list is returned instead of raising, so startup
+    is never blocked by a corrupted queue file.
+    """
     if not RECOVERY_QUEUE_PATH.exists():
         return []
-    rows = json.loads(RECOVERY_QUEUE_PATH.read_text())
-    RECOVERY_QUEUE_PATH.unlink()
-    return rows
+    try:
+        return json.loads(RECOVERY_QUEUE_PATH.read_text())
+    except (json.JSONDecodeError, ValueError) as e:
+        corrupt_path = RECOVERY_QUEUE_PATH.with_name(RECOVERY_QUEUE_PATH.name + ".corrupt")
+        log.error("Recovery queue file is corrupt, quarantining to %s: %s", corrupt_path, e)
+        try:
+            RECOVERY_QUEUE_PATH.replace(corrupt_path)
+        except Exception as e2:
+            log.error("Failed to quarantine corrupt recovery queue file: %s", e2)
+        return []
+
+
+def delete_recovery_queue_file() -> None:
+    """Remove the recovery queue file. Call only after replay has fully completed."""
+    RECOVERY_QUEUE_PATH.unlink(missing_ok=True)
 
 
 def _active_backend() -> str:
@@ -615,29 +691,52 @@ def append_transactions_batch(transactions: list) -> None:
         log.info("Batch-appended %d transactions to MasterData", len(transactions))
 
 
-def delete_transaction_row(row_idx: int) -> None:
+def delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
     """
     Delete a single row from MasterData by its 1-based Excel row index.
 
     Shifts all rows below up by one. Uploads to remote storage on exit.
+
+    If `expected` (a snapshot of Date/Value/Description captured when the
+    user picked the row) is given, the row is re-verified under the write
+    lock before deleting — protects against a stale row index if another
+    delete/edit shifted rows in the meantime. Raises RowMovedError if the
+    row no longer matches.
     """
     from openpyxl import load_workbook
 
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = wb["MasterData"]
+        if expected is not None:
+            headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+            if not _row_matches_snapshot(ws, headers, row_idx, expected):
+                raise RowMovedError(
+                    f"Row {row_idx} no longer matches the selected transaction — it may have moved."
+                )
         ws.delete_rows(row_idx)
         atomic_save(wb, excel_path)
         log.info("Deleted MasterData row %d", row_idx)
 
 
-def update_transaction_field(row_idx: int, field: str, value) -> None:
+def update_transaction_field(row_idx: int, field: str, value, expected: dict | None = None) -> None:
+    """
+    Update a single field of a MasterData row.
+
+    If `expected` is given, the row is re-verified under the write lock
+    before applying the change (see delete_transaction_row). Raises
+    RowMovedError if the row no longer matches.
+    """
     from openpyxl import load_workbook
 
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+        if expected is not None and not _row_matches_snapshot(ws, headers, row_idx, expected):
+            raise RowMovedError(
+                f"Row {row_idx} no longer matches the selected transaction — it may have moved."
+            )
         col_idx = headers.get(field)
         if col_idx is None:
             raise ValueError(f"Column '{field}' not found")

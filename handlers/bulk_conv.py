@@ -422,8 +422,9 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     parsed = _sort_bulk_rows(parsed)
     ctx.user_data["bulk_parsed"] = parsed
-    transactions = []
-    errors       = []
+    transactions  = []
+    errors        = []
+    failed_items  = []  # raw rows that never made it into `transactions`, kept for retry
 
     for i, item in enumerate(parsed, 1):
         try:
@@ -440,18 +441,32 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ))
         except Exception as e:
             errors.append(f"Row {i}: {e}")
+            failed_items.append(item)
 
     saved = 0
+    write_failed = False
     if transactions:
         try:
             log.info("User %s saving bulk batch: %d transactions", update.effective_user.id, len(transactions))
             await async_append_batch(transactions)
             saved = len(transactions)
-            _delete_bulk_draft(update.effective_user.id)
             log.info("User %s bulk batch saved: %d transactions", update.effective_user.id, saved)
         except Exception as e:
             log.exception("bulk_confirm batch write failed for user %s", update.effective_user.id)
             errors.append(f"Write failed: {e}")
+            write_failed = True
+
+    if write_failed:
+        # The whole batch write failed — nothing was saved, so keep every row
+        # (including the ones that parsed fine) in the draft for a clean retry.
+        _save_bulk_draft(update.effective_user.id, parsed)
+    elif failed_items:
+        # Partial save: the valid rows are already in the workbook. Keep only
+        # the rows that failed to construct so the user can fix/retry them
+        # instead of losing them when the whole draft is wiped.
+        _save_bulk_draft(update.effective_user.id, failed_items)
+    else:
+        _delete_bulk_draft(update.effective_user.id)
 
     if settings.STORAGE_BACKEND == "gcs" or settings.GCS_BUCKET_NAME:
         destination = f"gs://{settings.GCS_BUCKET_NAME}/{settings.GCS_OBJECT_NAME}"
@@ -465,5 +480,10 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
     if errors:
         msg += "\n\n⚠️ Errors:\n" + "\n".join(errors[:5])
+    if failed_items and not write_failed:
+        msg += (
+            f"\n\n{len(failed_items)} row(s) could not be saved and are kept in your draft — "
+            "reply with edits (e.g. `1 value=12.50`) and send `save` again to retry them."
+        )
     await update.message.reply_text(msg, reply_markup=ReplyKeyboardRemove())
     return ConversationHandler.END
