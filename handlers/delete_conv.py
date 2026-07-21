@@ -6,7 +6,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 from config import auth, log
 from log_decorators import log_call
 from excel_ops import async_delete_transaction_row
-from file_storage import get_excel_path_for_reading, get_recent_transactions
+from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
 from states import DELETE_PICK
 
 
@@ -58,16 +58,23 @@ async def delete_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Pick 1–{len(candidates)} or /cancel.")
         return DELETE_PICK
 
-    txn     = candidates[choice - 1]
-    row_idx = txn["_row_idx"]
+    txn      = candidates[choice - 1]
+    row_idx  = txn["_row_idx"]
+    expected = {"Date": txn.get("Date"), "Value": txn.get("Value"), "Description": txn.get("Description")}
     try:
-        await async_delete_transaction_row(row_idx)
+        await async_delete_transaction_row(row_idx, expected)
         val   = txn.get("Value", "?")
         d_ccy = str(txn.get("Currency", "PLN") or "PLN")
         label = str(txn.get("Description", "") or txn.get("Category", "") or "—")
         await update.message.reply_text(
             f"✅ Deleted: `{val} {d_ccy}` — {label}",
             parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+    except RowMovedError:
+        log.warning("Delete aborted, row %d moved before it could be applied", row_idx)
+        await update.message.reply_text(
+            "⚠️ That transaction moved (another edit/delete happened first). Please run /delete again.",
             reply_markup=ReplyKeyboardRemove(),
         )
     except Exception as e:

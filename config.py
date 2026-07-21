@@ -21,11 +21,11 @@ _DISPLAY_CURRENCY = settings.DISPLAY_CURRENCY
 SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
 
 # ── logging ───────────────────────────────────────────────────────────────────
+# Single owner of logging setup is logger.init_logging() (called from bot.py
+# before this module is imported). Do not call logging.basicConfig here —
+# it would install a second console handler and partially override the
+# level/format that init_logging() configured on the root logger.
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    level=logging.INFO,
-)
 log = logging.getLogger("budget_bot")
 
 if not ALLOWED_USERS:

@@ -37,6 +37,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import openpyxl
+from _repair_guard import repair_guard
+from file_storage import atomic_save
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.formatting.rule import FormulaRule
@@ -383,6 +385,11 @@ def _ensure_monthly_summary(wb) -> None:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main(source: Path, dest: Path):
+    with repair_guard():
+        _run(source, dest)
+
+
+def _run(source: Path, dest: Path):
     print(f"Source: {source}")
     print(f"Dest:   {dest}")
 
@@ -620,7 +627,7 @@ def main(source: Path, dest: Path):
     print(f"\n── Verification: {written}/{len(rows)} rows ✓")
 
     # ── 14. Save ──────────────────────────────────────────────────────────────
-    new_wb.save(dest)
+    atomic_save(new_wb, dest)
     print(f"\n✅  Done. Saved: {dest}")
     print(f"    Rows:       {written}")
     print(f"    Categories: {len(categories)}")
