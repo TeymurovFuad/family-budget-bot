@@ -256,6 +256,14 @@ write paths — commit 309df08.
       size pre-check with a clear message before the workbook grows past the limit (same leak risk
       above if a raw Telegram error surfaces on failure).
 
+## Follow-up PR: recovery-queue hardening (PR #2 review, 2026-07-22)
+
+- [ ] **Quarantine rename failure retries forever** — file_storage.py: if the corrupt-queue-file
+      `.replace(corrupt_path)` itself fails (e.g. permissions), the exception is caught and logged
+      but the file stays at its original path; every subsequent flush hits the same JSONDecodeError
+      and repeats the same failing rename. Not a data-loss risk, just log spam — give up after one
+      retry or alert distinctly instead of looping silently.
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
