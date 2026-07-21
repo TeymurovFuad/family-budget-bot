@@ -1746,12 +1746,12 @@ class TestBulkSaveCommandAndDestination:
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
                  "category": "Groceries", "description": "shop", "person": ""}]
-        action, reason = _apply_bulk_edit("/save", rows)
+        action, reason, notes = _apply_bulk_edit("/save", rows)
         assert action is True
 
     def test_apply_bulk_edit_accepts_slash_cancel(self):
         from handlers.bulk_conv import _apply_bulk_edit
-        action, reason = _apply_bulk_edit("/cancel", [])
+        action, reason, notes = _apply_bulk_edit("/cancel", [])
         assert action is False and reason == "cancel"
 
     async def test_save_confirmation_names_destination_file(self):
@@ -1969,3 +1969,29 @@ class TestDataValidationFollowUp:
         result = await add_value(upd, ctx)
         assert result == states.ADD_CURRENCY
         assert ctx.user_data["state"].value == 1234.56
+
+    async def test_bulk_edit_correction_reported_with_shield_note(self):
+        ctx = make_ctx()
+        ctx.user_data["lists"] = dict(SAMPLE_LISTS, categories=["Groceries", "Savings"])
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "x", "person": ""},
+        ]
+        upd = make_update("1 category=Savings", user_id=99013)
+        result = await bulk_confirm(upd, ctx)
+        assert result == states.BULK_CONFIRM
+        assert ctx.user_data["bulk_parsed"][0]["type"] == "Savings"
+        messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert any("🛡" in m for m in messages)
+
+    async def test_bulk_edit_negative_value_correction_reported(self):
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Income", "category": "Groceries", "description": "x", "person": ""},
+        ]
+        upd = make_update("1 value=-45.00", user_id=99014)
+        result = await bulk_confirm(upd, ctx)
+        assert result == states.BULK_CONFIRM
+        messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert any("🛡" in m and "negative" in m for m in messages)
