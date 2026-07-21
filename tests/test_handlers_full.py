@@ -1876,3 +1876,96 @@ class TestNormalizeParsedRows:
         rows = [{"category": "Groceries", "person": "", "type": "Transfer", "description": "x"}]
         fixed, corr = _normalize_parsed_rows(rows, self.LISTS)
         assert fixed[0]["type"] == "Expense"
+
+
+class TestDataValidationFollowUp:
+    """BACKLOG 'data validation' PR: shared validator on every entry path."""
+
+    async def test_quick_add_rejects_future_date(self):
+        upd = make_update("groceries 50 tomorrow")
+        ctx = make_ctx()
+        parsed = {"date": "2099-01-01", "value": 50, "currency": "PLN",
+                  "category": "Groceries", "description": "shop",
+                  "type": "Expense", "person": ""}
+        with patch("handlers.quick_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.quick_conv.parse_quick", return_value=parsed):
+            result = await handle_quick_add(upd, ctx)
+        assert result is None
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "future" in sent.lower()
+
+    async def test_quick_add_reports_coherence_correction(self):
+        upd = make_update("2000 to savings")
+        ctx = make_ctx()
+        lists = dict(SAMPLE_LISTS, categories=["Groceries", "Savings"])
+        parsed = {"value": 2000, "currency": "PLN", "category": "Savings",
+                  "description": "transfer", "type": "Expense", "person": ""}
+        with patch("handlers.quick_conv.load_reference_data", return_value=lists), \
+             patch("handlers.quick_conv.parse_quick", return_value=parsed), \
+             patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
+             patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
+             patch("handlers.quick_conv.format_pln_as_currency", return_value="2,000 PLN"):
+            result = await handle_quick_add(upd, ctx)
+        assert result == states.QUICK_CONFIRM
+        assert ctx.user_data["quick_parsed"]["type"] == "Savings"
+        first_msg = upd.message.reply_text.call_args_list[0].args[0]
+        assert "🛡" in first_msg
+
+    async def test_bulk_confirm_skips_invalid_rows_and_keeps_them_in_draft(self):
+        from handlers.bulk_conv import _load_user_draft
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "ok", "person": ""},
+            {"date": "2024-06-16", "value": 20, "currency": "PLN",
+             "type": "Expense", "category": "Grocries", "description": "typo", "person": "",
+             "invalid": "Unknown category 'Grocries'."},
+        ]
+        upd = make_update("save", user_id=99010)
+        with patch("handlers.bulk_conv.async_append_batch", AsyncMock()) as mock_batch:
+            result = await bulk_confirm(upd, ctx)
+        assert result == ConversationHandler.END
+        assert len(mock_batch.call_args.args[0]) == 1
+        remaining = _load_user_draft(99010)
+        assert len(remaining) == 1
+        assert remaining[0]["description"] == "typo"
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "Saved 1 of 2" in sent
+
+    async def test_bulk_confirm_honors_edited_is_recurring(self):
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "netflix",
+             "person": "", "is_recurring": True},
+        ]
+        upd = make_update("save", user_id=99011)
+        with patch("handlers.bulk_conv.async_append_batch", AsyncMock()) as mock_batch:
+            await bulk_confirm(upd, ctx)
+        txn = mock_batch.call_args.args[0][0]
+        assert txn.is_recurring is True
+
+    async def test_bulk_receive_flags_invalid_rows_in_preview(self):
+        upd = make_update("statement text", user_id=99012)
+        ctx = make_ctx()
+        rows = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "ok", "person": ""},
+            {"date": "2024-06-16", "value": "??", "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "bad", "person": ""},
+        ]
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv.parse_text", return_value=rows):
+            result = await bulk_receive(upd, ctx)
+        assert result == states.BULK_CONFIRM
+        previews = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert any("⚠️" in p for p in previews)
+
+    async def test_add_value_accepts_locale_thousands_format(self):
+        from models import AddTransactionState
+        ctx = make_ctx()
+        ctx.user_data["state"] = AddTransactionState(display_currency="PLN", rates=SAMPLE_RATES)
+        upd = make_update("1.234,56")
+        result = await add_value(upd, ctx)
+        assert result == states.ADD_CURRENCY
+        assert ctx.user_data["state"].value == 1234.56

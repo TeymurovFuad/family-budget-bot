@@ -180,7 +180,8 @@ def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
         desc = "'" + desc
     ws.cell(r, c("description",  8),  desc)
     ws.cell(r, c("is_recurring", 9),  row.get("is_recurring"))
-    ws.cell(r, c("is_done",      10), True)
+    is_done = row.get("is_done")
+    ws.cell(r, c("is_done",      10), True if is_done is None else bool(is_done))
 
     ccy_col = c("currency", 11)
     ws.cell(r, ccy_col, row.get("currency", "PLN"))

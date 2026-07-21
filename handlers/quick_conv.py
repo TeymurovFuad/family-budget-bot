@@ -14,97 +14,7 @@ from formatters import format_pln_as_currency
 from handlers.reports import check_budget_alert
 from models import Transaction
 from states import QUICK_CONFIRM
-
-
-# ── Constants ───────────────────────────────────────────────────────────────────
-HOUSEHOLD_ALIASES = {"household", "nobody", "none", ""}
-
-
-# ── Helpers ─────────────────────────────────────────────────────────────────────
-
-def _normalize_str(value: str) -> str:
-    return str(value or "").strip()
-
-
-def _validate_quick_parsed(parsed: dict, lists: dict) -> tuple[bool, str, dict]:
-    """Validate and normalize the AI quick-add parse result.
-
-    This function ensures the parsed transaction uses exact list values for:
-    - transaction type
-    - category
-    - currency
-    - person (when known persons exist)
-    It also enforces a positive numeric value.
-    """
-    txn_types = [str(t).strip() for t in lists.get("txn_types", []) if t is not None]
-    categories = [str(c).strip() for c in lists.get("categories", []) if c is not None]
-    currencies = [str(c).strip() for c in lists.get("currencies", []) if c is not None]
-    persons = [str(p).strip() for p in lists.get("persons", []) if p is not None]
-    if not parsed:
-        return False, "Could not parse a transaction.", {}
-
-    value = parsed.get("value")
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return False, "Transaction value must be a positive number.", {}
-    if value <= 0:
-        return False, "Transaction value must be greater than zero.", {}
-
-    txn_type_raw = _normalize_str(parsed.get("type", ""))
-    category_raw = _normalize_str(parsed.get("category", ""))
-    currency_raw = _normalize_str(parsed.get("currency", "PLN")).upper()
-    person_raw = _normalize_str(parsed.get("person", ""))
-    date_raw = _normalize_str(parsed.get("date", ""))
-
-    txn_type_map = {t.lower(): t for t in txn_types}
-    category_map = {c.lower(): c for c in categories}
-    currency_map = {c.upper(): c for c in currencies}
-    person_map = {p.lower(): p for p in persons}
-
-    if txn_type_raw.lower() not in txn_type_map:
-        return False, (
-            f"Unknown transaction type '{txn_type_raw}'. Use one of: {', '.join(txn_types)}."
-            if txn_types else "Unknown transaction type."
-        ), {}
-
-    if categories and category_raw.lower() not in category_map:
-        return False, (
-            f"Unknown category '{category_raw}'. Use one of: {', '.join(categories)}."
-        ), {}
-
-    if currencies and currency_raw not in currency_map:
-        return False, f"Unknown currency '{currency_raw}'. Use one of: {', '.join(currencies)}.", {}
-
-    if persons:
-        if person_raw.lower() in HOUSEHOLD_ALIASES:
-            normalized_person = ""
-        elif person_raw.lower() not in person_map:
-            return False, (
-                f"Unknown person '{person_raw}'. Use one of: {', '.join(persons)} or leave blank for household."
-            ), {}
-        else:
-            normalized_person = person_map[person_raw.lower()]
-    else:
-        normalized_person = "" if person_raw.lower() in HOUSEHOLD_ALIASES else person_raw
-
-    parsed_date = None
-    if date_raw:
-        try:
-            parsed_date = datetime.fromisoformat(date_raw).date()
-        except ValueError:
-            return False, (
-                f"Invalid date '{date_raw}'. Use YYYY-MM-DD."
-            ), {}
-
-    normalized = parsed.copy()
-    normalized["value"] = value
-    normalized["type"] = txn_type_map[txn_type_raw.lower()]
-    normalized["category"] = category_map[category_raw.lower()]
-    normalized["currency"] = currency_map.get(currency_raw, currency_raw)
-    normalized["person"] = normalized_person
-    normalized["date"] = parsed_date
-    return True, "", normalized
+from validators import MAX_PAST_DAYS, validate_parsed_row
 
 
 @auth
@@ -129,7 +39,9 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    valid, reason, normalized = _validate_quick_parsed(parsed, lists)
+    valid, reason, normalized, corrections = validate_parsed_row(
+        parsed, lists, max_past_days=MAX_PAST_DAYS
+    )
     if not valid:
         log.warning("Quick-add rejected invalid parse: %s", reason)
         await update.message.reply_text(
@@ -140,6 +52,11 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     ctx.user_data["quick_parsed"] = normalized
+
+    if corrections:
+        shown = "\n".join(f"  • {c}" for c in corrections)
+        await update.message.reply_text(f"🛡 Auto-corrected:\n{shown}")
+        log.info("Quick-add auto-corrections: %s", "; ".join(corrections))
 
     # Build a presentation layer for user confirmation.
     ccy   = get_display_currency(update.effective_user.id)
