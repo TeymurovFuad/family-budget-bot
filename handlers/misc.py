@@ -1,11 +1,14 @@
-"""/start, /help, /setcurrency handlers."""
+"""/start, /help, /setcurrency, /export handlers."""
+
+from datetime import datetime, timezone
 
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import auth, get_display_currency, set_display_currency
+from config import auth, get_display_currency, set_display_currency, log
 from log_decorators import log_call
 from data import load_rates
+from file_storage import get_excel_path_for_reading
 from states import SET_CCY
 
 
@@ -41,6 +44,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/edit — edit a field on one of the last 10 transactions\n"
         "/bulk — import transactions from a photo, a plain-text file (.txt), or pasted text; review the parsed rows and reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
         "/chart — spending by category as a chart\n"
+        "/export — download the current Excel workbook\n"
         "/setcurrency — change display currency\n\n"
         "Or just type naturally: \"groceries 89 PLN\" to quick-add a transaction.\n",
         parse_mode="Markdown",
@@ -80,6 +84,24 @@ async def cmd_setcurrency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True),
     )
     return SET_CCY
+
+
+@auth
+@log_call()
+async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Send the current live Excel workbook back to the requesting user."""
+    try:
+        excel_path = get_excel_path_for_reading()
+        if not excel_path.exists():
+            await update.message.reply_text("❌ Workbook not found on the server.")
+            return
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        filename = f"Expenses_Improved_{today}.xlsx"
+        with open(excel_path, "rb") as fh:
+            await update.message.reply_document(document=fh, filename=filename)
+    except Exception as e:
+        log.exception("Failed to export workbook")
+        await update.message.reply_text(f"❌ Could not export the workbook: {e}")
 
 
 @log_call()
