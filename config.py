@@ -16,6 +16,7 @@ from file_storage import load_user_prefs, save_user_prefs
 
 BOT_TOKEN         = settings.BOT_TOKEN
 ALLOWED_USERS: set[int] = settings.ALLOWED_TELEGRAM_IDS
+ALLOW_ALL_USERS   = settings.ALLOW_ALL_USERS
 TIMEZONE          = settings.TIMEZONE
 _DISPLAY_CURRENCY = settings.DISPLAY_CURRENCY
 SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
@@ -29,6 +30,13 @@ SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
 log = logging.getLogger("budget_bot")
 
 if not ALLOWED_USERS:
+    if not ALLOW_ALL_USERS:
+        raise RuntimeError(
+            "ALLOWED_TELEGRAM_IDS is not set — refusing to start with the bot "
+            "open to ALL Telegram users. Set ALLOWED_TELEGRAM_IDS to a "
+            "comma-separated list of allowed user IDs, or set ALLOW_ALL_USERS=1 "
+            "to explicitly opt in to an open bot."
+        )
     log.warning("ALLOWED_TELEGRAM_IDS is not set — bot is open to ALL users")
 
 # ── display-currency state ────────────────────────────────────────────────────
