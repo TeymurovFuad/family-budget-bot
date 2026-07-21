@@ -29,7 +29,12 @@ SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
 log = logging.getLogger("budget_bot")
 
 if not ALLOWED_USERS:
-    log.warning("ALLOWED_TELEGRAM_IDS is not set — bot is open to ALL users")
+    raise RuntimeError(
+        "ALLOWED_TELEGRAM_IDS is not set — refusing to start with the bot "
+        "open to ALL Telegram users. Fix: set ALLOWED_TELEGRAM_IDS in .env to "
+        "a comma-separated list of allowed Telegram user IDs (get your ID "
+        "from @userinfobot) and restart."
+    )
 
 # ── display-currency state ────────────────────────────────────────────────────
 
@@ -57,13 +62,17 @@ _last_saved: dict[int, tuple] = {}  # uid → (value, currency, category, dateti
 # ── auth decorator ────────────────────────────────────────────────────────────
 
 def auth(func):
-    """Restrict handler to ALLOWED_USERS. Empty set → everyone allowed (testing)."""
+    """Restrict handler to ALLOWED_USERS. Unauthorized users get a reply with their ID."""
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
-        if ALLOWED_USERS and uid not in ALLOWED_USERS:
+        if uid not in ALLOWED_USERS:
             msg = update.message or (update.callback_query and update.callback_query.message)
             if msg:
-                await msg.reply_text("⛔ Not authorised.")
+                await msg.reply_text(
+                    f"⛔ You're not authorized to use this bot. Your Telegram ID is {uid}. "
+                    "If you own this bot, add it to ALLOWED_TELEGRAM_IDS in the "
+                    "server's .env and restart."
+                )
             return
         return await func(update, ctx)
     wrapper.__name__ = func.__name__

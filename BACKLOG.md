@@ -243,7 +243,7 @@ write paths — commit 309df08.
 
 ## Follow-up PR: security posture (pre-publication audit)
 
-- [ ] **Auth fails open** — config.py: empty ALLOWED_TELEGRAM_IDS serves ALL Telegram users with
+- [x] **Auth fails open** — config.py: empty ALLOWED_TELEGRAM_IDS serves ALL Telegram users with
       only a log warning. Now that the code is public, misconfiguration = strangers get full
       read/write on the finances file. Fail closed unless an explicit ALLOW_ALL_USERS=1 is set.
 
