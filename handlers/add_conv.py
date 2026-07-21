@@ -1,6 +1,5 @@
 """/add conversation — 9-step flow to log a new transaction."""
 
-import re
 from datetime import datetime, date, timezone
 
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -12,6 +11,7 @@ from excel_ops import append_transaction
 from formatters import sanitize_description
 from handlers.reports import check_budget_alert
 from models import Transaction, AddTransactionState
+from validators import parse_amount
 from states import (
     ADD_VALUE, ADD_CURRENCY, ADD_TYPE, ADD_CATEGORY,
     ADD_PERSON, ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
@@ -37,11 +37,10 @@ async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().replace(",", ".")
+    text = update.message.text.strip()
     try:
-        if text.startswith("-"):
-            raise ValueError
-        value = float(re.sub(r"[^\d.]", "", text))
+        # Shared normalizer — handles `1 234,56`, `1.234,56`, `1,234.56` alike.
+        value = parse_amount(text)
         if value <= 0:
             raise ValueError
     except (ValueError, TypeError):

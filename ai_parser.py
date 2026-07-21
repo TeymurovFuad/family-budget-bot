@@ -240,6 +240,10 @@ CRITICAL field rules:
 - "person" identifies WHO IN THE HOUSEHOLD made the transaction. It must be one of
   the known persons above or "". NEVER put the transfer recipient, counterparty,
   merchant, or landlord here — mention them in "description" instead.
+- "type" must be coherent with "category": category Savings ⇒ type Savings
+  (transfers to your own savings account are Savings, never Expense);
+  category Salary ⇒ type Income. Refunds/returns are Income with the
+  category of the ORIGINAL purchase (e.g. a returned jacket is Income/Shopping).
 
 Rules:
 - This may be a bank statement, transaction export, receipt, or mixed transaction text.
@@ -276,6 +280,7 @@ Return ONLY a JSON object with these keys:
 - "person": ""{person_note}
 
 Use only the exact categories, types, and person names provided above. Do not invent new categories, transaction types, or persons.
+Keep "type" coherent with "category": category Savings ⇒ type Savings (moving money to your own savings is Savings, never Expense); category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
 If you cannot map the message to an exact known category, type, or person, return: {{"not_transaction": true}}
 
 Examples:

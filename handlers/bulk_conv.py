@@ -17,6 +17,7 @@ import settings
 from excel_ops import async_append_batch
 from models import Transaction
 from states import BULK_RECEIVE, BULK_CONFIRM
+from validators import coerce_bool, parse_amount, validate_parsed_row
 
 
 
@@ -153,6 +154,38 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
     return parsed, corrections
 
 
+def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
+    """
+    Run the shared validator on one draft row: normalize what's unambiguous,
+    flag what isn't (row['invalid'] = reason, shown in the preview and
+    excluded from save). Returns correction notes for the user.
+    """
+    notes: list[str] = []
+    if not str(row.get("type") or "").strip():
+        row["type"] = "Expense"
+    if not str(row.get("category") or "").strip() and lists.get("categories"):
+        row["category"] = "Other"
+        notes.append(f"row {row_no}: empty category → 'Other'")
+
+    ok, reason, normalized, corrections = validate_parsed_row(row, lists)
+    if ok:
+        row.pop("invalid", None)
+        for f in ("value", "type", "category", "currency", "person"):
+            row[f] = normalized[f]
+        notes.extend(f"row {row_no}: {c}" for c in corrections)
+    else:
+        row["invalid"] = reason
+    return notes
+
+
+def _validate_bulk_rows(parsed: list[dict], lists: dict) -> tuple[list[dict], list[str]]:
+    """Validate every draft row with the shared validator (all entry paths)."""
+    corrections: list[str] = []
+    for i, row in enumerate(parsed, 1):
+        corrections.extend(_revalidate_bulk_row(row, lists, i))
+    return parsed, corrections
+
+
 def _draft_limit_reached(user_id: int) -> bool:
     previous = _load_user_draft(user_id)
     if not isinstance(previous, list):
@@ -184,10 +217,12 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         txn_type = t.get("type") or ""
         person_suffix = f" | person={_md_escape(person)}" if person else ""
         type_suffix = f" | type={_md_escape(txn_type)}" if txn_type else ""
+        invalid = t.get("invalid") or ""
+        invalid_suffix = f"\n   ⚠️ {_md_escape(invalid)} (won't be saved — edit it first)" if invalid else ""
         row_lines.append(
             f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
-            f"{type_suffix}{person_suffix}"
+            f"{type_suffix}{person_suffix}{invalid_suffix}"
         )
 
     messages = []
@@ -226,7 +261,7 @@ async def _send_bulk_preview(update: Update, parsed: list[dict]) -> None:
             )
 
 
-def _apply_bulk_edit(message: str, parsed: list[dict]) -> tuple[bool, str]:
+def _apply_bulk_edit(message: str, parsed: list[dict], lists: dict | None = None) -> tuple[bool, str]:
     text = message.strip()
     if not text:
         return False, ""
@@ -247,16 +282,30 @@ def _apply_bulk_edit(message: str, parsed: list[dict]) -> tuple[bool, str]:
     value = match.group(3).strip()
     if not (0 <= idx < len(parsed)):
         return False, "invalid"
-    if field not in {"date", "value", "currency", "type", "category", "description", "person"}:
+    if field not in {"date", "value", "currency", "type", "category", "description",
+                     "person", "is_recurring"}:
         return False, "invalid"
 
     if field == "value":
         try:
-            value = float(value)
+            value = parse_amount(value)
+        except ValueError:
+            return False, "invalid"
+        if value < 0:
+            # Signed bank-export amount: negative means money out.
+            parsed[idx]["type"] = "Expense"
+            value = abs(value)
+    elif field == "is_recurring":
+        try:
+            value = coerce_bool(value)
         except ValueError:
             return False, "invalid"
 
     parsed[idx][field] = value
+    # Manual edits go through the same normalizer/validator as AI output —
+    # a typo'd category must not slip past just because it was typed by hand.
+    if lists:
+        _revalidate_bulk_row(parsed[idx], lists, idx + 1)
     return False, "edited"
 
 
@@ -345,7 +394,10 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No transactions found in the input.")
         return ConversationHandler.END
 
+    ctx.user_data["lists"] = lists
     parsed, corrections = _normalize_parsed_rows(parsed, lists)
+    parsed, validator_corrections = _validate_bulk_rows(parsed, lists)
+    corrections += validator_corrections
     if corrections:
         shown = "\n".join(f"  • {c}" for c in corrections[:10])
         more = f"\n  … and {len(corrections) - 10} more" if len(corrections) > 10 else ""
@@ -385,7 +437,8 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = _sort_bulk_rows(ctx.user_data.get("bulk_parsed", []))
     text = update.message.text.strip()
-    action, reason = _apply_bulk_edit(text, parsed)
+    lists = ctx.user_data.get("lists") or {}
+    action, reason = _apply_bulk_edit(text, parsed, lists)
 
     if reason == "cancel":
         _delete_bulk_draft(update.effective_user.id)
@@ -428,6 +481,12 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     for i, item in enumerate(parsed, 1):
         try:
+            if item.get("invalid"):
+                raise ValueError(item["invalid"])
+            try:
+                is_recurring = coerce_bool(item.get("is_recurring", False))
+            except ValueError:
+                is_recurring = False
             txn_date = date.fromisoformat(item.get("date", str(datetime.now(timezone.utc).date())))
             transactions.append(Transaction(
                 date=txn_date,
@@ -437,7 +496,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 category=item.get("category", "Other"),
                 person=item.get("person", ""),
                 description=item.get("description", ""),
-                is_recurring=False,
+                is_recurring=is_recurring,
             ))
         except Exception as e:
             errors.append(f"Row {i}: {e}")

@@ -21,23 +21,23 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Follow-up PR: data validation
 
-- [ ] **Shared validator for all entry paths** — extract `_validate_quick_parsed` (quick_conv.py)
+- [x] **Shared validator for all entry paths** — extract `_validate_quick_parsed` (quick_conv.py)
       into `validate_parsed_row(row, lists)`; run per row after bulk `parse_text`/`parse_image`
       (flag invalid rows in preview) and inside `_apply_bulk_edit` for the edited field.
       Today `2 category=Grocries` (typo) saves fine and breaks Dashboard SUMIFS.
-- [ ] **Type↔Category coherence** — nothing stops `type=Expense, category=Savings` (observed live:
+- [x] **Type↔Category coherence** — nothing stops `type=Expense, category=Savings` (observed live:
       2000 PLN transfer-to-self) or `type=Expense, category=Salary`. Two layers:
       (a) rules in the AI prompts ("category Savings ⇒ type Savings; refunds are Income with the
       original purchase's category"), (b) type→category compatibility check in the shared validator.
       Optionally a `TxnType` column next to Categories in Lists (extend `ListsSchema`).
-- [ ] **Value normalization** — one shared `parse_amount(raw)` for `1 234,56` / `1,234.56` / `-45.00`
+- [x] **Value normalization** — one shared `parse_amount(raw)` for `1 234,56` / `1,234.56` / `-45.00`
       (last separator = decimal); /add currently corrupts `1.234,56`; bulk rejects signed amounts
       instead of mapping negative → Expense. Round to 2 decimals in the `Transaction` validator.
-- [ ] **Date sanity in quick-add** — quick-add accepts future dates; /add has a future/90-day check.
+- [x] **Date sanity in quick-add** — quick-add accepts future dates; /add has a future/90-day check.
       Align via the shared validator.
-- [ ] **write_transaction_row honors is_done** — `excel_schema.py` hardcodes IsDone=True;
+- [x] **write_transaction_row honors is_done** — `excel_schema.py` hardcodes IsDone=True;
       `Transaction.is_done` is a dead field. Write `row.get("is_done", True)`.
-- [ ] **is_recurring editable in bulk** — bulk hardcodes False and `_apply_bulk_edit` whitelist
+- [x] **is_recurring editable in bulk** — bulk hardcodes False and `_apply_bulk_edit` whitelist
       excludes the field; add it with yes/no/true/false coercion.
 
 ## Follow-up PR: dedup
@@ -231,9 +231,10 @@ Unique findings (single reviewer, verified plausible):
       (SUMIFS criteria) nor pending bulk drafts in data/bulk_drafts/*.json (old name resurfaces and
       gets silently normalized to 'Other'). Fix: scan Dashboard/Monthly Summary formulas for the
       quoted old name; rename inside all pending drafts.
-- [ ] **Bulk manual edits bypass the normalizer** — `2 category=Trnsport` writes verbatim
+- [x] **Bulk manual edits bypass the normalizer** — `2 category=Trnsport` writes verbatim
       (bulk_conv.py:229-260); run _normalize_parsed_rows (or the shared validator) on the edited
-      field too. (Overlaps with existing "data validation PR" item — merge when implementing.)
+      field too. (Covered by the data-validation PR: `_apply_bulk_edit` now runs the shared
+      validator on the edited row.)
 - [ ] **lists_currency_range caps at row 100** — currencies beyond Lists row 100 silently ignored
       in every written Value (PLN) formula → #N/A. Derive the end row from actual data or use a
       named range. (Overlaps with "unit-less magic numbers" sweep.)

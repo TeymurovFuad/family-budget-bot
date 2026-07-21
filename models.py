@@ -36,7 +36,7 @@ class Transaction(BaseModel):
     def value_must_be_positive(cls, v: float) -> float:
         if v <= 0:
             raise ValueError(f"value must be positive, got {v}")
-        return v
+        return round(v, 2)
 
     @field_validator("transaction_type")
     @classmethod
