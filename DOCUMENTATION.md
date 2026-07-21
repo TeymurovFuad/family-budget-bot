@@ -228,6 +228,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/bulk` | Import many transactions at once from a photo, .txt file, or pasted text |
 | `/setcurrency EUR` | Switch display currency for this session |
 | `/setcurrency` | Pick display currency from a keyboard |
+| `/export` | Download the live Excel workbook as a Telegram document |
 
 ### Scheduled Reports
 
