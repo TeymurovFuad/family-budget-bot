@@ -210,7 +210,6 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | — | Token from @BotFather |
 | `ALLOWED_TELEGRAM_IDS` | ✅ | — | Comma-separated user IDs. Get from @userinfobot |
-| `ALLOW_ALL_USERS` | — | `0` | Set to `1` to explicitly opt into an open bot when `ALLOWED_TELEGRAM_IDS` is empty. Without it, the bot fails to start (fail-closed) rather than silently serving all users. |
 | `XLSX_PATH` | — | `data/Expenses_Improved.xlsx` | Path to the Excel file |
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
 | `DISPLAY_CURRENCY` | — | `PLN` | Default display currency. Change to `EUR` or `AZN` when relocating |

@@ -18,9 +18,6 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 ALLOWED_TELEGRAM_IDS = set(
     int(x) for x in os.getenv("ALLOWED_TELEGRAM_IDS", "").split(",") if x.strip()
 )
-# Explicit opt-in escape hatch: only when ALLOWED_TELEGRAM_IDS is empty does this
-# matter. Fails closed by default — see config.py's startup check.
-ALLOW_ALL_USERS = os.getenv("ALLOW_ALL_USERS", "0").strip() == "1"
 
 xlsx_path = os.getenv("XLSX_PATH", str(DEFAULT_XLSX_PATH)).strip('"\'')
 XLSX_PATH = Path(xlsx_path).expanduser()

@@ -104,4 +104,6 @@ async def test_cmd_export_unauthorised_user_rejected(tmp_path, monkeypatch):
         mocked.assert_not_called()
 
     update.message.reply_text.assert_awaited_once()
-    assert "not authorised" in update.message.reply_text.call_args[0][0].lower()
+    reply = update.message.reply_text.call_args[0][0]
+    assert "not authorized" in reply.lower()
+    assert "123" in reply  # the unauthorized user's own Telegram ID

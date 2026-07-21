@@ -16,7 +16,6 @@ from file_storage import load_user_prefs, save_user_prefs
 
 BOT_TOKEN         = settings.BOT_TOKEN
 ALLOWED_USERS: set[int] = settings.ALLOWED_TELEGRAM_IDS
-ALLOW_ALL_USERS   = settings.ALLOW_ALL_USERS
 TIMEZONE          = settings.TIMEZONE
 _DISPLAY_CURRENCY = settings.DISPLAY_CURRENCY
 SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
@@ -30,14 +29,12 @@ SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
 log = logging.getLogger("budget_bot")
 
 if not ALLOWED_USERS:
-    if not ALLOW_ALL_USERS:
-        raise RuntimeError(
-            "ALLOWED_TELEGRAM_IDS is not set — refusing to start with the bot "
-            "open to ALL Telegram users. Set ALLOWED_TELEGRAM_IDS to a "
-            "comma-separated list of allowed user IDs, or set ALLOW_ALL_USERS=1 "
-            "to explicitly opt in to an open bot."
-        )
-    log.warning("ALLOWED_TELEGRAM_IDS is not set — bot is open to ALL users")
+    raise RuntimeError(
+        "ALLOWED_TELEGRAM_IDS is not set — refusing to start with the bot "
+        "open to ALL Telegram users. Fix: set ALLOWED_TELEGRAM_IDS in .env to "
+        "a comma-separated list of allowed Telegram user IDs (get your ID "
+        "from @userinfobot) and restart."
+    )
 
 # ── display-currency state ────────────────────────────────────────────────────
 
@@ -65,13 +62,17 @@ _last_saved: dict[int, tuple] = {}  # uid → (value, currency, category, dateti
 # ── auth decorator ────────────────────────────────────────────────────────────
 
 def auth(func):
-    """Restrict handler to ALLOWED_USERS. Empty set → everyone allowed (testing)."""
+    """Restrict handler to ALLOWED_USERS. Unauthorized users get a reply with their ID."""
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
-        if ALLOWED_USERS and uid not in ALLOWED_USERS:
+        if uid not in ALLOWED_USERS:
             msg = update.message or (update.callback_query and update.callback_query.message)
             if msg:
-                await msg.reply_text("⛔ Not authorised.")
+                await msg.reply_text(
+                    f"⛔ You're not authorized to use this bot. Your Telegram ID is {uid}. "
+                    "If you own this bot, add it to ALLOWED_TELEGRAM_IDS in the "
+                    "server's .env and restart."
+                )
             return
         return await func(update, ctx)
     wrapper.__name__ = func.__name__

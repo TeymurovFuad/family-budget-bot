@@ -417,7 +417,6 @@ Every time you push code to `main`, the next scheduled run uses the updated code
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | bot + reports | ✅ | — |
 | `ALLOWED_TELEGRAM_IDS` | bot + reports | ✅ | — |
-| `ALLOW_ALL_USERS` | bot | — (opt-in) | `0` — set to `1` to explicitly allow all Telegram users when `ALLOWED_TELEGRAM_IDS` is empty. Without it, the bot refuses to start. |
 | `GCS_BUCKET_NAME` | bot + reports | for GCS | — |
 | `GCS_KEY_JSON` | bot + reports | for GCS | — |
 | `GCS_OBJECT_NAME` | bot + reports | — | `Expenses_Improved.xlsx` |
