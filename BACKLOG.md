@@ -247,6 +247,15 @@ write paths — commit 309df08.
       only a log warning. Now that the code is public, misconfiguration = strangers get full
       read/write on the finances file. Fail closed unless an explicit ALLOW_ALL_USERS=1 is set.
 
+## Follow-up PR: /export command hardening (PR #1 review, 2026-07-22)
+
+- [ ] **Exception message leak in /export** — handlers/misc.py `cmd_export`'s except branch replies
+      with the raw exception text, which could include internal paths/bucket names; send a generic
+      user-facing message and keep `log.exception` for server-side detail.
+- [ ] **No file-size guard before reply_document** — Telegram bot API caps uploads at 50MB; add a
+      size pre-check with a clear message before the workbook grows past the limit (same leak risk
+      above if a raw Telegram error surfaces on failure).
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
