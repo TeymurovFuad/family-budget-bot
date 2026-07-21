@@ -40,6 +40,15 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 - [x] **is_recurring editable in bulk** — bulk hardcodes False and `_apply_bulk_edit` whitelist
       excludes the field; add it with yes/no/true/false coercion.
 
+## Follow-up: data-validation review notes (PR #5, 2026-07-22)
+
+- [ ] **Lone-separator amounts silently reinterpreted** — `parse_amount` treats a single
+      comma/dot as decimal, so `1,234` (thousands intent) becomes 1.23 with no warning;
+      surface a 🛡 note when a lone separator with exactly 3 trailing digits is reinterpreted.
+- [ ] **Bulk edit revalidation skipped when reference data unavailable** — `_apply_bulk_edit`
+      revalidates only `if lists:`; after a bot restart mid-draft, lists is absent from
+      ctx.user_data and typo'd categories slip through; reload reference data instead of skipping.
+
 ## Follow-up PR: dedup
 
 - [ ] **Statement dedup against MasterData** — re-uploading an overlapping bank export silently

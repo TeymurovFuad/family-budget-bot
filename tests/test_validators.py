@@ -278,46 +278,47 @@ class TestApplyBulkEditValidation:
     def test_is_recurring_yes_coerced(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
-        action, reason = _apply_bulk_edit("1 is_recurring=yes", rows)
+        action, reason, notes = _apply_bulk_edit("1 is_recurring=yes", rows)
         assert reason == "edited" and rows[0]["is_recurring"] is True
 
     def test_is_recurring_false_coerced(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row(is_recurring=True)]
-        action, reason = _apply_bulk_edit("1 is_recurring=false", rows)
+        action, reason, notes = _apply_bulk_edit("1 is_recurring=false", rows)
         assert reason == "edited" and rows[0]["is_recurring"] is False
 
     def test_is_recurring_garbage_rejected(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
-        action, reason = _apply_bulk_edit("1 is_recurring=maybe", rows)
+        action, reason, notes = _apply_bulk_edit("1 is_recurring=maybe", rows)
         assert reason == "invalid"
 
     def test_value_locale_format_accepted(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
-        action, reason = _apply_bulk_edit("1 value=1.234,56", rows)
+        action, reason, notes = _apply_bulk_edit("1 value=1.234,56", rows)
         assert reason == "edited" and rows[0]["value"] == 1234.56
 
     def test_negative_value_maps_to_expense(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row(type="Income")]
-        action, reason = _apply_bulk_edit("1 value=-45.00", rows)
+        action, reason, notes = _apply_bulk_edit("1 value=-45.00", rows)
         assert reason == "edited"
         assert rows[0]["value"] == 45.0
         assert rows[0]["type"] == "Expense"
+        assert any("negative" in n for n in notes)  # correction is reported, not silent
 
     def test_typo_category_edit_flagged_when_lists_known(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
-        action, reason = _apply_bulk_edit("1 category=Grocries", rows, LISTS)
+        action, reason, notes = _apply_bulk_edit("1 category=Grocries", rows, LISTS)
         assert reason == "edited"
         assert "Grocries" in rows[0]["invalid"]
 
     def test_valid_edit_clears_invalid_flag(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [dict(_row(), invalid="Unknown category 'Grocries'.", category="Grocries")]
-        action, reason = _apply_bulk_edit("1 category=groceries", rows, LISTS)
+        action, reason, notes = _apply_bulk_edit("1 category=groceries", rows, LISTS)
         assert reason == "edited"
         assert "invalid" not in rows[0]
         assert rows[0]["category"] == "Groceries"
@@ -325,5 +326,13 @@ class TestApplyBulkEditValidation:
     def test_edit_without_lists_skips_membership_check(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
-        action, reason = _apply_bulk_edit("1 category=Whatever", rows)
+        action, reason, notes = _apply_bulk_edit("1 category=Whatever", rows)
         assert reason == "edited" and rows[0]["category"] == "Whatever"
+
+    def test_coherence_correction_on_edit_returns_note(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        rows = [_row(type="Expense")]
+        action, reason, notes = _apply_bulk_edit("1 category=Savings", rows, LISTS)
+        assert reason == "edited"
+        assert rows[0]["type"] == "Savings"
+        assert any("Savings" in n for n in notes)

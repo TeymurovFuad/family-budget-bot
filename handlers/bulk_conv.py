@@ -261,52 +261,57 @@ async def _send_bulk_preview(update: Update, parsed: list[dict]) -> None:
             )
 
 
-def _apply_bulk_edit(message: str, parsed: list[dict], lists: dict | None = None) -> tuple[bool, str]:
+def _apply_bulk_edit(
+    message: str, parsed: list[dict], lists: dict | None = None
+) -> tuple[bool, str, list[str]]:
+    """Returns (save, reason, correction_notes) — notes are 🛡-reported to the user."""
     text = message.strip()
     if not text:
-        return False, ""
+        return False, "", []
 
     # Accept both "save" and "/save" — users naturally type slash commands.
     normalized = text.lower().lstrip("/")
     if normalized in {"save", "yes"}:
-        return True, ""
+        return True, "", []
     if normalized in {"cancel", "no"}:
-        return False, "cancel"
+        return False, "cancel", []
 
     match = re.match(r"^(\d+)\s+(\w+)=(.+)$", text)
     if not match:
-        return False, "invalid"
+        return False, "invalid", []
 
     idx = int(match.group(1)) - 1
     field = match.group(2).strip().lower()
     value = match.group(3).strip()
     if not (0 <= idx < len(parsed)):
-        return False, "invalid"
+        return False, "invalid", []
     if field not in {"date", "value", "currency", "type", "category", "description",
                      "person", "is_recurring"}:
-        return False, "invalid"
+        return False, "invalid", []
 
+    notes: list[str] = []
     if field == "value":
         try:
             value = parse_amount(value)
         except ValueError:
-            return False, "invalid"
+            return False, "invalid", []
         if value < 0:
             # Signed bank-export amount: negative means money out.
             parsed[idx]["type"] = "Expense"
             value = abs(value)
+            notes.append(f"row {idx + 1}: negative amount → type 'Expense'")
     elif field == "is_recurring":
         try:
             value = coerce_bool(value)
         except ValueError:
-            return False, "invalid"
+            return False, "invalid", []
 
     parsed[idx][field] = value
     # Manual edits go through the same normalizer/validator as AI output —
     # a typo'd category must not slip past just because it was typed by hand.
     if lists:
-        _revalidate_bulk_row(parsed[idx], lists, idx + 1)
-    return False, "edited"
+        notes.extend(_revalidate_bulk_row(parsed[idx], lists, idx + 1))
+    return False, "edited", notes
 
 
 async def bulk_timeout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -438,7 +443,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = _sort_bulk_rows(ctx.user_data.get("bulk_parsed", []))
     text = update.message.text.strip()
     lists = ctx.user_data.get("lists") or {}
-    action, reason = _apply_bulk_edit(text, parsed, lists)
+    action, reason, edit_notes = _apply_bulk_edit(text, parsed, lists)
 
     if reason == "cancel":
         _delete_bulk_draft(update.effective_user.id)
@@ -454,6 +459,12 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # Persist so a timeout/restart doesn't roll back to pre-edit values.
         _save_bulk_draft(update.effective_user.id, parsed)
         log.info("User %s edited bulk draft row via message: %s", update.effective_user.id, text)
+        if edit_notes:
+            # Same "report every silent correction" pattern as bulk_receive.
+            shown = "\n".join(f"  • {n}" for n in edit_notes)
+            await update.message.reply_text(f"🛡 Auto-corrected:\n{shown}")
+            log.info("User %s bulk edit auto-corrections: %s",
+                     update.effective_user.id, "; ".join(edit_notes))
         await _send_bulk_preview(update, parsed)
         return BULK_CONFIRM
 
