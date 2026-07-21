@@ -1,0 +1,18 @@
+python-telegram-bot==21.5
+matplotlib
+openai>=1.30.0
+openpyxl==3.1.5
+pandas==2.2.3
+APScheduler==3.10.4
+python-dotenv==1.0.1
+httpx==0.27.0
+pydantic==2.7.4
+
+# Storage backends — only the one you use needs to be installed,
+# but having both installed does no harm.
+google-cloud-storage==2.18.2   # used when STORAGE_BACKEND=gcs
+boto3==1.34.149                # used when STORAGE_BACKEND=s3 (Oracle, Cloudflare R2, AWS S3, etc.)
+
+# Testing
+pytest==8.3.2
+pytest-asyncio>=0.25.0

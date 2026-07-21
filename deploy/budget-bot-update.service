@@ -1,0 +1,8 @@
+[Unit]
+Description=Budget bot auto-update (git pull + restart when remote moved)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/home/ubuntu/budget-bot/deploy/auto-update.sh

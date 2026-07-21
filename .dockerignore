@@ -1,0 +1,19 @@
+# Never bake these into the image
+.env
+data/
+*.xlsx
+
+# Not needed in image
+.github/
+.claude/
+scripts/
+README.md
+DOCUMENTATION.md
+*.md
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/

@@ -1,0 +1,34 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [main]
+    # Only rebuild when actual code changes — not when you push the Excel file
+    paths:
+      - '*.py'
+      - 'requirements.txt'
+      - 'Dockerfile'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # Two tags: latest always points to newest, version tag lets you roll back
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/budget-bot:latest
+            ${{ secrets.DOCKER_USERNAME }}/budget-bot:${{ github.sha }}

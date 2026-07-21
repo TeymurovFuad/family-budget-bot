@@ -1,0 +1,52 @@
+name: Monthly Budget Summary
+
+on:
+  schedule:
+    - cron: '0 7 1 * *'   # Every Sunday 17:00 UTC
+  workflow_dispatch:
+    inputs:
+      report_type:
+        description: 'Report type'
+        required: false
+        default: 'weekly'
+        type: choice
+        options: [weekly, monthly, yearly]
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+
+      - run: echo "REPORT_TYPE=monthly" >> $GITHUB_ENV
+
+      - name: Send report
+        env:
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ALLOWED_TELEGRAM_IDS: ${{ secrets.ALLOWED_TELEGRAM_IDS }}
+          DISPLAY_CURRENCY:     ${{ vars.DISPLAY_CURRENCY || 'PLN' }}
+          TIMEZONE:             Europe/Warsaw
+
+          # Storage backend — set whichever you use, leave the others blank
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+
+          # GCS
+          GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
+          GCS_OBJECT_NAME: ${{ secrets.GCS_OBJECT_NAME }}
+          GCS_KEY_JSON:    ${{ secrets.GCS_KEY_JSON }}
+
+          # S3-compatible (Oracle, Cloudflare R2, etc.)
+          S3_BUCKET_NAME:  ${{ secrets.S3_BUCKET_NAME }}
+          S3_OBJECT_NAME:  ${{ secrets.S3_OBJECT_NAME }}
+          S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+          S3_ACCESS_KEY:   ${{ secrets.S3_ACCESS_KEY }}
+          S3_SECRET_KEY:   ${{ secrets.S3_SECRET_KEY }}
+          S3_REGION:       ${{ secrets.S3_REGION }}
+
+        run: python scheduled_report.py

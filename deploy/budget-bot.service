@@ -1,0 +1,14 @@
+[Unit]
+Description=Budget Telegram Bot
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/budget-bot
+ExecStart=/home/ubuntu/budget-bot/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
