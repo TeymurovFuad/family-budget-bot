@@ -49,7 +49,7 @@ from handlers.edit_conv import (
     cmd_edit, edit_pick, edit_field, edit_value, edit_confirm,
 )
 from handlers.menu import cmd_menu, handle_menu_buttons, MENU_BUTTON_FILTER
-from handlers.misc import cmd_help, cmd_setcurrency, setcurrency_pick
+from handlers.misc import cmd_help, cmd_setcurrency, cmd_export, setcurrency_pick
 from handlers.quick_conv import handle_quick_add, quick_confirm
 from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
@@ -98,6 +98,7 @@ def main():
     app.add_handler(CommandHandler("rates",   cmd_rates))
     app.add_handler(CommandHandler("chart",   cmd_chart))
     app.add_handler(CommandHandler("range",   cmd_range))
+    app.add_handler(CommandHandler("export",  cmd_export))
 
     # ── range report inline callback ──────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_range_callback, pattern="^range:"))
