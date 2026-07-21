@@ -12,12 +12,12 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_text, parse_image, _chunk_statement_text
 from config import auth, log
-from data import load_reference_data
+from data import load_dedup_keys, load_reference_data
 import settings
 from excel_ops import async_append_batch
 from models import Transaction
 from states import BULK_RECEIVE, BULK_CONFIRM
-from validators import coerce_bool, parse_amount, validate_parsed_row
+from validators import coerce_bool, make_dedup_key, parse_amount, validate_parsed_row
 
 
 
@@ -90,7 +90,51 @@ def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
     return sorted([dict(item) for item in parsed], key=_date_key)
 
 
-def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> list[dict]:
+def _row_dedup_key(row: dict) -> str:
+    """Dedup key for one draft row — same recipe as MasterData keys."""
+    return make_dedup_key(
+        row.get("date"), row.get("value"), row.get("currency", "PLN"), row.get("description"),
+    )
+
+
+def _flag_master_duplicates(rows: list[dict]) -> int:
+    """
+    Mark draft rows already present in MasterData: row['dup'] = True.
+    Flagged rows are skipped at save unless the user overrides with `N keep`
+    (row['dup_keep']). Returns how many rows are currently flagged.
+    """
+    if not rows:
+        return 0
+    row_dates = []
+    for row in rows:
+        try:
+            row_dates.append(date.fromisoformat(str(row.get("date", "")).strip()[:10]))
+        except ValueError:
+            pass
+    existing = load_dedup_keys(
+        min(row_dates) if row_dates else None,
+        max(row_dates) if row_dates else None,
+    )
+    flagged = 0
+    for row in rows:
+        if row.get("dup_keep"):
+            row.pop("dup", None)
+            continue
+        if _row_dedup_key(row) in existing:
+            row["dup"] = True
+            flagged += 1
+        else:
+            row.pop("dup", None)
+    return flagged
+
+
+def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int]:
+    """
+    Merge new rows into the pending draft, skipping exact duplicates (same
+    dedup key) of rows already in the draft or earlier in the same batch —
+    uploading the same photo twice must not double every row.
+    Returns (merged draft, number of duplicate rows skipped).
+    """
     previous = _load_user_draft(user_id)
     if not isinstance(previous, list):
         previous = []
@@ -99,12 +143,23 @@ def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> list[dict]:
         row = dict(item)
         row.setdefault("status", "pending")
         normalized_previous.append(row)
-    merged = _sort_bulk_rows(normalized_previous + [dict(item) for item in parsed])
+    seen = {_row_dedup_key(row) for row in normalized_previous}
+    fresh = []
+    skipped = 0
+    for item in parsed:
+        key = _row_dedup_key(item)
+        if key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        fresh.append(dict(item))
+    merged = _sort_bulk_rows(normalized_previous + fresh)
     for item in merged:
         item.setdefault("status", "pending")
     _save_bulk_draft(user_id, merged)
-    log.info("User %s bulk draft updated: %d pending entries", user_id, len(merged))
-    return merged
+    log.info("User %s bulk draft updated: %d pending entries (%d duplicates skipped)",
+             user_id, len(merged), skipped)
+    return merged, skipped
 
 
 # Maximum rows a pending draft may hold before new imports are refused.
@@ -219,10 +274,14 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         type_suffix = f" | type={_md_escape(txn_type)}" if txn_type else ""
         invalid = t.get("invalid") or ""
         invalid_suffix = f"\n   ⚠️ {_md_escape(invalid)} (won't be saved — edit it first)" if invalid else ""
+        dup_suffix = (
+            f"\n   ↺ likely already imported (skipped — reply `{i} keep` to save anyway)"
+            if t.get("dup") and not t.get("dup_keep") else ""
+        )
         row_lines.append(
             f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
-            f"{type_suffix}{person_suffix}{invalid_suffix}"
+            f"{type_suffix}{person_suffix}{invalid_suffix}{dup_suffix}"
         )
 
     messages = []
@@ -275,6 +334,17 @@ def _apply_bulk_edit(
         return True, "", []
     if normalized in {"cancel", "no"}:
         return False, "cancel", []
+
+    keep_match = re.match(r"^(\d+)\s+keep$", normalized)
+    if keep_match:
+        idx = int(keep_match.group(1)) - 1
+        if not (0 <= idx < len(parsed)):
+            return False, "invalid", []
+        if not parsed[idx].get("dup"):
+            return False, "invalid", []
+        parsed[idx]["dup_keep"] = True
+        parsed[idx].pop("dup", None)
+        return False, "edited", [f"row {idx + 1}: will be saved even though it looks already imported"]
 
     match = re.match(r"^(\d+)\s+(\w+)=(.+)$", text)
     if not match:
@@ -331,6 +401,8 @@ async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Resume an unfinished draft directly — no need to re-upload anything.
     draft = _load_user_draft(update.effective_user.id)
     if isinstance(draft, list) and draft:
+        if _flag_master_duplicates(draft):
+            _save_bulk_draft(update.effective_user.id, draft)
         ctx.user_data["bulk_parsed"] = draft
         await update.message.reply_text(
             f"📋 You have an unfinished draft with {len(draft)} transaction(s). "
@@ -424,15 +496,31 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return BULK_CONFIRM
 
     parsed = _sort_bulk_rows(parsed)
-    draft_rows = _merge_bulk_draft(uid, parsed)
+    draft_rows, merge_skipped = _merge_bulk_draft(uid, parsed)
     ctx.user_data["bulk_parsed"] = draft_rows
     log.info("User %s bulk parse completed: %d items (src=%s)", update.effective_user.id, len(parsed), src)
-    if len(draft_rows) > len(parsed):
+    if merge_skipped:
         await update.message.reply_text(
-            f"ℹ️ {len(draft_rows) - len(parsed)} row(s) from a previous draft were merged in. "
-            f"The preview below is the full set that `save` will store.",
-            parse_mode="Markdown",
+            f"↺ {merge_skipped} row(s) skipped as already imported: already in this draft "
+            f"(likely the same photo/text sent twice)."
         )
+    if len(draft_rows) > len(parsed) - merge_skipped:
+        merged_in = len(draft_rows) - (len(parsed) - merge_skipped)
+        if merged_in > 0:
+            await update.message.reply_text(
+                f"ℹ️ {merged_in} row(s) from a previous draft were merged in. "
+                f"The preview below is the full set that `save` will store.",
+                parse_mode="Markdown",
+            )
+
+    dup_count = _flag_master_duplicates(draft_rows)
+    if dup_count:
+        _save_bulk_draft(uid, draft_rows)
+        await update.message.reply_text(
+            f"↺ {dup_count} row(s) skipped as already imported: they look like they're already "
+            f"in MasterData. Reply `N keep` (e.g. `3 keep`) to save one anyway."
+        )
+
     # Preview the MERGED draft — exactly what `save` will write.
     await _send_bulk_preview(update, draft_rows)
     return BULK_CONFIRM
@@ -486,11 +574,27 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     parsed = _sort_bulk_rows(parsed)
     ctx.user_data["bulk_parsed"] = parsed
+
+    # Re-check against MasterData right before writing (the flag set at
+    # preview time may be stale) and against duplicates within this same
+    # batch — both are reported to the user, never silently dropped.
+    _flag_master_duplicates(parsed)
+    skipped_dups: list[int] = []
+    seen_batch_keys: set[str] = set()
+
     transactions  = []
     errors        = []
     failed_items  = []  # raw rows that never made it into `transactions`, kept for retry
 
     for i, item in enumerate(parsed, 1):
+        if item.get("dup") and not item.get("dup_keep"):
+            skipped_dups.append(i)
+            continue
+        key = _row_dedup_key(item)
+        if key in seen_batch_keys and not item.get("dup_keep"):
+            skipped_dups.append(i)
+            continue
+        seen_batch_keys.add(key)
         try:
             if item.get("invalid"):
                 raise ValueError(item["invalid"])
@@ -548,6 +652,10 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"✅ Saved {saved} of {len(parsed)} transaction(s) "
         f"to the MasterData sheet of:\n{destination}"
     )
+    if skipped_dups and not write_failed:
+        nums = ", ".join(f"#{n}" for n in skipped_dups[:10])
+        more = f", … and {len(skipped_dups) - 10} more" if len(skipped_dups) > 10 else ""
+        msg += f"\n\n↺ {len(skipped_dups)} row(s) skipped as already imported: {nums}{more}"
     if errors:
         msg += "\n\n⚠️ Errors:\n" + "\n".join(errors[:5])
     if failed_items and not write_failed:
