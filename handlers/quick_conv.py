@@ -10,7 +10,8 @@ from ai_parser import parse_quick
 from config import auth, get_display_currency, log
 from data import load_rates, load_reference_data
 from excel_ops import append_transaction
-from formatters import format_pln_as_currency
+from formatters import format_pln_as_currency, sanitize_description
+import merchant_map
 from handlers.reports import check_budget_alert
 from models import Transaction
 from states import QUICK_CONFIRM
@@ -22,8 +23,15 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text  = update.message.text.strip()
     lists = ctx.user_data.get("lists") or load_reference_data()
     try:
-        loop   = asyncio.get_running_loop()
-        parsed = await loop.run_in_executor(None, lambda: parse_quick(text, lists))
+        loop = asyncio.get_running_loop()
+        # Known merchant + amount → deterministic parse from merchant memory,
+        # zero AI tokens. Falls through to the AI for anything unrecognized.
+        parsed = await loop.run_in_executor(
+            None, lambda: merchant_map.try_local_quick_parse(text)
+        )
+        from_memory = parsed is not None
+        if parsed is None:
+            parsed = await loop.run_in_executor(None, lambda: parse_quick(text, lists))
     except Exception:
         log.exception("Quick-add parse failed")
         await update.message.reply_text(
@@ -42,6 +50,28 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     valid, reason, normalized, corrections = validate_parsed_row(
         parsed, lists, max_past_days=MAX_PAST_DAYS
     )
+    if not valid and from_memory:
+        # Stale memory (e.g. category renamed in Lists) must never block the
+        # user — fall back to the AI and report the detour.
+        log.warning("Merchant-memory parse failed validation (%s) — falling back to AI", reason)
+        try:
+            parsed = await asyncio.get_running_loop().run_in_executor(
+                None, lambda: parse_quick(text, lists)
+            )
+        except Exception:
+            parsed = None
+        from_memory = False
+        if parsed is not None:
+            valid, reason, normalized, corrections = validate_parsed_row(
+                parsed, lists, max_past_days=MAX_PAST_DAYS
+            )
+    if parsed is None:
+        await update.message.reply_text(
+            "🤔 That doesn't look like a transaction to me. "
+            "Try something like `groceries 89` or use /menu.",
+            parse_mode="Markdown",
+        )
+        return
     if not valid:
         log.warning("Quick-add rejected invalid parse: %s", reason)
         await update.message.reply_text(
@@ -51,7 +81,16 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Same junk-stripping as /add and /bulk — MasterData never sees raw
+    # statement noise regardless of entry path.
+    normalized["description"] = sanitize_description(str(normalized.get("description") or ""))
     ctx.user_data["quick_parsed"] = normalized
+
+    if from_memory:
+        await update.message.reply_text(
+            "🧠 Categorized from merchant memory — no AI call needed."
+        )
+        log.info("Quick-add served from merchant memory: %s", text)
 
     if corrections:
         shown = "\n".join(f"  • {c}" for c in corrections)
@@ -118,7 +157,7 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             category=parsed.get("category", "Other"),
             person=parsed.get("person", ""),
             description=parsed.get("description", ""),
-            is_recurring=False,
+            is_recurring=bool(parsed.get("is_recurring", False)),
         )
         log.info(
             "User %s quick-add transaction saved: value=%s currency=%s category=%s person=%s",

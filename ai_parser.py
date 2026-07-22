@@ -230,10 +230,14 @@ Return ONLY a JSON array. Each element must have these exact keys:
 - "currency": {" | ".join(lists.get("currencies", ["PLN"]))} (default PLN)
 - "type": {txn_types}
 - "category": one of: {all_cats}
-- "description": short description (max 60 chars)
+- "description": clean 2-4 word merchant label (max 60 chars)
 - "person": ""{person_note}
 
 CRITICAL field rules:
+- "description" must be a clean, human-readable merchant or purpose label
+  (e.g. "Biedronka", "Shell fuel", "Autopay S.A."). NEVER include masked card
+  numbers (4111XXXXXXXX1111), terminal ids, BPID:/reference codes, /OPT/
+  routing blocks, or trailing city/country codes from the raw statement line.
 - "category" MUST be copied EXACTLY, character for character, from the list above.
   Never invent, shorten, translate, or paraphrase a category name.
   If unsure, use "Other".
@@ -276,7 +280,7 @@ Return ONLY a JSON object with these keys:
 - "currency": {" | ".join(lists.get("currencies", ["PLN"]))} (default PLN; zł/zl = PLN)
 - "type": {txn_types}
 - "category": one of: {all_cats}
-- "description": short description (max 40 chars)
+- "description": clean 2-4 word merchant label (max 40 chars) — never card numbers, BPID:/reference codes, or city/country suffixes
 - "person": ""{person_note}
 
 Use only the exact categories, types, and person names provided above. Do not invent new categories, transaction types, or persons.

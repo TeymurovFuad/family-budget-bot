@@ -72,14 +72,47 @@ def _normalize_str(value) -> str:
     return str(value or "").strip()
 
 
+# ── Merchant-description cleaning ─────────────────────────────────────────────
+# Bank exports carry junk around the merchant name: masked card numbers
+# (4111XXXXXXXX1111), BPID: reference codes, /OPT/X///// routing blocks,
+# terminal ids and trailing country codes. One deterministic cleaner shared by
+# every entry path AND by make_dedup_key, so display, storage and dedup all
+# see the same description.
+
+_MASKED_PAN_RE = re.compile(r"\b\d{2,6}[Xx*•]{2,}\d{2,6}\b")
+_BPID_RE = re.compile(r"\bBPID:\S*", re.IGNORECASE)
+_SLASH_BLOCK_RE = re.compile(r"(?<!\S)/\S*")  # tokens starting with '/', e.g. /OPT/X/////
+_COUNTRY_SUFFIX_RE = re.compile(r"\s+[A-Z]{2}$")  # trailing country code: "... CITY PL"
+
+
+def clean_merchant_description(text) -> str:
+    """
+    Strip bank-statement junk from a merchant description, deterministically:
+    masked PANs, BPID: codes, /OPT/-style slash blocks, a trailing 2-letter
+    country code, and surplus whitespace/punctuation. Already-clean strings
+    pass through unchanged. Returns the original (stripped) text if cleaning
+    would leave nothing.
+    """
+    original = _normalize_str(text)
+    s = _MASKED_PAN_RE.sub(" ", original)
+    s = _BPID_RE.sub(" ", s)
+    s = _SLASH_BLOCK_RE.sub(" ", s)
+    # Trim separator leftovers — but NEVER a leading '-' (it may be a real
+    # minus/negative marker and it drives the Excel formula-injection guard).
+    s = re.sub(r"\s+", " ", s).strip(" \t|,;").rstrip(" -–—|,;")
+    s = _COUNTRY_SUFFIX_RE.sub("", s).strip(" \t|,;").rstrip(" -–—|,;")
+    return s or original
+
+
 def make_dedup_key(txn_date, value, currency, description) -> str:
     """
     Stable identity key for a transaction: sha1(date|value|currency|cleaned-description).
 
     Used to detect re-imports of the same bank-statement rows. Uses the RAW
     Value + Currency as stored (that is what a re-import would duplicate),
-    never the PLN conversion. Description is normalized (whitespace collapsed,
-    case-folded) so trivially different formatting doesn't defeat dedup.
+    never the PLN conversion. Description is normalized (Excel guard-quote
+    stripped, merchant junk cleaned, whitespace collapsed, case-folded) so a
+    raw statement description and its cleaned stored form produce the SAME key.
     """
     d = str(txn_date or "").strip()[:10]
     try:
@@ -87,7 +120,10 @@ def make_dedup_key(txn_date, value, currency, description) -> str:
     except (TypeError, ValueError):
         v = _normalize_str(value)
     ccy = _normalize_str(currency).upper() or "PLN"
-    desc = re.sub(r"\s+", " ", _normalize_str(description)).lower()
+    # lstrip("'"): write_transaction_row prepends ' to =+-@ descriptions
+    # (formula-injection guard) — the stored form must still match the draft.
+    desc = clean_merchant_description(_normalize_str(description).lstrip("'"))
+    desc = re.sub(r"\s+", " ", desc).lower()
     return hashlib.sha1(f"{d}|{v}|{ccy}|{desc}".encode("utf-8")).hexdigest()
 
 

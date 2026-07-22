@@ -32,6 +32,17 @@ from models import Transaction
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _isolate_merchant_map(tmp_path, monkeypatch):
+    """Point the merchant map at a temp file so no test touches data/."""
+    import merchant_map
+    map_path = tmp_path / "merchant_map.json"
+    # Pre-create an empty map so load_merchant_map() never auto-seeds from
+    # (and thereby never touches) a real workbook during unrelated tests.
+    map_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(merchant_map, "MERCHANT_MAP_PATH", map_path)
+
+
 @pytest.fixture()
 def excel_path(tmp_path, monkeypatch):
     """

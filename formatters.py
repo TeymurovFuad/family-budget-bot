@@ -3,6 +3,7 @@ formatters.py — display formatting helpers. No I/O, no side effects.
 """
 
 from data import get_rate
+from validators import clean_merchant_description
 
 
 def format_amount(n: float, ccy: str = "PLN") -> str:
@@ -36,8 +37,8 @@ def savings_emoji(rate: float) -> str:
 
 
 def sanitize_description(text: str) -> str:
-    """Prevent Excel formula injection."""
-    text = text.strip()[:100]
+    """Clean bank-statement junk from a description, then prevent Excel formula injection."""
+    text = clean_merchant_description(text)[:100]
     if text and text[0] in ('=', '+', '-', '@'):
         text = "'" + text
     return text
