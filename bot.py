@@ -50,7 +50,10 @@ from handlers.edit_conv import (
     cmd_edit, edit_pick, edit_field, edit_value, edit_confirm,
 )
 from handlers.menu import cmd_menu, handle_menu_buttons, MENU_BUTTON_FILTER
-from handlers.misc import cmd_help, cmd_setcurrency, cmd_export, setcurrency_pick
+from handlers.misc import (
+    cmd_help, cmd_setcurrency, cmd_export, setcurrency_pick,
+    cmd_setbudget, setbudget_pick, setbudget_amount,
+)
 from handlers.quick_conv import handle_quick_add, quick_confirm
 from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
@@ -67,6 +70,7 @@ from states import (
     DELETE_PICK, SET_CCY,
     EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM,
     BULK_RECEIVE, BULK_CONFIRM, QUICK_CONFIRM,
+    SET_BUDGET_PICK, SET_BUDGET_AMOUNT,
 )
 
 
@@ -97,6 +101,7 @@ BOT_COMMANDS = [
     BotCommand("delete",      "Remove one of the last 5 transactions"),
     BotCommand("export",      "Download your Excel workbook"),
     BotCommand("setcurrency", "Change the display currency"),
+    BotCommand("setbudget",   "Set the monthly budget for a category (owner only)"),
     BotCommand("menu",        "Show the button menu"),
     BotCommand("help",        "List all commands with what they do"),
     BotCommand("start",       "Welcome message and main menu"),
@@ -142,6 +147,16 @@ def build_application() -> Application:
     app.add_handler(ConversationHandler(
         entry_points=[CommandHandler("setcurrency", cmd_setcurrency)],
         states={SET_CCY: [MessageHandler(filters.TEXT & ~filters.COMMAND, setcurrency_pick)]},
+        fallbacks=[CommandHandler("cancel", add_cancel)],
+    ))
+
+    # ── /setbudget conversation ───────────────────────────────────────────────
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("setbudget", cmd_setbudget)],
+        states={
+            SET_BUDGET_PICK:   [CallbackQueryHandler(setbudget_pick, pattern="^setbudget:")],
+            SET_BUDGET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, setbudget_amount)],
+        },
         fallbacks=[CommandHandler("cancel", add_cancel)],
     ))
 

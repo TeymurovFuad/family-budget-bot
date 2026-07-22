@@ -2,14 +2,19 @@
 
 from datetime import datetime, timezone
 
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    InlineKeyboardButton, InlineKeyboardMarkup, Update,
+    ReplyKeyboardMarkup, ReplyKeyboardRemove,
+)
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import auth, get_display_currency, set_display_currency, log
+from config import auth, auth_write, get_display_currency, set_display_currency, log
 from log_decorators import log_call
-from data import load_rates
-from file_storage import get_excel_path_for_reading
-from states import SET_CCY
+from data import load_budgets, load_rates, load_reference_data
+from file_storage import get_excel_path_for_reading, update_category_budget_in_excel
+from formatters import format_amount
+from validators import parse_amount
+from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT
 
 
 @auth
@@ -52,6 +57,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/export — download your Excel workbook\n\n"
         "*Settings*\n"
         "/setcurrency — change the display currency\n"
+        "/setbudget — set the monthly budget limit for a category (owner only)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
         "/help — this list\n",
@@ -59,7 +65,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-@auth
+@auth_write
 @log_call()
 async def cmd_setcurrency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rates     = load_rates()
@@ -130,3 +136,87 @@ async def setcurrency_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove(),
         )
     return ConversationHandler.END
+
+
+# ── /setbudget conversation (owner only) ──────────────────────────────────────
+
+def _build_setbudget_keyboard() -> InlineKeyboardMarkup:
+    """Build the category picker, 2 buttons per row, each showing the current
+    Budget (PLN) value for that category."""
+    categories = load_reference_data().get("categories", [])
+    budgets = load_budgets()
+    buttons = [
+        InlineKeyboardButton(
+            f"{cat} — {format_amount(budgets.get(cat, 0), 'PLN')}",
+            callback_data=f"setbudget:{cat}",
+        )
+        for cat in categories
+    ]
+    rows = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
+    return InlineKeyboardMarkup(rows)
+
+
+@auth_write
+@log_call()
+async def cmd_setbudget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💰 *Set a category budget*\n\nPick a category to update (or /cancel):",
+        parse_mode="Markdown",
+        reply_markup=_build_setbudget_keyboard(),
+    )
+    return SET_BUDGET_PICK
+
+
+@log_call()
+async def setbudget_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    category = query.data.split(":", 1)[1]
+    budgets = load_budgets()
+    current = budgets.get(category, 0)
+    ctx.user_data["setbudget_category"] = category
+    ctx.user_data["setbudget_current"] = current
+
+    await query.message.reply_text(
+        f"*{category}* — currently {format_amount(current, 'PLN')}\\.\n"
+        "Send the new monthly budget \\(PLN\\):",
+        parse_mode="MarkdownV2",
+    )
+    return SET_BUDGET_AMOUNT
+
+
+@log_call()
+async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    category = ctx.user_data.get("setbudget_category")
+    old_value = ctx.user_data.get("setbudget_current", 0)
+
+    try:
+        new_value = parse_amount(update.message.text)
+        if new_value < 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            "❌ Please enter a non-negative number for the budget (PLN):"
+        )
+        return SET_BUDGET_AMOUNT
+
+    try:
+        update_category_budget_in_excel(category, new_value)
+    except Exception as e:
+        log.exception("Failed to update budget for category %s", category)
+        await update.message.reply_text(f"❌ Failed to save: {e}")
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"✅ *{category}* budget: {format_amount(old_value, 'PLN')} → {format_amount(new_value, 'PLN')}",
+        parse_mode="Markdown",
+    )
+    ctx.user_data.pop("setbudget_category", None)
+    ctx.user_data.pop("setbudget_current", None)
+
+    await update.message.reply_text(
+        "Pick another category to update (or /cancel):",
+        reply_markup=_build_setbudget_keyboard(),
+    )
+    return SET_BUDGET_PICK

@@ -7,7 +7,7 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_quick
-from config import auth, get_display_currency, log
+from config import auth, auth_write, get_display_currency, log
 from data import load_rates, load_reference_data
 from excel_ops import append_transaction
 from formatters import format_pln_as_currency, sanitize_description
@@ -18,7 +18,7 @@ from states import QUICK_CONFIRM
 from validators import MAX_PAST_DAYS, validate_parsed_row
 
 
-@auth
+@auth_write
 async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text  = update.message.text.strip()
     lists = ctx.user_data.get("lists") or load_reference_data()

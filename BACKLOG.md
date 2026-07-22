@@ -4,6 +4,42 @@ Findings from the whole-team review (Architect, Designer, Developer, PO, fresh-e
 of 2026-07-21 on branch `feat/bulk-import-draft-ordering`. Grouped by planned follow-up PR.
 Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
+## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
+
+- [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
+      `list[int]` (was a `set`), so `ALLOWED_TELEGRAM_IDS[0]` is the
+      primary/sudo user. `config.py` gained `auth_write`, a new decorator
+      alongside `auth`: non-listed users get the existing not-authorized
+      reply (with their ID), listed-but-non-primary users get a new
+      owner-only rejection ("You can view reports and data, but not add,
+      edit, or delete"), and only the primary user passes through. All write
+      entry points were reclassified from `@auth` to `@auth_write`: `/add`,
+      `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, and the
+      quick-add (bare-text) handler. Internal conversation steps keep their
+      existing (or absent) decorator — the gate check happens once at
+      conversation entry, not on every step. All read/report commands
+      (`/summary`, `/week`, `/budget`, `/top`, `/savings`, `/report`,
+      `/rates`, `/chart`, `/range`, `/export`, `/help`, `/menu`, `/start`)
+      remain on `@auth` and stay open to every allowed user.
+- [x] **`/setbudget` command** — new owner-only conversation
+      (`handlers/misc.py`) that shows all categories as an inline keyboard (2
+      per row) with their current `Budget (PLN)` value from the Lists sheet,
+      lets the owner tap a category, enter a new non-negative monthly budget
+      (parsed via the shared `validators.parse_amount`), writes it back
+      through a new `file_storage.update_category_budget_in_excel()` (same
+      `ListsSchema`/`ExcelFileContext` pattern as `update_currency_rates_in_excel`),
+      confirms the change, and loops back to the category picker so several
+      categories can be set in one session. Reuses the same `Budget (PLN)`
+      column already read by `/budget`/`check_budget_alert` — no schema
+      changes. Registered in `bot.py`'s handler list, `BOT_COMMANDS` menu, and
+      `/help`; documented in `DOCUMENTATION.md`.
+- Tests: `tests/test_write_gate.py` (auth_write unit behavior, all seven write
+  entry points reject non-primary/non-listed users correctly, a read command
+  stays open to a non-primary allowed user, and the full `/setbudget` flow
+  including negative-amount rejection and persisted-value re-render).
+  `tests/test_handlers_full.py` now also patches `config.auth_write` to a
+  pass-through so its conversation-step tests are unaffected by the new gate.
+
 ## In scope for PR #3 (bulk-import bug fixes)
 
 - [ ] **[PR #3] Draft-limit path discards just-parsed input** — `handlers/bulk_conv.py` `bulk_receive`:

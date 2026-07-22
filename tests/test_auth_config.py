@@ -27,6 +27,9 @@ import config as _config
 # patch is active while other tests run. This module imports before it
 # (alphabetical collection order), so the reference below is the real thing.
 _REAL_AUTH = _config.auth
+# Same reasoning for auth_write (tests/test_write_gate.py needs the real one
+# to test actual handler entry points after test_handlers_full.py's patch).
+_REAL_AUTH_WRITE = _config.auth_write
 
 _IMPORT_CONFIG_SNIPPET = "import config"
 

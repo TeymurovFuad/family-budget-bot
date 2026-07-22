@@ -15,9 +15,11 @@ DEFAULT_TEMPLATE_PATH = DATA_DIR / "Expenses_Template.xlsx"
 DEFAULT_LOG_DIR = PROJECT_ROOT / "logs"
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-ALLOWED_TELEGRAM_IDS = set(
+# Ordered list (not a set) — preserves .env comma order so
+# ALLOWED_TELEGRAM_IDS[0] can be treated as the primary/sudo user.
+ALLOWED_TELEGRAM_IDS = [
     int(x) for x in os.getenv("ALLOWED_TELEGRAM_IDS", "").split(",") if x.strip()
-)
+]
 
 xlsx_path = os.getenv("XLSX_PATH", str(DEFAULT_XLSX_PATH)).strip('"\'')
 XLSX_PATH = Path(xlsx_path).expanduser()

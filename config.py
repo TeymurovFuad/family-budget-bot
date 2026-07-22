@@ -15,7 +15,7 @@ from file_storage import load_user_prefs, save_user_prefs
 # ── env ───────────────────────────────────────────────────────────────────────
 
 BOT_TOKEN         = settings.BOT_TOKEN
-ALLOWED_USERS: set[int] = settings.ALLOWED_TELEGRAM_IDS
+ALLOWED_USERS: list[int] = settings.ALLOWED_TELEGRAM_IDS
 TIMEZONE          = settings.TIMEZONE
 _DISPLAY_CURRENCY = settings.DISPLAY_CURRENCY
 SAVINGS_TARGET    = settings.SAVINGS_RATE_TARGET
@@ -72,6 +72,38 @@ def auth(func):
                     f"⛔ You're not authorized to use this bot. Your Telegram ID is {uid}. "
                     "If you own this bot, add it to ALLOWED_TELEGRAM_IDS in the "
                     "server's .env and restart."
+                )
+            return
+        return await func(update, ctx)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
+def auth_write(func):
+    """
+    Restrict handler to the PRIMARY allowed user (ALLOWED_USERS[0]).
+
+    Non-listed users get the same not-authorized reply as `auth`. Listed but
+    non-primary users get an owner-only rejection — they can still use every
+    @auth (read) command, just not this write-path one.
+    """
+    async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        uid = update.effective_user.id
+        if uid not in ALLOWED_USERS:
+            msg = update.message or (update.callback_query and update.callback_query.message)
+            if msg:
+                await msg.reply_text(
+                    f"⛔ You're not authorized to use this bot. Your Telegram ID is {uid}. "
+                    "If you own this bot, add it to ALLOWED_TELEGRAM_IDS in the "
+                    "server's .env and restart."
+                )
+            return
+        if uid != ALLOWED_USERS[0]:
+            msg = update.message or (update.callback_query and update.callback_query.message)
+            if msg:
+                await msg.reply_text(
+                    "⛔ Only the bot owner can make changes. "
+                    "You can view reports and data, but not add, edit, or delete."
                 )
             return
         return await func(update, ctx)

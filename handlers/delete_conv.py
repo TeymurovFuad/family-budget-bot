@@ -3,7 +3,7 @@
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import auth, log
+from config import auth, auth_write, log
 from log_decorators import log_call
 from excel_ops import async_delete_transaction_row
 from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
@@ -11,7 +11,7 @@ from states import DELETE_PICK
 
 
 @log_call()
-@auth
+@auth_write
 async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         recent = get_recent_transactions(get_excel_path_for_reading(), n=5)

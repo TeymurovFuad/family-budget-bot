@@ -32,10 +32,14 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Patch config.auth to a pass-through BEFORE importing handlers
+# Patch config.auth / config.auth_write to pass-throughs BEFORE importing
+# handlers. This file exercises conversation-step logic, not the auth gate
+# itself (that's covered separately in tests/test_write_gate.py).
 import unittest.mock as _mock
 _auth_patcher = _mock.patch("config.auth", lambda f: f)
 _auth_patcher.start()
+_auth_write_patcher = _mock.patch("config.auth_write", lambda f: f)
+_auth_write_patcher.start()
 
 # ── Project imports (after env + auth patch) ──────────────────────────────────
 import settings

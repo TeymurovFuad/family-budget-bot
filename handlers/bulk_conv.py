@@ -11,7 +11,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_text, parse_image, _chunk_statement_text
-from config import auth, log
+from config import auth, auth_write, log
 from data import load_dedup_keys, load_reference_data
 import settings
 from excel_ops import async_append_batch
@@ -453,7 +453,7 @@ async def bulk_timeout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-@auth
+@auth_write
 async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Resume an unfinished draft directly — no need to re-upload anything.
     draft = _load_user_draft(update.effective_user.id)
