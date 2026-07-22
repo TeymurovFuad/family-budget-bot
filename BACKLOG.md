@@ -317,10 +317,10 @@ unaccounted tracking — the old manual dashboard metric).
       use for existing workbooks; bot access through excel_schema.
 - [ ] **Historical backfill: `/cycles detect`** — one-pass scan of the whole history:
       every Income row with category Salary (fallback: largest recurring end-of-month
-      income for rows imported before categories were clean) → propose the COMPLETE
-      ledger in one message, one `confirm all` for clear cases, per-row fixes for gaps:
-      "Jun 2026 — salary 24 May (6 000 PLN) / Aug 2026 — ??? no salary found 20-31 Jul.
-       Reply: confirm all · 3 = 2026-07-23 · 3 none".
+      income for rows imported before categories were clean). Unambiguous months are
+      listed in one summary message and confirmed with a single `Confirm all` button.
+      Ambiguous months (no candidate, or several) are walked one at a time with inline
+      buttons — no positional reply grammar anywhere in this flow.
 - [ ] **Lazy backfill on report** — cycle report requested for a period with missing
       boundaries → run the same detection scoped to that period and ask before
       rendering. Same engine, two triggers (explicit command + lazy on demand).
@@ -337,10 +337,15 @@ unaccounted tracking — the old manual dashboard metric).
       ends today. A hole in the walk triggers the lazy backfill prompt before
       rendering. No special-case logic for historical queries.
 - [ ] **Multiple salary rows in one window (salary + overtime, all category Salary)** —
-      backfill: several candidates in a window → proposal lists them, largest amount
-      pre-selected as default (main salary beats overtime), user confirms:
-      "Jul 2026 — 2 candidates: ① 25 Jun salary 6 000 ② 28 Jun overtime 900 —
-      reply `2 = 1` or a date." Never auto-recorded.
+      backfill: each ambiguous month gets its own inline-button prompt, one candidate
+      per button (largest amount listed first — main salary beats overtime), plus
+      `Custom date` and `No cycle this month`:
+      "Jul 2026 — which payment starts the cycle?
+       [ ① 25 Jun · salary · 6 000 PLN ] [ ② 28 Jun · overtime · 900 PLN ]
+       [ Custom date ] [ No cycle this month ]"
+      One tap per gap; typing only for Custom date (e.g. 2026-07-23). Never
+      auto-recorded. Buttons, not reply grammar — same interaction language as the
+      /summary picker.
       Live: a Salary-row save triggers the new-cycle prompt only if the current cycle
       is older than ~20 days (configurable); younger → income inside the cycle,
       silently counted, no re-prompt.
