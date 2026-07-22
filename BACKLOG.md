@@ -336,6 +336,35 @@ unaccounted tracking — the old manual dashboard metric).
       period" iterates ledger rows: each cycle ends where the next begins, the last
       ends today. A hole in the walk triggers the lazy backfill prompt before
       rendering. No special-case logic for historical queries.
+- [ ] **Multiple salary rows in one window (salary + overtime, all category Salary)** —
+      backfill: several candidates in a window → proposal lists them, largest amount
+      pre-selected as default (main salary beats overtime), user confirms:
+      "Jul 2026 — 2 candidates: ① 25 Jun salary 6 000 ② 28 Jun overtime 900 —
+      reply `2 = 1` or a date." Never auto-recorded.
+      Live: a Salary-row save triggers the new-cycle prompt only if the current cycle
+      is older than ~20 days (configurable); younger → income inside the cycle,
+      silently counted, no re-prompt.
+
+## Follow-up PR: /summary picker UX — agreed design (brainstorm 2026-07-22)
+
+- [ ] **Free-form argument parsing, order-independent** — `/summary aug 2025`,
+      `2025 aug`, `08.2025`, bare `aug` (= most recent occurrence of that month) all
+      resolve without a fixed year-then-month order.
+- [ ] **Bare `/summary` → button drill-down** — quick row first: This month · Last
+      month · This cycle (cycle button only when BUDGET_CYCLE=1); then year buttons
+      generated from actual MasterData years (newest first, only years with data);
+      tap year → month buttons (only months with data) → report. 90% of calls end on
+      the quick row without drilling.
+- [ ] **Calendar vs Cycle choice** — with BUDGET_CYCLE=1, first button row is
+      📅 Calendar / 💰 Cycle. Cycle path lists ledger labels with date ranges
+      ("Aug (23 Jul–24 Aug)") instead of months; a hole in the ledger triggers the
+      lazy backfill prompt.
+- [ ] **Range support, both forms** — free-form `/summary aug 2025 - jan 2026`
+      (reuse the existing /range parsing pattern) and a `Range…` button that walks the
+      same year→month picker twice ("From:" then "To:", prompt text shows progress).
+      No new UI concepts — the same pickers, used twice.
+- [ ] **Year overflow paging** — years beyond ~2 rows of 4 buttons collapse into an
+      "Earlier…" page (Telegram inline-keyboard height limits).
 
 ## Notes
 
