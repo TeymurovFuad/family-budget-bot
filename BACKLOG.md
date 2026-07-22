@@ -51,11 +51,11 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Follow-up PR: dedup
 
-- [ ] **Statement dedup against MasterData** — re-uploading an overlapping bank export silently
+- [x] **Statement dedup against MasterData** — re-uploading an overlapping bank export silently
       doubles rows. Key: `sha1(date|value|currency|cleaned-description)`. At batch save, read
       existing keys for the date range; dedupe within the batch; flag collisions in the preview
       as "↺ likely already imported" (skip by default, `3 keep` to override).
-- [ ] **Within-draft dedup** — `_merge_bulk_draft` concatenates blindly; uploading the same
+- [x] **Within-draft dedup** — `_merge_bulk_draft` concatenates blindly; uploading the same
       photo twice mid-draft duplicates every row inside one save. Same key.
 
 ## Follow-up PR: merchant memory & description quality

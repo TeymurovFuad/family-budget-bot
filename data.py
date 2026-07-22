@@ -9,9 +9,10 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from config import log
-from excel_schema import load_currency_rates_from_path
+from excel_schema import MasterDataSchema, header_of, load_currency_rates_from_path
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
 from models import MONTH_NAMES
+from validators import make_dedup_key
 
 
 # ── time ──────────────────────────────────────────────────────────────────────
@@ -99,3 +100,38 @@ def load_data() -> pd.DataFrame:
     df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
 
     return df
+
+
+def load_dedup_keys(start=None, end=None) -> set[str]:
+    """
+    Dedup keys (see validators.make_dedup_key) of MasterData rows whose Date
+    falls in [start, end] (date objects, both optional/inclusive). Uses the RAW
+    Value + Currency as stored. Returns an empty set on any read failure —
+    dedup then simply doesn't flag anything, it never blocks an import.
+    """
+    try:
+        df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
+        date_h  = header_of(MasterDataSchema, "date")
+        value_h = header_of(MasterDataSchema, "value")
+        ccy_h   = header_of(MasterDataSchema, "currency")
+        desc_h  = header_of(MasterDataSchema, "description")
+        if date_h not in df.columns or value_h not in df.columns:
+            return set()
+        dates = pd.to_datetime(df[date_h], errors="coerce")
+        mask = dates.notna() & df[value_h].notna()
+        if start is not None:
+            mask &= dates >= pd.Timestamp(start)
+        if end is not None:
+            mask &= dates <= pd.Timestamp(end)
+        keys: set[str] = set()
+        for i in df.index[mask]:
+            keys.add(make_dedup_key(
+                dates.loc[i].date().isoformat(),
+                df.at[i, value_h],
+                df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else "PLN",
+                df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else "",
+            ))
+        return keys
+    except Exception as e:
+        log.warning("Could not load dedup keys from MasterData: %s", e)
+        return set()

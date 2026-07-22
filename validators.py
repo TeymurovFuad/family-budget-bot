@@ -7,6 +7,7 @@ typo'd category ("Grocries") or an incoherent type/category pair can never
 reach MasterData and break the Dashboard SUMIFS.
 """
 
+import hashlib
 import re
 from datetime import date, datetime, timezone
 
@@ -69,6 +70,25 @@ def coerce_bool(raw) -> bool:
 
 def _normalize_str(value) -> str:
     return str(value or "").strip()
+
+
+def make_dedup_key(txn_date, value, currency, description) -> str:
+    """
+    Stable identity key for a transaction: sha1(date|value|currency|cleaned-description).
+
+    Used to detect re-imports of the same bank-statement rows. Uses the RAW
+    Value + Currency as stored (that is what a re-import would duplicate),
+    never the PLN conversion. Description is normalized (whitespace collapsed,
+    case-folded) so trivially different formatting doesn't defeat dedup.
+    """
+    d = str(txn_date or "").strip()[:10]
+    try:
+        v = f"{float(str(value).replace(',', '.')):.2f}"
+    except (TypeError, ValueError):
+        v = _normalize_str(value)
+    ccy = _normalize_str(currency).upper() or "PLN"
+    desc = re.sub(r"\s+", " ", _normalize_str(description)).lower()
+    return hashlib.sha1(f"{d}|{v}|{ccy}|{desc}".encode("utf-8")).hexdigest()
 
 
 def validate_parsed_row(
