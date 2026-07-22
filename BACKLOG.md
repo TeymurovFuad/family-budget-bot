@@ -355,15 +355,22 @@ unaccounted tracking — the old manual dashboard metric).
 - [ ] **Free-form argument parsing, order-independent** — `/summary aug 2025`,
       `2025 aug`, `08.2025`, bare `aug` (= most recent occurrence of that month) all
       resolve without a fixed year-then-month order.
-- [ ] **Bare `/summary` → button drill-down** — quick row first: This month · Last
-      month · This cycle (cycle button only when BUDGET_CYCLE=1); then year buttons
-      generated from actual MasterData years (newest first, only years with data);
-      tap year → month buttons (only months with data) → report. 90% of calls end on
-      the quick row without drilling.
-- [ ] **Calendar vs Cycle choice** — with BUDGET_CYCLE=1, first button row is
-      📅 Calendar / 💰 Cycle. Cycle path lists ledger labels with date ranges
-      ("Aug (23 Jul–24 Aug)") instead of months; a hole in the ledger triggers the
-      lazy backfill prompt.
+- [ ] **Bare `/summary` → one message, three zones** — buttons appear ONLY on bare
+      /summary (no arguments); any typed argument renders the report directly.
+      Zone 1 (quick row, top): flag off → This month · Last month;
+      flag on → This cycle · Last cycle · This month · Last month.
+      "This cycle" = last recorded boundary → today (how am I doing on this salary);
+      "Last cycle" = between the two most recent boundaries (what happened to the
+      previous salary — the leftover metric's home). Most calls end here.
+      Zone 2 (history drill-down, beneath): flag off → year buttons directly;
+      flag on → 📅 Calendar / 💰 Cycle choice first. Calendar → year buttons
+      (actual MasterData years, newest first, only years with data) → month buttons
+      (only months with data) → report. Cycle → ledger list, newest first, labeled
+      with ranges: "Aug (23 Jul – today)", "Jul (25 Jun – 22 Jul)", "Earlier…" paging;
+      a hole in the ledger triggers the lazy backfill prompt.
+      Calendar/Cycle is never a gate — the quick row sits above it on the same screen.
+- [ ] **`/summary jul` with cycles enabled** — a bare month name resolves against the
+      ledger label first (cycle "Jul"), calendar month only when no such label exists.
 - [ ] **Range support, both forms** — free-form `/summary aug 2025 - jan 2026`
       (reuse the existing /range parsing pattern) and a `Range…` button that walks the
       same year→month picker twice ("From:" then "To:", prompt text shows progress).
