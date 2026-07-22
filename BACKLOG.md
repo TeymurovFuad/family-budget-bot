@@ -101,6 +101,22 @@ reasoning in the preview, and offers a one-command override.
 - [ ] **Future: timestamp in the strict key when the source provides HH:MM** — bank
       statement imports (statement-profile design, separate topic) carry time; include
       it in the key when present so same-day repeats never collide at all.
+- [ ] **Unified row-command grammar** — `drop` and `keep` as verbs; targets `N`, `N M`,
+      `N-M`, `all`, `all flagged`; alongside existing `N field=value`, `save`, `cancel`.
+      One parser for all preview states (dedup flags, validation flags, manual pruning).
+      Supersedes the UX-group "skip N / delete N" item — implement once, here.
+- [ ] **Contextual command footer — show only what applies** — every preview ends with a
+      short hint line, but content adapts to state; a user who has no duplicates never
+      reads a word about duplicates:
+      * nothing flagged: "✏️ 2 category=Transport · drop 3 · save · cancel"
+      * dedup skips present, add: "↺ 2 rows skipped as already imported — keep 5,
+        keep 4-6, or keep all flagged to save them anyway."
+      * loose-match advisory present, add its block with: "drop 9 / drop all flagged".
+      Every conditional message carries a worked example of the command that answers it.
+- [ ] **`all flagged` scopes to the block it is printed under** — `keep all flagged`
+      under the skip list acts on skipped rows only; `drop all flagged` under the
+      advisory acts on advisory rows only; plain `drop all` / `keep all` act on the
+      whole batch.
 
 ## Follow-up PR: merchant memory & description quality
 
