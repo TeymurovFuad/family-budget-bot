@@ -98,9 +98,14 @@ reasoning in the preview, and offers a one-command override.
 - [ ] **Deleted rows reappear as new on re-import — accepted, no tombstones** —
       decided: the bank file says the transaction happened; preview shows it as new,
       user can drop it. No deleted-key state is kept.
-- [ ] **Future: timestamp in the strict key when the source provides HH:MM** — bank
-      statement imports (statement-profile design, separate topic) carry time; include
-      it in the key when present so same-day repeats never collide at all.
+- [ ] **Timestamp disambiguates within-batch only (corrected by design review
+      2026-07-22)** — MasterData has no time column, so HH:MM must NEVER enter keys
+      compared against stored rows (time-bearing draft keys would never match timeless
+      stored keys — dedup would silently stop firing for statement imports). When the
+      source provides time (statement profiles), use it only to tell identical rows
+      apart WITHIN one batch (exact per-day counts for count-aware matching);
+      cross-import keys stay timeless. A MasterData Time column is deliberately out of
+      scope; revisit only if timeless+count-aware dedup proves insufficient.
 - [ ] **Unified row-command grammar** — `drop` and `keep` as verbs; targets `N`, `N M`,
       `N-M`, `all`, `all flagged`; alongside existing `N field=value`, `save`, `cancel`.
       One parser for all preview states (dedup flags, validation flags, manual pruning).
