@@ -60,15 +60,38 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Follow-up PR: merchant memory & description quality
 
-- [ ] **Description cleanup** — MasterData gets `4111XXXXXXXX1111 SHOP TERMINAL 12 CITY PL` and
+- [x] **Description cleanup** — MasterData gets `4111XXXXXXXX1111 SHOP TERMINAL 12 CITY PL` and
       `/OPT/X///// BPID:EXAMPLE123 Autopay S.A.`. (a) Prompt: output clean 2-4 word merchant labels;
       (b) deterministic regex post-processor (strip masked PANs, `BPID:` codes, `/OPT/` blocks,
       city/country suffixes) applied on all three entry paths — extend `formatters.sanitize_description`
       and actually call it in quick_conv and bulk_conv.
-- [ ] **Merchant→category memory** — `MerchantMap` store (sheet or JSON): cleaned merchant →
+      *(done: `validators.clean_merchant_description` shared by sanitize_description, bulk
+      normalize, quick-add AND `make_dedup_key`, so display/storage/dedup stay consistent)*
+- [x] **Merchant→category memory** — `MerchantMap` store (sheet or JSON): cleaned merchant →
       category/type/label/person/is_recurring defaults. Lookup before AI; learn from preview edits
       (`2 category=Transport` writes the mapping back); seed from MasterData history.
       Makes categorization deterministic and cuts DeepSeek calls.
+      *(done: `merchant_map.py`, JSON at `data/merchant_map.json` via the user-prefs pattern —
+      no workbook change; auto-seeds from MasterData on first use; 🧠 markers in the preview)*
+
+## Follow-up: dedup review notes (PR #7, 2026-07-22)
+
+- [ ] **Within-batch identical rows have no keep override** — two genuinely identical same-day
+      transactions in one statement are dropped by `_merge_bulk_draft`'s `seen` set and
+      `bulk_confirm`'s `seen_batch_keys`; `N keep` is rejected because `_apply_bulk_edit`
+      requires `parsed[idx].get("dup")`, which only MasterData flags set. Allow `keep` on
+      within-batch dups or use count-aware keys.
+- [x] **Guard-quoted descriptions defeat dedup** — `write_transaction_row` prepends `'` to
+      descriptions starting with `=+-@` (excel_schema.py); read-back keys hash `'foo` vs draft
+      `foo`, so dedup silently never fires for those rows. Strip the guard quote in
+      `load_dedup_keys`/`make_dedup_key` normalization; add a round-trip test with a
+      leading-`=` description.
+      *(fixed in the merchant-memory PR: `make_dedup_key` now strips a leading `'` and runs
+      `clean_merchant_description` before hashing; round-trip test in tests/test_merchant_map.py)*
+- [ ] **Locale-formatted draft values fall back to raw-string keys** — `make_dedup_key` value
+      normalization: `"1,234.56"`-style strings fail float() and fall back to the raw string,
+      never matching Excel's float-derived key; route through validators.parse_amount before
+      hashing.
 
 ## Follow-up PR: infra & performance
 
@@ -130,8 +153,11 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 - [ ] **Split extraction from categorization** — regex extracts date/amount/description from
       structured bank statements locally; AI only categorizes a compact list of unknown merchant
       names (~5 tokens/txn instead of ~120). Shares foundation with merchant memory.
-- [ ] **Merchant memory as token saver** — (see merchant-memory PR) deterministic lookup for
+- [x] **Merchant memory as token saver** — (see merchant-memory PR) deterministic lookup for
       repeat merchants = zero tokens; after a month ~80% of rows skip the AI entirely.
+      *(covered by the merchant-memory PR: `merchant_map.try_local_quick_parse` gives known
+      merchants a zero-token quick-add path; bulk still parses via AI but categorization of
+      known merchants is deterministic)*
 - [ ] **Local fast-path for quick-add** — regex + Lists categories handle "groceries 89" /
       "lunch 45 eur" patterns with zero tokens; AI only for ambiguous messages.
 - [ ] **Dedup before parse** — skip already-imported statement blocks BEFORE sending to the AI

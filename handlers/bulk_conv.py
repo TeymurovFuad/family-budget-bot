@@ -15,9 +15,16 @@ from config import auth, log
 from data import load_dedup_keys, load_reference_data
 import settings
 from excel_ops import async_append_batch
+import merchant_map
 from models import Transaction
 from states import BULK_RECEIVE, BULK_CONFIRM
-from validators import coerce_bool, make_dedup_key, parse_amount, validate_parsed_row
+from validators import (
+    clean_merchant_description,
+    coerce_bool,
+    make_dedup_key,
+    parse_amount,
+    validate_parsed_row,
+)
 
 
 
@@ -180,6 +187,15 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
     corrections: list[str] = []
 
     for i, row in enumerate(parsed, 1):
+        # Description: strip statement junk (masked PANs, BPID:, /OPT/ blocks,
+        # country suffixes) so MasterData, dedup and merchant memory all see
+        # the same clean merchant label.
+        desc_raw = str(row.get("description") or "").strip()
+        cleaned = clean_merchant_description(desc_raw)
+        if desc_raw and cleaned != desc_raw:
+            row["description"] = cleaned
+            corrections.append(f"row {i}: description cleaned → '{cleaned}'")
+
         # Category: exact -> case-insensitive -> substring fuzzy -> Other
         cat = str(row.get("category") or "").strip()
         if cat and cat not in categories:
@@ -207,6 +223,39 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
             corrections.append(f"row {i}: type '{typ}' → '{row['type']}'")
 
     return parsed, corrections
+
+
+def _apply_merchant_memory(parsed: list[dict]) -> list[str]:
+    """
+    Override AI categorization with remembered merchant defaults — the map is
+    deterministic (seeded from history, corrected by the user), the model is
+    not. Rows touched get row['mem'] = True (🧠 in the preview) and every
+    override is reported so nothing changes silently.
+    """
+    mapping = merchant_map.load_merchant_map()
+    if not mapping:
+        return []
+    notes: list[str] = []
+    for i, row in enumerate(parsed, 1):
+        entry = merchant_map.lookup(mapping, row.get("description"))
+        if not entry:
+            continue
+        changed = []
+        for field in ("category", "type"):
+            remembered = str(entry.get(field) or "").strip()
+            if remembered and remembered != str(row.get(field) or "").strip():
+                changed.append(f"{field} '{row.get(field) or ''}' → '{remembered}'")
+                row[field] = remembered
+        if entry.get("person") and not str(row.get("person") or "").strip():
+            row["person"] = entry["person"]
+            changed.append(f"person → '{entry['person']}'")
+        if entry.get("is_recurring") and not row.get("is_recurring"):
+            row["is_recurring"] = True
+            changed.append("is_recurring → yes")
+        if changed:
+            row["mem"] = True
+            notes.append(f"row {i}: {', '.join(changed)} (merchant memory)")
+    return notes
 
 
 def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
@@ -272,6 +321,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         txn_type = t.get("type") or ""
         person_suffix = f" | person={_md_escape(person)}" if person else ""
         type_suffix = f" | type={_md_escape(txn_type)}" if txn_type else ""
+        mem_suffix = " 🧠" if t.get("mem") else ""
         invalid = t.get("invalid") or ""
         invalid_suffix = f"\n   ⚠️ {_md_escape(invalid)} (won't be saved — edit it first)" if invalid else ""
         dup_suffix = (
@@ -281,7 +331,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         row_lines.append(
             f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
-            f"{type_suffix}{person_suffix}{invalid_suffix}{dup_suffix}"
+            f"{mem_suffix}{type_suffix}{person_suffix}{invalid_suffix}{dup_suffix}"
         )
 
     messages = []
@@ -381,6 +431,13 @@ def _apply_bulk_edit(
     # a typo'd category must not slip past just because it was typed by hand.
     if lists:
         notes.extend(_revalidate_bulk_row(parsed[idx], lists, idx + 1))
+    # A human correction to categorization is the strongest signal there is —
+    # remember it so future imports of this merchant skip the AI's guess.
+    if field in {"category", "type", "person", "is_recurring"} and not parsed[idx].get("invalid"):
+        learned = merchant_map.learn_from_row(parsed[idx])
+        if learned:
+            notes.append(f"row {idx + 1}: remembered '{learned}' → "
+                         f"{parsed[idx].get('category')} for future imports")
     return False, "edited", notes
 
 
@@ -473,8 +530,17 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     ctx.user_data["lists"] = lists
     parsed, corrections = _normalize_parsed_rows(parsed, lists)
+    memory_notes = _apply_merchant_memory(parsed)
     parsed, validator_corrections = _validate_bulk_rows(parsed, lists)
     corrections += validator_corrections
+    if memory_notes:
+        shown = "\n".join(f"  • {n}" for n in memory_notes[:10])
+        more = f"\n  … and {len(memory_notes) - 10} more" if len(memory_notes) > 10 else ""
+        await update.message.reply_text(
+            f"🧠 {len(memory_notes)} row(s) categorized from merchant memory "
+            f"(marked 🧠 in the preview):\n{shown}{more}"
+        )
+        log.info("User %s bulk merchant-memory: %d rows", uid, len(memory_notes))
     if corrections:
         shown = "\n".join(f"  • {c}" for c in corrections[:10])
         more = f"\n  … and {len(corrections) - 10} more" if len(corrections) > 10 else ""

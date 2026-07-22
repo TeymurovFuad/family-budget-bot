@@ -51,6 +51,9 @@ RECOVERY_QUEUE_PATH = Path(os.getenv("RECOVERY_QUEUE_PATH", str(DATA_DIR / "reco
 BULK_DRAFTS_DIR = Path(os.getenv("BULK_DRAFTS_DIR", str(DATA_DIR / "bulk_drafts"))).expanduser()
 if not BULK_DRAFTS_DIR.is_absolute():
     BULK_DRAFTS_DIR = PROJECT_ROOT / BULK_DRAFTS_DIR
+MERCHANT_MAP_PATH = Path(os.getenv("MERCHANT_MAP_PATH", str(DATA_DIR / "merchant_map.json"))).expanduser()
+if not MERCHANT_MAP_PATH.is_absolute():
+    MERCHANT_MAP_PATH = PROJECT_ROOT / MERCHANT_MAP_PATH
 
 # Logging configuration
 LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_LOG_DIR))).expanduser()
