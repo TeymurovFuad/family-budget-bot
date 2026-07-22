@@ -83,7 +83,7 @@ reasoning in the preview, and offers a one-command override.
       called new; matches get NO automatic action (saved by default) and are surfaced
       as an advisory showing BOTH descriptions side by side:
       "⚠️ Possible duplicates (matched on date+amount, but description differs):
-       row 9: 45.98 PLN 'Zabka Warszawa 4211' (12 May) ↔ existing: 45.98 PLN 'Żabka' (12 May).
+       row 9: 45.98 PLN 'Old Tbilisi Warszawa 4211' (12 May) ↔ existing: 45.98 PLN 'Old Tbilisi' (12 May).
        Saving them. Reply `drop 9` if it's the same payment."
       Asymmetry is deliberate: wrong advisory costs one line of reading; wrong skip
       loses a transaction. Loose pass reuses the same MasterData read — no extra
@@ -93,7 +93,7 @@ reasoning in the preview, and offers a one-command override.
       `drop all flagged` in one command.
 - [ ] **Strict-flag evidence in message** — skip lines show date, amount, merchant AND
       what was matched, so a false match is spottable without opening Excel:
-      "↺ row 7: 45.98 PLN 'Żabka' (12 May) — matches an entry saved 12 May.
+      "↺ row 7: 45.98 PLN 'Old Tbilisi' (12 May) — matches an entry saved 12 May.
        Skipping. Reply `keep 7` if this is a separate payment."
 - [ ] **Deleted rows reappear as new on re-import — accepted, no tombstones** —
       decided: the bank file says the transaction happened; preview shows it as new,
@@ -234,7 +234,7 @@ reasoning in the preview, and offers a one-command override.
 ## Follow-up PR: token economy (paid DeepSeek tokens)
 
 - [ ] **Compact AI output format** — replace keyed JSON objects (~120 output tokens/txn) with
-      positional arrays `["2026-07-05", 45.98, "PLN", "E", "Groceries", "Żabka", ""]` + letter
+      positional arrays `["2026-07-05", 45.98, "PLN", "E", "Entertainment", "Old Tbilisi", ""]` + letter
       codes for type. ~4-5× cut on output tokens (the expensive kind). Prompt change + decoder.
 - [ ] **Split extraction from categorization** — regex extracts date/amount/description from
       structured bank statements locally; AI only categorizes a compact list of unknown merchant
