@@ -236,7 +236,13 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/delete` | Remove one of the last 5 transactions |
 | `/setcurrency EUR` | Switch display currency for this session |
 | `/setcurrency` | Pick display currency from a keyboard |
+| `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
 | `/export` | Download the live Excel workbook as a Telegram document |
+
+`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, and quick-add
+(typed transactions) are **owner-only** — only the first ID listed in
+`ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
+read/report commands.
 
 All of these are also registered in Telegram's command menu (the `/` button) at
 startup via `set_my_commands` — no manual BotFather registration needed.

@@ -5,7 +5,7 @@ from datetime import datetime, date, timezone
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
-from config import TIMEZONE, auth, get_display_currency, _last_saved, log
+from config import TIMEZONE, auth_write, get_display_currency, _last_saved, log
 from data import load_rates, load_reference_data, now_utc, get_rate
 from excel_ops import append_transaction
 from formatters import sanitize_description
@@ -18,7 +18,7 @@ from states import (
 )
 
 
-@auth
+@auth_write
 async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid   = update.effective_user.id
     rates = load_rates()

@@ -636,6 +636,39 @@ def update_currency_rates_in_excel(new_rates: dict[str, float]) -> None:
         log.info("Updated %d currency rates in Lists sheet", len(new_rates))
 
 
+def update_category_budget_in_excel(category: str, new_budget_pln: float) -> None:
+    """
+    Write a new monthly budget limit (in PLN) for one category into the Lists
+    sheet Budget (PLN) column. Only updates the row whose Categories cell
+    already matches `category` — never adds or removes a category row.
+    """
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb["Lists"]
+
+        idx      = col_indices(ws, ListsSchema)
+        cat_col  = idx.get("categories")
+        bud_col  = idx.get("budget_pln")
+
+        if cat_col is None or bud_col is None:
+            log.warning("Categories or Budget (PLN) column not found in Lists sheet — budget not updated")
+            return
+
+        for row in range(2, ws.max_row + 1):
+            cat = ws.cell(row, cat_col).value
+            if cat and str(cat).strip() == category:
+                ws.cell(row, bud_col).value = round(new_budget_pln, 2)
+                break
+        else:
+            log.warning("Category '%s' not found in Lists sheet — budget not updated", category)
+            return
+
+        atomic_save(wb, excel_path)
+        log.info("Updated budget for category '%s' to %.2f PLN", category, new_budget_pln)
+
+
 # ── Transaction management ────────────────────────────────────────────────────
 
 def get_recent_transactions(excel_path: Path, n: int = 5) -> list[dict]:
