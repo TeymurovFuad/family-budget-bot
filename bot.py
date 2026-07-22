@@ -31,6 +31,7 @@ import settings
 init_logging()
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram import BotCommand
 from telegram.ext import (
     Application, CallbackQueryHandler, CommandHandler, ConversationHandler,
     MessageHandler, filters,
@@ -76,14 +77,42 @@ BULK_REVIEW_TIMEOUT_SECONDS = 30 * 60   # /bulk — reviewing 100+ parsed rows t
 QUICK_CONFIRM_TIMEOUT_SECONDS = 60      # quick-add — single yes/no confirmation
 
 
-def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN not set in .env")
+# ── Telegram command menu (the "/" button) ────────────────────────────────────
+# Every user-facing command, ordered by frequency of use. Registered at startup
+# via set_my_commands — no manual BotFather step needed. Conversation-internal
+# commands (/cancel, /skip, /save) are deliberately excluded.
+BOT_COMMANDS = [
+    BotCommand("summary",     "This month at a glance: income, expenses, savings"),
+    BotCommand("add",         "Log one transaction step by step"),
+    BotCommand("bulk",        "Import many transactions from photo, file or text"),
+    BotCommand("week",        "Last 7 days of spending by category"),
+    BotCommand("budget",      "Budget vs actual for every category"),
+    BotCommand("top",         "Top 5 biggest expenses this month"),
+    BotCommand("report",      "Full monthly report with month-over-month deltas"),
+    BotCommand("chart",       "Spending by category as a chart"),
+    BotCommand("range",       "Report for a custom date range"),
+    BotCommand("savings",     "Savings rate for the last 6 months vs target"),
+    BotCommand("rates",       "Exchange rates (add 'refresh' for live rates)"),
+    BotCommand("edit",        "Edit a field on one of the last 10 transactions"),
+    BotCommand("delete",      "Remove one of the last 5 transactions"),
+    BotCommand("export",      "Download your Excel workbook"),
+    BotCommand("setcurrency", "Change the display currency"),
+    BotCommand("menu",        "Show the button menu"),
+    BotCommand("help",        "List all commands with what they do"),
+    BotCommand("start",       "Welcome message and main menu"),
+]
 
-    replay_recovery_queue()
-    log.info("Using storage backend=%s, xlsx_path=%s", settings.STORAGE_BACKEND, settings.XLSX_PATH)
 
-    app = Application.builder().token(BOT_TOKEN).build()
+async def register_commands(app: Application) -> None:
+    """post_init hook: publish the command menu so Telegram shows it on '/'."""
+    await app.bot.set_my_commands(BOT_COMMANDS)
+    log.info("Registered %d bot commands with Telegram", len(BOT_COMMANDS))
+
+
+def build_application() -> Application:
+    """Build the Application and wire every handler. Split from main() so tests
+    can inspect the registered handlers without starting the bot."""
+    app = Application.builder().token(BOT_TOKEN).post_init(register_commands).build()
 
     # ── command handlers ──────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_menu))
@@ -189,6 +218,18 @@ def main():
         fallbacks=[CommandHandler("cancel", add_cancel)],
         conversation_timeout=QUICK_CONFIRM_TIMEOUT_SECONDS,
     ))
+
+    return app
+
+
+def main():
+    if not BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN not set in .env")
+
+    replay_recovery_queue()
+    log.info("Using storage backend=%s, xlsx_path=%s", settings.STORAGE_BACKEND, settings.XLSX_PATH)
+
+    app = build_application()
 
     # ── scheduler ─────────────────────────────────────────────────────────────
     scheduler = AsyncIOScheduler(timezone=str(TIMEZONE))
