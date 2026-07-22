@@ -52,9 +52,29 @@ timeout or bot restart.
 
 ---
 
-## Quick start (local, no Docker)
+## Quick start (one command)
 
-The fastest way to run the bot on your own machine without Docker.
+Fork the repo, clone it, run the setup script. It checks your Python version,
+creates the virtualenv, installs dependencies, asks for any missing config
+(bot token, allowed Telegram IDs, optional DeepSeek key), validates the
+result, and on Linux offers to install the systemd service.
+
+**Requirements:** Python 3.12+, Git
+
+```bash
+git clone https://github.com/YOUR_USERNAME/budget-bot.git
+cd budget-bot
+./setup.sh                       # Windows: python scripts\setup_bot.py
+```
+
+Re-run it any time — it acts as a config doctor and only prompts for values
+that are still missing.
+
+---
+
+## Quick start (manual, no Docker)
+
+The same steps done by hand.
 
 **Requirements:** Python 3.12+, Git
 
