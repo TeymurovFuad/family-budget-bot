@@ -32,21 +32,29 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ccy = get_display_currency(update.effective_user.id)
     await update.message.reply_text(
         f"📋 *Commands* (showing in {ccy})\n\n"
-        "/summary — this month at a glance + burn rate\n"
-        "/week — last 7 days spending\n"
-        "/budget — budget vs actual (all categories)\n"
+        "*Add transactions*\n"
+        "/add — log one transaction step by step\n"
+        "/bulk — import many transactions from photo, file or text; review the parsed rows, reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
+        "Or just type naturally: \"groceries 89 PLN\" to quick-add.\n\n"
+        "*Reports*\n"
+        "/summary — this month at a glance: income, expenses, savings\n"
+        "/week — last 7 days of spending by category\n"
+        "/budget — budget vs actual for every category\n"
         "/top — top 5 biggest expenses this month\n"
-        "/savings — savings rate last 6 months vs target\n"
-        "/report — full monthly report with MoM deltas\n"
-        "/rates — exchange rates (/rates refresh for live)\n"
-        "/add — log a new transaction\n"
-        "/delete — remove one of the last 5 transactions\n"
-        "/edit — edit a field on one of the last 10 transactions\n"
-        "/bulk — import transactions from a photo, a plain-text file (.txt), or pasted text; review the parsed rows and reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
+        "/report — full monthly report with month-over-month deltas\n"
         "/chart — spending by category as a chart\n"
-        "/export — download the current Excel workbook\n"
-        "/setcurrency — change display currency\n\n"
-        "Or just type naturally: \"groceries 89 PLN\" to quick-add a transaction.\n",
+        "/range — report for a custom date range\n"
+        "/savings — savings rate for the last 6 months vs target\n"
+        "/rates — exchange rates (/rates refresh for live)\n\n"
+        "*Manage*\n"
+        "/edit — edit a field on one of the last 10 transactions\n"
+        "/delete — remove one of the last 5 transactions\n"
+        "/export — download your Excel workbook\n\n"
+        "*Settings*\n"
+        "/setcurrency — change the display currency\n"
+        "/menu — show the button menu\n"
+        "/start — welcome message and main menu\n"
+        "/help — this list\n",
         parse_mode="Markdown",
     )
 

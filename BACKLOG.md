@@ -189,9 +189,12 @@ reasoning in the preview, and offers a one-command override.
       Stop asking on every /add; bulk stops hardcoding False.
 - [ ] **/add default-and-confirm** — 9 round-trips today; pre-fill PLN/Expense/today/non-recurring
       after amount+category and jump to the confirm card with "Edit a field…" (reuse edit_conv picker).
-- [ ] **Discoverability** — `/bulk`, `/delete`, `/help`, `/setcurrency` absent from menus and /start;
+- [x] **Discoverability** — `/bulk`, `/delete`, `/help`, `/setcurrency` absent from menus and /start;
       add 📥 Import + 🗑 Delete buttons; rewrite /start to show the three entry methods;
-      register commands with BotFather.
+      register commands with BotFather. *Done: 📥 Import + 🗑 Delete added to MAIN_MENU;
+      /start shows the three entry methods; /help lists every command grouped by purpose;
+      BotFather registration replaced by `set_my_commands` at startup (bot.py `register_commands`
+      post_init hook) — better, no manual BotFather step, guarded by a drift test.*
 - [ ] **Bulk edit UX** — `skip N` / `delete N` commands to drop a mis-parsed row without cancelling
       everything; on invalid edit, list the editable fields; validate category values against Lists.
 - [ ] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category

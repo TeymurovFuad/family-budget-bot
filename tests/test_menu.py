@@ -54,11 +54,11 @@ def _make_ctx():
 # ── Test 1: MAIN_MENU buttons are correctly defined ───────────────────────────
 
 def test_main_menu_buttons():
-    """MAIN_MENU must have exactly one row with the three main buttons."""
-    kb = MAIN_MENU.keyboard
-    assert len(kb) == 1, "MAIN_MENU should have exactly 1 row"
-    buttons = [btn.text for btn in kb[0]]
+    """MAIN_MENU must contain the main entry, import, delete and nav buttons."""
+    buttons = {btn.text for row in MAIN_MENU.keyboard for btn in row}
     assert "➕ Add" in buttons
+    assert "📥 Import" in buttons
+    assert "🗑 Delete" in buttons
     assert "📊 Reports" in buttons
     assert "⚙️ More" in buttons
 

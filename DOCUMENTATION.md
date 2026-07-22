@@ -218,17 +218,28 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 
 | Command | What you get |
 |---|---|
+| `/start` | Welcome message with the three entry methods and the main button menu |
+| `/menu` | Show the persistent button menu |
+| `/help` | List all commands grouped by purpose |
 | `/summary` | This month: income, expenses, savings, net, savings rate |
 | `/week` | Last 7 days spending by category |
 | `/budget` | All 17 categories with budget vs actual and progress bars |
 | `/top` | The 5 biggest expenses this month |
 | `/savings` | Savings rate for each of the last 6 months |
 | `/report` | Full report: fixed vs variable, by category, by person |
+| `/chart` | Spending by category rendered as a chart image |
+| `/range` | Report for a custom date range (preset buttons or typed dates) |
+| `/rates` | Exchange rates (`/rates refresh` fetches live rates) |
 | `/add` | Log a new transaction step by step |
 | `/bulk` | Import many transactions at once from a photo, .txt file, or pasted text |
+| `/edit` | Edit a field on one of the last 10 transactions |
+| `/delete` | Remove one of the last 5 transactions |
 | `/setcurrency EUR` | Switch display currency for this session |
 | `/setcurrency` | Pick display currency from a keyboard |
 | `/export` | Download the live Excel workbook as a Telegram document |
+
+All of these are also registered in Telegram's command menu (the `/` button) at
+startup via `set_my_commands` — no manual BotFather registration needed.
 
 ### Scheduled Reports
 

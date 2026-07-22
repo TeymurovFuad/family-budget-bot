@@ -14,7 +14,10 @@ from log_decorators import log_call
 # ── Keyboard definitions ──────────────────────────────────────────────────────
 
 MAIN_MENU = ReplyKeyboardMarkup(
-    [["➕ Add", "📊 Reports", "⚙️ More"]],
+    [
+        ["➕ Add", "📥 Import", "📊 Reports"],
+        ["🗑 Delete", "⚙️ More"],
+    ],
     resize_keyboard=True,
     is_persistent=True,
 )
@@ -56,8 +59,12 @@ async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ccy  = get_display_currency(update.effective_user.id)
     await update.message.reply_text(
         f"👋 Hi *{name}*! I'm your *Budget Bot*.\n\n"
+        "Three ways to log spending:\n"
+        "• Just type it — e.g. \"groceries 89 PLN\"\n"
+        "• /add — guided, one transaction step by step\n"
+        "• /bulk — import many at once from a photo, file or text\n\n"
         f"Currently showing amounts in *{ccy}*. "
-        f"Use /setcurrency to change.\n\n"
+        f"Use /setcurrency to change, /help for all commands.\n\n"
         "What would you like to do?",
         parse_mode="Markdown",
         reply_markup=MAIN_MENU,
@@ -88,6 +95,8 @@ _ACTION_BUTTONS = {
     "🔄 Rates Refresh": "cmd_rates_refresh",
     "✏️ Edit Last":    "cmd_edit",
     "➕ Add":          "cmd_add",
+    "📥 Import":       "cmd_bulk",
+    "🗑 Delete":       "cmd_delete",
 }
 
 
@@ -137,6 +146,14 @@ async def handle_menu_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif func_name == "cmd_add":
             from handlers.add_conv import cmd_add
             await cmd_add(update, ctx)
+
+        elif func_name == "cmd_bulk":
+            from handlers.bulk_conv import cmd_bulk
+            await cmd_bulk(update, ctx)
+
+        elif func_name == "cmd_delete":
+            from handlers.delete_conv import cmd_delete
+            await cmd_delete(update, ctx)
 
         return
 
