@@ -283,9 +283,10 @@ unaccounted tracking — the old manual dashboard metric).
 
 - [ ] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
       everyone else. When off, none of the below activates.
-- [ ] **Cycle ledger** — one row per cycle: start date + label (e.g. "Aug"). Stored in
-      Lists (new columns) so Excel formulas can reference it; bot reads/writes through
-      excel_schema. Boundaries are written once and never recomputed — no retroactive
+- [ ] **Cycle ledger** — one row per cycle: start date + label. Labels always carry the
+      year ("Aug 2026", never bare "Aug") so multi-year resolution is unambiguous.
+      Lives in the dedicated `Cycles` sheet (see below — NOT Lists columns).
+      Boundaries are written once and never recomputed — no retroactive
       re-bucketing, late edits cannot silently move history between cycles.
 - [ ] **Boundary capture, user-confirmed** — two inputs, same ledger:
       (a) bot saves an Income row with category Salary → prompt: "💰 Salary received.
@@ -305,7 +306,9 @@ unaccounted tracking — the old manual dashboard metric).
       same layout, same category rows, same budget targets (shared Lists budget column —
       one edit updates both). Filter is a single cycle selector (dropdown fed by the
       ledger) instead of Year+Month; all SUMIFS filter on Date >= cycle start AND
-      Date < next start. Adds the salary/expenses/savings/unaccounted block and shows
+      Date < next start — for the LAST ledger row (no next start) the upper bound is
+      open-ended: TODAY()+1 in formulas, today in bot queries.
+      Adds the salary/expenses/savings/unaccounted block and shows
       the cycle's day count (24-33 days — budgets are not pro-rated, matching the old
       manual system). The calendar Dashboard and Month/Year columns stay untouched —
       cycles are purely additive; disabling the flag corrupts nothing.
@@ -336,6 +339,13 @@ unaccounted tracking — the old manual dashboard metric).
       period" iterates ledger rows: each cycle ends where the next begins, the last
       ends today. A hole in the walk triggers the lazy backfill prompt before
       rendering. No special-case logic for historical queries.
+- [ ] **Before the first boundary** — transactions older than the first recorded cycle
+      form an implicit "Before cycles" bucket: included in entire-period reports under
+      that label (never silently omitted), listed in the cycle picker as
+      "Before cycles (… – first start)", and excluded from unaccounted math (no salary
+      anchor exists there). Backfill can shrink this bucket by recording earlier
+      boundaries; "none this month" for the very first gap simply leaves rows in the
+      bucket instead of extending a nonexistent previous cycle.
 - [ ] **Multiple salary rows in one window (salary + overtime, all category Salary)** —
       backfill: each ambiguous month gets its own inline-button prompt, one candidate
       per button (largest amount listed first — main salary beats overtime), plus
@@ -400,20 +410,30 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
       Fix a column = button walk (pick column → pick field). Nothing saved until
       confirmed. Then: "Name this format?" with suggested default; saved locally.
 - [ ] **Known format** — fingerprint match → zero questions, zero tokens, deterministic
-      extraction; preview opens with one status line: "📄 Parsed with profile 'mBank' —
+      extraction; preview opens with one status line: "📄 Parsed with profile 'MyBankA' —
       42 rows." Categorization runs the normal pipeline (merchant map 🧠 first, AI only
       for unknown merchants) — this IS the token-economy "split extraction from
       categorization" item for statement imports.
 - [ ] **Bank redesigns the export** — fingerprint stops matching (all-or-nothing; a
       changed format can never half-match/misparse) → new-format flow reruns. Before
       proposing from scratch, compare the new header against saved profiles: ~80%
-      similar → "This looks like an updated mBank format (2 columns changed). Update
-      mBank or save as new?" Old profile is KEPT either way (matching is by
+      similar → "This looks like an updated MyBankA format (2 columns changed). Update
+      MyBankA or save as new?" Old profile is KEPT either way (matching is by
       fingerprint, so profiles coexist under one bank) — re-downloaded historical
       statements arrive in the format of their era and still parse silently.
-- [ ] **Feeds dedup v2** — the profile's optional time column supplies HH:MM to the
-      strict dedup key (see dedup v2 "timestamp in key" item); statement imports become
-      immune to same-day identical-transaction collisions.
+- [ ] **Feeds dedup v2 — within-batch only (design correction, review 2026-07-22)** —
+      MasterData has NO time column, so HH:MM can never appear in keys compared against
+      stored rows (time-bearing draft keys would never match timeless stored keys and
+      dedup would silently stop firing — the opposite of the goal). Corrected rule:
+      the profile's time column disambiguates identical rows WITHIN one statement
+      (count-aware logic gets exact per-day counts); cross-import keys stay timeless.
+      Persisting time cross-import would require a MasterData Time column — a schema
+      change deliberately NOT part of this design; revisit only if timeless+count-aware
+      dedup proves insufficient in practice.
+- [ ] **`.txt` that is secretly a CSV** — some banks export column-structured files named
+      .txt (tab/semicolon separated). On .txt upload, sniff: if the content splits into
+      consistent columns, offer the profile flow; otherwise AI free-form parsing as
+      today. Plain receipts/pasted text keep the current path unchanged.
 
 ## Notes
 
