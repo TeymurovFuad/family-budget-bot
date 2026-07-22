@@ -365,6 +365,167 @@ write paths — commit 309df08.
       and repeats the same failing rename. Not a data-loss risk, just log spam — give up after one
       retry or alert distinctly instead of looping silently.
 
+## Follow-up PR: budget cycles — agreed design (brainstorm 2026-07-22)
+
+Goal: restore the user's pre-bot salary-period tracking. Salary arrives around the 25th
+but shifts ±4-5 days, so cycle boundaries are RECORDED EVENTS, never date formulas.
+Answers "which salary funds this?" and "what happened to each salary?" (leftover /
+unaccounted tracking — the old manual dashboard metric).
+
+- [ ] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
+      everyone else. When off, none of the below activates.
+- [ ] **Cycle ledger** — one row per cycle: start date + label. Labels always carry the
+      year ("Aug 2026", never bare "Aug") so multi-year resolution is unambiguous.
+      Lives in the dedicated `Cycles` sheet (see below — NOT Lists columns).
+      Boundaries are written once and never recomputed — no retroactive
+      re-bucketing, late edits cannot silently move history between cycles.
+- [ ] **Boundary capture, user-confirmed** — two inputs, same ledger:
+      (a) bot saves an Income row with category Salary → prompt: "💰 Salary received.
+      Start the new budget cycle from 23 Jul? (yes / no / different date)" — the bot
+      proposes, only the user's confirmation records; a mis-categorized refund cannot
+      open a cycle. (b) `/cycle started [date]` manual command any time.
+      No salary logged + no command = current cycle continues; the bot never guesses.
+- [ ] **Bot reports per cycle** — with the flag on, `/summary` and budget bars compute
+      over the current cycle (last boundary → today); days-remaining uses no assumption
+      about cycle length. Monthly scheduled report fires on cycle close (boundary
+      confirmation) instead of the 1st, reporting the cycle that just closed.
+- [ ] **Unaccounted metric** — per cycle: salary received − tracked expenses − tracked
+      savings = unaccounted ("not reported"); negative = over-reported (untracked income
+      or previous cycle's leftover being spent). Shown in bot cycle reports and on the
+      Cycle Dashboard.
+- [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet;
+      same layout, same category rows, same budget targets (shared Lists budget column —
+      one edit updates both). Filter is a single cycle selector (dropdown fed by the
+      ledger) instead of Year+Month; all SUMIFS filter on Date >= cycle start AND
+      Date < next start — for the LAST ledger row (no next start) the upper bound is
+      open-ended: TODAY()+1 in formulas, today in bot queries.
+      Adds the salary/expenses/savings/unaccounted block and shows
+      the cycle's day count (24-33 days — budgets are not pro-rated, matching the old
+      manual system). The calendar Dashboard and Month/Year columns stay untouched —
+      cycles are purely additive; disabling the flag corrupts nothing.
+- [ ] **Sync check** — repair-script-pattern check that both dashboards carry the same
+      category rows (new category must be added to both sheets).
+- [ ] **Cycles sheet, not JSON** — the ledger lives in a dedicated `Cycles` sheet in the
+      main workbook (start date + label per row) so Dashboard formulas can reference it;
+      included in the template (harmless when the flag is off); auto-created on first
+      use for existing workbooks; bot access through excel_schema.
+- [ ] **Historical backfill: `/cycles detect`** — one-pass scan of the whole history:
+      every Income row with category Salary (fallback: largest recurring end-of-month
+      income for rows imported before categories were clean). Unambiguous months are
+      listed in one summary message and confirmed with a single `Confirm all` button.
+      Ambiguous months (no candidate, or several) are walked one at a time with inline
+      buttons — no positional reply grammar anywhere in this flow.
+- [ ] **Lazy backfill on report** — cycle report requested for a period with missing
+      boundaries → run the same detection scoped to that period and ask before
+      rendering. Same engine, two triggers (explicit command + lazy on demand).
+- [ ] **`none this month` is a valid answer** — a gap can be legitimate (no salary that
+      month: job gap, delayed payment). "none" extends the previous cycle (a 60-day
+      cycle is valid data, not an error) instead of fabricating a boundary; unaccounted
+      math stays honest over long cycles.
+- [ ] **Candidate window when detection finds nothing** — show Income rows (any
+      category) from the 20th of the previous month through the 5th of the target
+      month; if none, the largest 3 credits in that window; user picks one or types a
+      date. Catches the ±4-5-day payday drift without dumping a month of noise.
+- [ ] **Past/entire-period reports walk the ledger** — `/summary aug 2025` or "entire
+      period" iterates ledger rows: each cycle ends where the next begins, the last
+      ends today. A hole in the walk triggers the lazy backfill prompt before
+      rendering. No special-case logic for historical queries.
+- [ ] **Before the first boundary** — transactions older than the first recorded cycle
+      form an implicit "Before cycles" bucket: included in entire-period reports under
+      that label (never silently omitted), listed in the cycle picker as
+      "Before cycles (… – first start)", and excluded from unaccounted math (no salary
+      anchor exists there). Backfill can shrink this bucket by recording earlier
+      boundaries; "none this month" for the very first gap simply leaves rows in the
+      bucket instead of extending a nonexistent previous cycle.
+- [ ] **Multiple salary rows in one window (salary + overtime, all category Salary)** —
+      backfill: each ambiguous month gets its own inline-button prompt, one candidate
+      per button (largest amount listed first — main salary beats overtime), plus
+      `Custom date` and `No cycle this month`:
+      "Jul 2026 — which payment starts the cycle?
+       [ ① 25 Jun · salary · 6 000 PLN ] [ ② 28 Jun · overtime · 900 PLN ]
+       [ Custom date ] [ No cycle this month ]"
+      One tap per gap; typing only for Custom date (e.g. 2026-07-23). Never
+      auto-recorded. Buttons, not reply grammar — same interaction language as the
+      /summary picker.
+      Live: a Salary-row save triggers the new-cycle prompt only if the current cycle
+      is older than ~20 days (configurable); younger → income inside the cycle,
+      silently counted, no re-prompt.
+
+## Follow-up PR: /summary picker UX — agreed design (brainstorm 2026-07-22)
+
+- [ ] **Free-form argument parsing, order-independent** — `/summary aug 2025`,
+      `2025 aug`, `08.2025`, bare `aug` (= most recent occurrence of that month) all
+      resolve without a fixed year-then-month order.
+- [ ] **Bare `/summary` → one message, three zones** — buttons appear ONLY on bare
+      /summary (no arguments); any typed argument renders the report directly.
+      Zone 1 (quick row, top): flag off → This month · Last month;
+      flag on → This cycle · Last cycle · This month · Last month.
+      "This cycle" = last recorded boundary → today (how am I doing on this salary);
+      "Last cycle" = between the two most recent boundaries (what happened to the
+      previous salary — the leftover metric's home). Most calls end here.
+      Zone 2 (history drill-down, beneath): flag off → year buttons directly;
+      flag on → 📅 Calendar / 💰 Cycle choice first. Calendar → year buttons
+      (actual MasterData years, newest first, only years with data) → month buttons
+      (only months with data) → report. Cycle → ledger list, newest first, labeled
+      with ranges: "Aug (23 Jul – today)", "Jul (25 Jun – 22 Jul)", "Earlier…" paging;
+      a hole in the ledger triggers the lazy backfill prompt.
+      Calendar/Cycle is never a gate — the quick row sits above it on the same screen.
+- [ ] **`/summary jul` with cycles enabled** — a bare month name resolves against the
+      ledger label first (cycle "Jul"), calendar month only when no such label exists.
+- [ ] **Range support, both forms** — free-form `/summary aug 2025 - jan 2026`
+      (reuse the existing /range parsing pattern) and a `Range…` button that walks the
+      same year→month picker twice ("From:" then "To:", prompt text shows progress).
+      No new UI concepts — the same pickers, used twice.
+- [ ] **Year overflow paging** — years beyond ~2 rows of 4 buttons collapse into an
+      "Earlier…" page (Telegram inline-keyboard height limits).
+
+## Follow-up PR: bank-statement profiles — agreed design (brainstorm 2026-07-22)
+
+Goal: import any bank's CSV/XLSX export without hardcoding any bank in the public repo.
+Profiles are per-user local JSON — `data/statement_profiles/<name>.json`, gitignored like
+the live Excel and merchant map. No bank name ever enters the repo; only an
+`example.json` with fake columns ships.
+
+- [ ] **Profile contents** — delimiter, encoding, header row index, column→field mapping
+      (date, amount, currency, description, optional time), date format, decimal
+      convention, sign convention (negative = expense). Header fingerprint stored inside
+      the profile (set/order of header names) — matching is by fingerprint, never by
+      filename or profile name.
+- [ ] **First upload of unknown format (via /bulk attachment)** — read locally; no
+      fingerprint match → ONE small AI call with header row + 2-3 masked sample rows
+      (amounts/account numbers masked) proposes the mapping. User reviews a ready
+      answer, never assembles from scratch:
+      "New statement format detected. My reading: column 2 → date (DD.MM.YYYY) ·
+       column 7 → amount (comma decimal, negative = expense) · …
+       [ Looks right ] [ Fix a column ] [ Cancel ]"
+      Fix a column = button walk (pick column → pick field). Nothing saved until
+      confirmed. Then: "Name this format?" with suggested default; saved locally.
+- [ ] **Known format** — fingerprint match → zero questions, zero tokens, deterministic
+      extraction; preview opens with one status line: "📄 Parsed with profile 'MyBankA' —
+      42 rows." Categorization runs the normal pipeline (merchant map 🧠 first, AI only
+      for unknown merchants) — this IS the token-economy "split extraction from
+      categorization" item for statement imports.
+- [ ] **Bank redesigns the export** — fingerprint stops matching (all-or-nothing; a
+      changed format can never half-match/misparse) → new-format flow reruns. Before
+      proposing from scratch, compare the new header against saved profiles: ~80%
+      similar → "This looks like an updated MyBankA format (2 columns changed). Update
+      MyBankA or save as new?" Old profile is KEPT either way (matching is by
+      fingerprint, so profiles coexist under one bank) — re-downloaded historical
+      statements arrive in the format of their era and still parse silently.
+- [ ] **Feeds dedup v2 — within-batch only (design correction, review 2026-07-22)** —
+      MasterData has NO time column, so HH:MM can never appear in keys compared against
+      stored rows (time-bearing draft keys would never match timeless stored keys and
+      dedup would silently stop firing — the opposite of the goal). Corrected rule:
+      the profile's time column disambiguates identical rows WITHIN one statement
+      (count-aware logic gets exact per-day counts); cross-import keys stay timeless.
+      Persisting time cross-import would require a MasterData Time column — a schema
+      change deliberately NOT part of this design; revisit only if timeless+count-aware
+      dedup proves insufficient in practice.
+- [ ] **`.txt` that is secretly a CSV** — some banks export column-structured files named
+      .txt (tab/semicolon separated). On .txt upload, sniff: if the content splits into
+      consistent columns, offer the profile flow; otherwise AI free-form parsing as
+      today. Plain receipts/pasted text keep the current path unchanged.
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
