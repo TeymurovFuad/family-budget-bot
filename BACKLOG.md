@@ -58,6 +58,50 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 - [ ] **Within-draft dedup** — `_merge_bulk_draft` concatenates blindly; uploading the same
       photo twice mid-draft duplicates every row inside one save. Same key.
 
+## Follow-up PR: dedup v2 — agreed design (brainstorm 2026-07-22)
+
+Refines the base dedup (PR #7). All user-facing message templates below are acceptance
+criteria — exact wording reviewed at implementation, never improvised. Standing rule:
+the bot never blocks an import with a question; it decides a default, shows its
+reasoning in the preview, and offers a one-command override.
+
+- [ ] **Count-aware matching (multiset, not set)** — keys are compared with occurrence
+      counts on both sides. Upload has 3 identical rows, MasterData has 2 in range →
+      save 1, skip 2, and say the math: "3 identical rows found, 2 already in your
+      sheet → saving 1, skipping 2. Reply `keep all` if these are new payments."
+- [ ] **Within-batch identical rows are KEPT by default** (inverts PR #7 behaviour) —
+      repetition inside one source is almost always real (e.g. several 2 PLN car-wash
+      payments same day). Preview annotates instead of dropping:
+      "rows 4, 5, 6 are identical — keeping all 3; reply `drop N` if one is a scan error."
+- [ ] **Multi-row `drop` / `keep` grammar with stable numbering** — `drop 4 6`,
+      `drop 4-6 9 12`, `keep 3 7-9`; one reply, one re-rendered preview. Row numbers
+      never shift mid-draft (no renumbering until save) so batch commands stay safe.
+      `N field=value` edit grammar stays single-row.
+- [ ] **Two-pass scan: strict decides, loose advises** — pass 1 (strict key
+      date|value|currency|cleaned-description) drives all automatic skip/keep behaviour.
+      Pass 2 (loose key date|value|currency, no description) runs only on rows pass 1
+      called new; matches get NO automatic action (saved by default) and are surfaced
+      as an advisory showing BOTH descriptions side by side:
+      "⚠️ Possible duplicates (matched on date+amount, but description differs):
+       row 9: 45.98 PLN 'Zabka Warszawa 4211' (12 May) ↔ existing: 45.98 PLN 'Żabka' (12 May).
+       Saving them. Reply `drop 9` if it's the same payment."
+      Asymmetry is deliberate: wrong advisory costs one line of reading; wrong skip
+      loses a transaction. Loose pass reuses the same MasterData read — no extra
+      workbook access, no AI calls.
+- [ ] **Mass loose-match hint** — when most rows of a batch loose-match (bank
+      reformatted descriptions between exports), say so explicitly and offer
+      `drop all flagged` in one command.
+- [ ] **Strict-flag evidence in message** — skip lines show date, amount, merchant AND
+      what was matched, so a false match is spottable without opening Excel:
+      "↺ row 7: 45.98 PLN 'Żabka' (12 May) — matches an entry saved 12 May.
+       Skipping. Reply `keep 7` if this is a separate payment."
+- [ ] **Deleted rows reappear as new on re-import — accepted, no tombstones** —
+      decided: the bank file says the transaction happened; preview shows it as new,
+      user can drop it. No deleted-key state is kept.
+- [ ] **Future: timestamp in the strict key when the source provides HH:MM** — bank
+      statement imports (statement-profile design, separate topic) carry time; include
+      it in the key when present so same-day repeats never collide at all.
+
 ## Follow-up PR: merchant memory & description quality
 
 - [ ] **Description cleanup** — MasterData gets `4111XXXXXXXX1111 SHOP TERMINAL 12 CITY PL` and
