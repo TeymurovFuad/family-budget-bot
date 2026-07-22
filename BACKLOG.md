@@ -311,6 +311,31 @@ unaccounted tracking — the old manual dashboard metric).
       cycles are purely additive; disabling the flag corrupts nothing.
 - [ ] **Sync check** — repair-script-pattern check that both dashboards carry the same
       category rows (new category must be added to both sheets).
+- [ ] **Cycles sheet, not JSON** — the ledger lives in a dedicated `Cycles` sheet in the
+      main workbook (start date + label per row) so Dashboard formulas can reference it;
+      included in the template (harmless when the flag is off); auto-created on first
+      use for existing workbooks; bot access through excel_schema.
+- [ ] **Historical backfill: `/cycles detect`** — one-pass scan of the whole history:
+      every Income row with category Salary (fallback: largest recurring end-of-month
+      income for rows imported before categories were clean) → propose the COMPLETE
+      ledger in one message, one `confirm all` for clear cases, per-row fixes for gaps:
+      "Jun 2026 — salary 24 May (6 000 PLN) / Aug 2026 — ??? no salary found 20-31 Jul.
+       Reply: confirm all · 3 = 2026-07-23 · 3 none".
+- [ ] **Lazy backfill on report** — cycle report requested for a period with missing
+      boundaries → run the same detection scoped to that period and ask before
+      rendering. Same engine, two triggers (explicit command + lazy on demand).
+- [ ] **`none this month` is a valid answer** — a gap can be legitimate (no salary that
+      month: job gap, delayed payment). "none" extends the previous cycle (a 60-day
+      cycle is valid data, not an error) instead of fabricating a boundary; unaccounted
+      math stays honest over long cycles.
+- [ ] **Candidate window when detection finds nothing** — show Income rows (any
+      category) from the 20th of the previous month through the 5th of the target
+      month; if none, the largest 3 credits in that window; user picks one or types a
+      date. Catches the ±4-5-day payday drift without dumping a month of noise.
+- [ ] **Past/entire-period reports walk the ledger** — `/summary aug 2025` or "entire
+      period" iterates ledger rows: each cycle ends where the next begins, the last
+      ends today. A hole in the walk triggers the lazy backfill prompt before
+      rendering. No special-case logic for historical queries.
 
 ## Notes
 
