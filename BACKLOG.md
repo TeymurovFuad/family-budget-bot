@@ -274,6 +274,44 @@ write paths — commit 309df08.
       and repeats the same failing rename. Not a data-loss risk, just log spam — give up after one
       retry or alert distinctly instead of looping silently.
 
+## Follow-up PR: budget cycles — agreed design (brainstorm 2026-07-22)
+
+Goal: restore the user's pre-bot salary-period tracking. Salary arrives around the 25th
+but shifts ±4-5 days, so cycle boundaries are RECORDED EVENTS, never date formulas.
+Answers "which salary funds this?" and "what happened to each salary?" (leftover /
+unaccounted tracking — the old manual dashboard metric).
+
+- [ ] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
+      everyone else. When off, none of the below activates.
+- [ ] **Cycle ledger** — one row per cycle: start date + label (e.g. "Aug"). Stored in
+      Lists (new columns) so Excel formulas can reference it; bot reads/writes through
+      excel_schema. Boundaries are written once and never recomputed — no retroactive
+      re-bucketing, late edits cannot silently move history between cycles.
+- [ ] **Boundary capture, user-confirmed** — two inputs, same ledger:
+      (a) bot saves an Income row with category Salary → prompt: "💰 Salary received.
+      Start the new budget cycle from 23 Jul? (yes / no / different date)" — the bot
+      proposes, only the user's confirmation records; a mis-categorized refund cannot
+      open a cycle. (b) `/cycle started [date]` manual command any time.
+      No salary logged + no command = current cycle continues; the bot never guesses.
+- [ ] **Bot reports per cycle** — with the flag on, `/summary` and budget bars compute
+      over the current cycle (last boundary → today); days-remaining uses no assumption
+      about cycle length. Monthly scheduled report fires on cycle close (boundary
+      confirmation) instead of the 1st, reporting the cycle that just closed.
+- [ ] **Unaccounted metric** — per cycle: salary received − tracked expenses − tracked
+      savings = unaccounted ("not reported"); negative = over-reported (untracked income
+      or previous cycle's leftover being spent). Shown in bot cycle reports and on the
+      Cycle Dashboard.
+- [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet;
+      same layout, same category rows, same budget targets (shared Lists budget column —
+      one edit updates both). Filter is a single cycle selector (dropdown fed by the
+      ledger) instead of Year+Month; all SUMIFS filter on Date >= cycle start AND
+      Date < next start. Adds the salary/expenses/savings/unaccounted block and shows
+      the cycle's day count (24-33 days — budgets are not pro-rated, matching the old
+      manual system). The calendar Dashboard and Month/Year columns stay untouched —
+      cycles are purely additive; disabling the flag corrupts nothing.
+- [ ] **Sync check** — repair-script-pattern check that both dashboards carry the same
+      category rows (new category must be added to both sheets).
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
