@@ -210,6 +210,24 @@ reasoning in the preview, and offers a one-command override.
       `conversation_timeout` on /setcurrency and /add (currently unset = infinite — decide
       deliberately), recovery-queue retry counts, `$100` row bounds in VLOOKUP ranges.
 
+## Follow-up PR: module size policy — agreed (brainstorm 2026-07-22)
+
+- [ ] **Hard cap 300 lines per production module** — a file exceeding 300 lines almost
+      always contains two concerns; split by cohesion, not by line count alone.
+      Exempt: test files (a thorough test suite for one module legitimately runs long)
+      and generated/schema files.
+- [ ] **Target 150-200 lines** — not enforced immediately, but the trigger to consider
+      a split the next time the file is touched for a feature (not mid-feature, not
+      forced) — 150 as a hard cap was considered and rejected: it forces the opposite
+      failure, fragmenting one coherent handler into files whose functions call across
+      each other, trading "too long to scroll" for "too scattered to follow."
+- [ ] **Split by concern, name by concern** — e.g. `bulk_conv.py` → conversation states /
+      preview rendering / draft persistence, not `bulk_conv_part2.py`.
+- [ ] **Known offenders (first pass, measured 2026-07-22):** `file_storage.py` (745
+      lines — split already tracked under "infra & performance: Split file_storage god
+      module", merge these two items when implementing), `handlers/bulk_conv.py` (733),
+      `handlers/reports.py` (670).
+
 ## Follow-up PR: token economy (paid DeepSeek tokens)
 
 - [ ] **Compact AI output format** — replace keyed JSON objects (~120 output tokens/txn) with
