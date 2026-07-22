@@ -378,6 +378,43 @@ unaccounted tracking — the old manual dashboard metric).
 - [ ] **Year overflow paging** — years beyond ~2 rows of 4 buttons collapse into an
       "Earlier…" page (Telegram inline-keyboard height limits).
 
+## Follow-up PR: bank-statement profiles — agreed design (brainstorm 2026-07-22)
+
+Goal: import any bank's CSV/XLSX export without hardcoding any bank in the public repo.
+Profiles are per-user local JSON — `data/statement_profiles/<name>.json`, gitignored like
+the live Excel and merchant map. No bank name ever enters the repo; only an
+`example.json` with fake columns ships.
+
+- [ ] **Profile contents** — delimiter, encoding, header row index, column→field mapping
+      (date, amount, currency, description, optional time), date format, decimal
+      convention, sign convention (negative = expense). Header fingerprint stored inside
+      the profile (set/order of header names) — matching is by fingerprint, never by
+      filename or profile name.
+- [ ] **First upload of unknown format (via /bulk attachment)** — read locally; no
+      fingerprint match → ONE small AI call with header row + 2-3 masked sample rows
+      (amounts/account numbers masked) proposes the mapping. User reviews a ready
+      answer, never assembles from scratch:
+      "New statement format detected. My reading: column 2 → date (DD.MM.YYYY) ·
+       column 7 → amount (comma decimal, negative = expense) · …
+       [ Looks right ] [ Fix a column ] [ Cancel ]"
+      Fix a column = button walk (pick column → pick field). Nothing saved until
+      confirmed. Then: "Name this format?" with suggested default; saved locally.
+- [ ] **Known format** — fingerprint match → zero questions, zero tokens, deterministic
+      extraction; preview opens with one status line: "📄 Parsed with profile 'mBank' —
+      42 rows." Categorization runs the normal pipeline (merchant map 🧠 first, AI only
+      for unknown merchants) — this IS the token-economy "split extraction from
+      categorization" item for statement imports.
+- [ ] **Bank redesigns the export** — fingerprint stops matching (all-or-nothing; a
+      changed format can never half-match/misparse) → new-format flow reruns. Before
+      proposing from scratch, compare the new header against saved profiles: ~80%
+      similar → "This looks like an updated mBank format (2 columns changed). Update
+      mBank or save as new?" Old profile is KEPT either way (matching is by
+      fingerprint, so profiles coexist under one bank) — re-downloaded historical
+      statements arrive in the format of their era and still parse silently.
+- [ ] **Feeds dedup v2** — the profile's optional time column supplies HH:MM to the
+      strict dedup key (see dedup v2 "timestamp in key" item); statement imports become
+      immune to same-day identical-transaction collisions.
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
