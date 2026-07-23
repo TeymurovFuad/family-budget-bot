@@ -551,6 +551,23 @@ write paths — commit 309df08.
       and repeats the same failing rename. Not a data-loss risk, just log spam — give up after one
       retry or alert distinctly instead of looping silently.
 
+## Follow-up: budget cycles review notes (pre-PR verify, 2026-07-24)
+
+- [ ] **Bare `/cycle` (read-only status) is write-gated** — non-owner allowed users
+      cannot view the current cycle; consider `@auth` for the no-arg path and
+      `auth_write` only for `started`. (handlers/cycle.py)
+- [ ] **Timezone inconsistency** — reports.`_current_cycle_bounds` uses
+      `now_utc().date()` while handlers/cycle.py uses `datetime.now(TIMEZONE)`;
+      near midnight the "today" bound and the prompt-day can disagree by one day.
+- [ ] **Sync workbook I/O in async handlers** — `load_cycles()` /
+      `should_prompt_new_cycle()` block the event loop; matters mainly on remote
+      storage backends.
+- [ ] **Duplicate boundary still re-uploads on remote backends** —
+      `record_cycle_start` returning False inside `ExcelFileContext` triggers an
+      unnecessary upload of an unchanged workbook.
+- [ ] **Callback "yes" date not re-validated against future dates** — currently
+      unreachable but cheap to harden. (handlers/cycle.py)
+
 ## Follow-up PR: budget cycles — agreed design (brainstorm 2026-07-22)
 
 Goal: restore the user's pre-bot salary-period tracking. Salary arrives around the 25th
