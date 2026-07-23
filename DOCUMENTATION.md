@@ -340,6 +340,30 @@ A `.txt` upload that looks column-structured (consistent delimiter) enters
 the same profile flow; a plain-text receipt falls through to the normal AI
 path.
 
+**Split debit/credit columns.** Some banks export two separate amount columns
+instead of one signed column — a debit column for money out and a credit
+column for money in. Map `debit` (expense) and `credit` (income) instead of a
+single `amount` and the bot handles the rest: the transaction type is inferred
+automatically from which column holds the value, rows where both columns are
+empty are skipped, and if a row somehow has values in both, the debit wins and
+a warning is logged.
+
+**Reading the mapping proposal.** The proposal message is split into three
+sections so you can see at a glance what still needs attention:
+
+- **Required** — fields the profile cannot work without: ✅ mapped, ❌ still
+  missing.
+- **Optional** — nice-to-have fields (description, time): ✅ mapped, ➖ not
+  mapped (fine to leave).
+- **Ignored** — statement columns that map to nothing; they're simply skipped.
+
+A profile is valid once it has a date column, a currency, and an amount —
+either a single `amount` column or the `debit` + `credit` pair.
+
+**Managing saved profiles.** `/bulk profile list` shows every saved profile
+with an inline delete button next to each; `/bulk profile delete <name>`
+deletes one directly. Both are owner-only, like all write commands.
+
 **Drafts survive interruptions.** The draft is stored per user on disk, so if
 the review session times out (30 minutes) or the bot restarts, just run
 `/bulk` again and it resumes where you left off. A draft holds at most 50
