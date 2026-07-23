@@ -231,7 +231,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/range` | Report for a custom date range (preset buttons or typed dates) |
 | `/rates` | Exchange rates (`/rates refresh` fetches live rates) |
 | `/add` | Log a new transaction step by step |
-| `/bulk` | Import many transactions at once from a photo, .txt file, or pasted text |
+| `/bulk` | Import many transactions at once from a photo, CSV/XLSX bank statement, .txt file, or pasted text |
 | `/edit` | Edit a field on one of the last 10 transactions |
 | `/delete` | Remove one of the last 5 transactions |
 | `/setcurrency EUR` | Switch display currency for this session |
@@ -277,7 +277,8 @@ Import a whole bank statement or receipt in one go:
 
 1. Send `/bulk`. If you have an unfinished draft, the bot shows it immediately
    for review — no need to re-upload anything.
-2. Otherwise send a **photo**, a **plain-text file (.txt)**, or **pasted text**.
+2. Otherwise send a **photo**, a **CSV/XLSX bank statement**, a **plain-text
+   file (.txt)**, or **pasted text**.
 3. Large statements are parsed in chunks — the bot tells you up front
    ("I'll parse it in N parts") and merges the results.
 4. The AI output is auto-validated against the Lists sheet:
@@ -322,6 +323,20 @@ MasterData before showing the preview:
 - **Identical rows within one batch** (e.g. three 2 PLN car-wash payments
   same day): all are kept by default and annotated. Reply `drop N` to remove
   one if it's a scan error.
+
+**Bank-statement profiles (CSV/XLSX).** The first time you upload a statement
+export from your bank, the bot makes one AI call to guess which column is the
+date, amount, currency, and description (sample rows are masked before they
+leave your machine — amounts and account numbers are replaced with `***`).
+It shows you the proposed mapping; you can fix any column with the inline
+buttons, then give the profile a name and save it. From then on, every
+statement with the same columns is recognized instantly — no AI call, no
+questions, the preview opens directly with a "📄 Parsed with profile ..." line.
+Profiles are stored per user on the bot's disk (`data/statement_profiles/`),
+never in the repository, so no bank names or account details are shared.
+A `.txt` upload that looks column-structured (consistent delimiter) enters
+the same profile flow; a plain-text receipt falls through to the normal AI
+path.
 
 **Drafts survive interruptions.** The draft is stored per user on disk, so if
 the review session times out (30 minutes) or the bot restarts, just run
