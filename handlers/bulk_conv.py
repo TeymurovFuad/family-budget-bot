@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_text, parse_image, _chunk_statement_text
 from config import auth, auth_write, log
-from data import load_dedup_keys, load_reference_data
+from data import load_dedup_evidence, load_reference_data
 import settings
 from excel_ops import async_append_batch
 import merchant_map
@@ -22,6 +22,7 @@ from validators import (
     clean_merchant_description,
     coerce_bool,
     make_dedup_key,
+    make_loose_dedup_key,
     parse_amount,
     validate_parsed_row,
 )
@@ -98,49 +99,227 @@ def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
 
 
 def _row_dedup_key(row: dict) -> str:
-    """Dedup key for one draft row — same recipe as MasterData keys."""
+    """Strict dedup key for one draft row — same recipe as MasterData keys."""
     return make_dedup_key(
         row.get("date"), row.get("value"), row.get("currency", "PLN"), row.get("description"),
     )
 
 
-def _flag_master_duplicates(rows: list[dict]) -> int:
+def _row_loose_dedup_key(row: dict) -> str:
+    """Loose dedup key (date|value|currency, no description) — advisory only."""
+    return make_loose_dedup_key(row.get("date"), row.get("value"), row.get("currency", "PLN"))
+
+
+def _fmt_row_numbers(nums: list[int]) -> str:
+    """Render a list of 1-based row numbers as compact ranges: [4,5,6] -> '4-6'."""
+    if not nums:
+        return ""
+    nums = sorted(nums)
+    ranges = []
+    start = prev = nums[0]
+    for n in nums[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append(f"{start}-{prev}" if prev != start else str(start))
+        start = prev = n
+    ranges.append(f"{start}-{prev}" if prev != start else str(start))
+    return ", ".join(ranges)
+
+
+def _fmt_short_date(date_iso: str) -> str:
+    """'2024-05-12' -> '12 May' — matches the acceptance-criteria wording."""
+    try:
+        return date.fromisoformat(str(date_iso)[:10]).strftime("%-d %b")
+    except Exception:
+        try:
+            # Windows strftime has no %-d.
+            return date.fromisoformat(str(date_iso)[:10]).strftime("%#d %b")
+        except Exception:
+            return str(date_iso)
+
+
+def _flag_master_duplicates(rows: list[dict]) -> dict:
     """
-    Mark draft rows already present in MasterData: row['dup'] = True.
-    Flagged rows are skipped at save unless the user overrides with `N keep`
-    (row['dup_keep']). Returns how many rows are currently flagged.
+    Two-pass, count-aware scan of the draft against MasterData (dedup v2):
+
+    Pass 1 (strict key: date|value|currency|cleaned-description) drives all
+    automatic skip/keep behaviour and is COUNT-AWARE (multiset, not set) —
+    if the batch has 3 identical rows and MasterData already has 2 in range,
+    only the excess (2) is flagged; the rest (1) is treated as new. Rows
+    flagged this way get row['dup'] = True unless overridden with `keep N`
+    (row['dup_keep']). Within-batch identical rows with NO MasterData match
+    are kept by default and annotated (row['identical_group']).
+
+    Pass 2 (loose key: date|value|currency, no description) runs only on
+    rows pass 1 left as new. It NEVER auto-skips — a match only sets
+    row['loose_dup'] = True plus the matched entry's date/description, shown
+    as an advisory in the preview. Reuses the same MasterData read as pass 1.
+
+    Returns a summary dict used to build the user-facing messages:
+        {
+          "flagged": int,                 # rows skipped (dup, not dup_keep)
+          "skip_groups": [ {...}, ... ],   # count-aware skip groups, g > 1
+          "single_skips": [ {...}, ... ],  # count-aware skip groups, g == 1
+          "identical_groups": [ [1-based row numbers], ... ],
+          "loose_matches": [ {...}, ... ],
+        }
     """
+    summary = {
+        "flagged": 0, "skip_groups": [], "single_skips": [],
+        "identical_groups": [], "loose_matches": [],
+    }
     if not rows:
-        return 0
+        return summary
+
+    for row in rows:
+        row.pop("dup", None)
+        row.pop("dup_evidence_date", None)
+        row.pop("identical_group", None)
+        row.pop("loose_dup", None)
+        row.pop("loose_other_date", None)
+        row.pop("loose_other_desc", None)
+
     row_dates = []
     for row in rows:
         try:
             row_dates.append(date.fromisoformat(str(row.get("date", "")).strip()[:10]))
         except ValueError:
             pass
-    existing = load_dedup_keys(
+    evidence = load_dedup_evidence(
         min(row_dates) if row_dates else None,
         max(row_dates) if row_dates else None,
     )
-    flagged = 0
-    for row in rows:
+    strict_evidence = evidence.get("strict", {})
+    loose_evidence = evidence.get("loose", {})
+
+    # ── pass 1: strict, count-aware ──────────────────────────────────────────
+    groups: dict[str, list[int]] = {}
+    for idx, row in enumerate(rows):
         if row.get("dup_keep"):
-            row.pop("dup", None)
             continue
-        if _row_dedup_key(row) in existing:
-            row["dup"] = True
-            flagged += 1
-        else:
-            row.pop("dup", None)
-    return flagged
+        groups.setdefault(_row_dedup_key(row), []).append(idx)
+
+    for key, idxs in groups.items():
+        g = len(idxs)
+        m = len(strict_evidence.get(key, []))
+        skip_n = min(g, m)
+        if skip_n <= 0:
+            if g > 1:
+                nums = [i + 1 for i in idxs]
+                for i in idxs:
+                    rows[i]["identical_group"] = nums
+                summary["identical_groups"].append(nums)
+            continue
+        flagged_idxs = idxs[:skip_n]
+        example_date = strict_evidence[key][0][0]
+        for i in flagged_idxs:
+            rows[i]["dup"] = True
+            rows[i]["dup_evidence_date"] = example_date
+        summary["flagged"] += skip_n
+        entry = {
+            "group_size": g, "master_count": m, "skip_n": skip_n,
+            "flagged_rows": [i + 1 for i in flagged_idxs],
+            "kept_rows": [i + 1 for i in idxs[skip_n:]],
+            "example_date": example_date,
+        }
+        (summary["single_skips"] if g == 1 else summary["skip_groups"]).append(entry)
+
+    # ── pass 2: loose, advisory only ─────────────────────────────────────────
+    for idx, row in enumerate(rows):
+        if row.get("dup") or row.get("dup_keep"):
+            continue
+        lkey = _row_loose_dedup_key(row)
+        loose_hits = loose_evidence.get(lkey)
+        if not loose_hits:
+            continue
+        other_date, other_desc = loose_hits[0]
+        row["loose_dup"] = True
+        row["loose_other_date"] = other_date
+        row["loose_other_desc"] = other_desc
+        summary["loose_matches"].append({
+            "row": idx + 1,
+            "value": row.get("value"), "currency": row.get("currency", "PLN"),
+            "description": row.get("description", ""), "date": row.get("date", ""),
+            "other_date": other_date, "other_desc": other_desc,
+        })
+
+    return summary
+
+
+def _format_dedup_messages(summary: dict) -> list[str]:
+    """
+    Turn a _flag_master_duplicates() summary into the user-facing messages
+    (BACKLOG "dedup v2 — agreed design"). Every automatic decision is
+    reported with its reasoning and a one-command override — nothing this
+    feature does is silent.
+    """
+    messages: list[str] = []
+
+    for entry in summary["single_skips"]:
+        n = entry["flagged_rows"][0]
+        messages.append(
+            f"↺ row {n}: matches an entry saved {_fmt_short_date(entry['example_date'])}. "
+            f"Skipping. Reply `keep {n}` if this is a separate payment."
+        )
+
+    for entry in summary["skip_groups"]:
+        g, m, skip_n = entry["group_size"], entry["master_count"], entry["skip_n"]
+        saved = g - skip_n
+        messages.append(
+            f"↺ {g} identical rows found (rows {_fmt_row_numbers(entry['flagged_rows'] + entry['kept_rows'])}), "
+            f"{m} already in your sheet → saving {saved}, skipping {skip_n} "
+            f"(row(s) {_fmt_row_numbers(entry['flagged_rows'])}). "
+            f"Reply `keep {_fmt_row_numbers(entry['flagged_rows'])}` or `keep all flagged` "
+            f"if these are new payments."
+        )
+
+    for nums in summary["identical_groups"]:
+        messages.append(
+            f"rows {_fmt_row_numbers(nums)} are identical — keeping all {len(nums)}; "
+            f"reply `drop N` if one is a scan error."
+        )
+
+    loose = summary["loose_matches"]
+    if loose:
+        lines = ["⚠️ Possible duplicates (matched on date+amount, but description differs):"]
+        for m in loose[:10]:
+            lines.append(
+                f"row {m['row']}: {m['value']} {m['currency']} '{m['description']}' "
+                f"({_fmt_short_date(m['date'])}) ↔ existing: {m['value']} {m['currency']} "
+                f"'{m['other_desc']}' ({_fmt_short_date(m['other_date'])})."
+            )
+        more = f"\n… and {len(loose) - 10} more" if len(loose) > 10 else ""
+        row_nums = [m["row"] for m in loose]
+        lines.append(
+            f"Saving them. Reply `drop {_fmt_row_numbers(row_nums)}` "
+            f"if any of these are the same payment.{more}"
+        )
+        # Mass loose-match hint — bank likely reformatted descriptions between
+        # exports; offer the one-command bulk override.
+        total_new = sum(
+            len(g) for g in summary["identical_groups"]
+        ) + len(loose) + sum(e["skip_n"] for e in summary["skip_groups"] + summary["single_skips"])
+        if len(loose) >= 3 and total_new and len(loose) >= total_new // 2:
+            lines.append(
+                "Most rows in this batch loose-matched an existing entry (likely a "
+                "reformatted export). Reply `drop all flagged` to drop them all at once."
+            )
+        messages.append("\n".join(lines))
+
+    return messages
 
 
 def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int]:
     """
-    Merge new rows into the pending draft, skipping exact duplicates (same
-    dedup key) of rows already in the draft or earlier in the same batch —
-    uploading the same photo twice must not double every row.
-    Returns (merged draft, number of duplicate rows skipped).
+    Merge new rows into the pending draft. Within-batch/within-draft repeats
+    are KEPT by default (dedup v2 inverts PR #7's hard skip here — repetition
+    inside one source is almost always real, e.g. several 2 PLN car-wash
+    payments on the same day, or the same photo re-sent). They are annotated
+    as an identical group in the preview instead (see _flag_master_duplicates),
+    and MasterData-level dedup still applies once they're actually saved.
+    Returns (merged draft, 0) — the second element is kept for API
+    compatibility with callers that used to report a skip count.
     """
     previous = _load_user_draft(user_id)
     if not isinstance(previous, list):
@@ -150,23 +329,13 @@ def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int
         row = dict(item)
         row.setdefault("status", "pending")
         normalized_previous.append(row)
-    seen = {_row_dedup_key(row) for row in normalized_previous}
-    fresh = []
-    skipped = 0
-    for item in parsed:
-        key = _row_dedup_key(item)
-        if key in seen:
-            skipped += 1
-            continue
-        seen.add(key)
-        fresh.append(dict(item))
+    fresh = [dict(item) for item in parsed]
     merged = _sort_bulk_rows(normalized_previous + fresh)
     for item in merged:
         item.setdefault("status", "pending")
     _save_bulk_draft(user_id, merged)
-    log.info("User %s bulk draft updated: %d pending entries (%d duplicates skipped)",
-             user_id, len(merged), skipped)
-    return merged, skipped
+    log.info("User %s bulk draft updated: %d pending entries", user_id, len(merged))
+    return merged, 0
 
 
 # Maximum rows a pending draft may hold before new imports are refused.
@@ -306,15 +475,41 @@ def _md_escape(text: str) -> str:
     return re.sub(r"([_*`\[\]])", r"\\\1", str(text))
 
 
+def _bulk_footer(parsed: list[dict]) -> str:
+    """
+    Contextual command footer — content adapts to what's actually flagged in
+    THIS draft, so a user with no duplicates never reads a word about
+    duplicates (BACKLOG "Contextual command footer — show only what applies").
+    """
+    lines = [
+        "✏️ Reply with edits like `2 category=Transport`, `drop 3`, `keep 3`, `drop 4-6`.\n"
+        "Send `save` to store them all, or `cancel` to stop."
+    ]
+
+    dup_rows = [i for i, t in enumerate(parsed, 1) if t.get("dup") and not t.get("dup_keep")]
+    if dup_rows:
+        example = _fmt_row_numbers(dup_rows)
+        lines.append(
+            f"↺ {len(dup_rows)} row(s) skipped as already imported — "
+            f"`keep {dup_rows[0]}`, `keep {example}`, or `keep all flagged` to save them anyway."
+        )
+
+    loose_rows = [i for i, t in enumerate(parsed, 1) if t.get("loose_dup")]
+    if loose_rows:
+        lines.append(
+            f"⚠️ {len(loose_rows)} possible duplicate(s) flagged above (saved by default) — "
+            f"`drop {loose_rows[0]}` or `drop all flagged` to remove them."
+        )
+
+    return "\n".join(lines)
+
+
 def _format_bulk_preview(parsed: list[dict]) -> list[str]:
     """
     Render the draft preview as a LIST of messages, each under Telegram's
     length limit. Row numbers are stable across all pages.
     """
-    footer = (
-        "\nReply with edits like: `2 category=Transport` or `1 description=Lunch`\n"
-        "Send `save` to store them all, or `cancel` to stop."
-    )
+    footer = "\n" + _bulk_footer(parsed)
     row_lines = []
     for i, t in enumerate(parsed, 1):
         person = t.get("person") or ""
@@ -324,14 +519,31 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         mem_suffix = " 🧠" if t.get("mem") else ""
         invalid = t.get("invalid") or ""
         invalid_suffix = f"\n   ⚠️ {_md_escape(invalid)} (won't be saved — edit it first)" if invalid else ""
+        dropped_suffix = (
+            f"\n   ❌ dropped — reply `keep {i}` to restore" if t.get("dropped") else ""
+        )
         dup_suffix = (
-            f"\n   ↺ likely already imported (skipped — reply `{i} keep` to save anyway)"
+            f"\n   ↺ matches an entry saved {_md_escape(_fmt_short_date(t.get('dup_evidence_date', '')))} "
+            f"— already imported (skipped — reply `keep {i}` to save anyway)"
             if t.get("dup") and not t.get("dup_keep") else ""
+        )
+        loose_suffix = (
+            f"\n   ⚠️ possible duplicate: matches {_md_escape(_fmt_short_date(t.get('loose_other_date', '')))} "
+            f"'{_md_escape(t.get('loose_other_desc', ''))}' but description differs "
+            f"— saving (reply `drop {i}` if it's the same payment)"
+            if t.get("loose_dup") else ""
+        )
+        identical = t.get("identical_group") or []
+        identical_suffix = (
+            f"\n   ↔ rows {_fmt_row_numbers(identical)} are identical — keeping all "
+            f"{len(identical)} (reply `drop {i}` if this one's a scan error)"
+            if identical else ""
         )
         row_lines.append(
             f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
-            f"{mem_suffix}{type_suffix}{person_suffix}{invalid_suffix}{dup_suffix}"
+            f"{mem_suffix}{type_suffix}{person_suffix}{invalid_suffix}"
+            f"{dup_suffix}{loose_suffix}{identical_suffix}{dropped_suffix}"
         )
 
     messages = []
@@ -370,6 +582,86 @@ async def _send_bulk_preview(update: Update, parsed: list[dict]) -> None:
             )
 
 
+_RANGE_TOKEN_RE = re.compile(r"^(\d+)(?:-(\d+))?$")
+_ROW_COMMAND_RE = re.compile(r"^(drop|keep)\s+(.+)$", re.IGNORECASE)
+
+
+def _parse_row_targets(args: str, n: int) -> list[int] | None:
+    """
+    Parse space-separated row targets ('4', '4 6', '4-6 9 12') into a sorted
+    list of 0-based indices, bounds-checked against n rows. Returns None if
+    nothing valid parses (caller reports "invalid").
+    """
+    idxs: set[int] = set()
+    for tok in args.split():
+        m = _RANGE_TOKEN_RE.match(tok)
+        if not m:
+            return None
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else a
+        if a > b:
+            a, b = b, a
+        for v in range(a, b + 1):
+            if 1 <= v <= n:
+                idxs.add(v - 1)
+    return sorted(idxs) if idxs else None
+
+
+def _apply_row_command(text: str, parsed: list[dict]) -> tuple[bool, str, list[str]] | None:
+    """
+    Unified `drop` / `keep` row-command grammar (BACKLOG dedup v2): targets
+    `N`, `N M`, `N-M`, `all`, `all flagged`. One parser for every preview
+    state (dedup skip flags, loose-match advisory, manual pruning).
+
+    `all flagged` SCOPES to the block it answers: `keep all flagged` acts
+    only on rows skipped as MasterData duplicates (row['dup']); `drop all
+    flagged` acts only on the loose-match advisory rows (row['loose_dup']).
+    Plain `drop all` / `keep all` act on the whole batch.
+
+    Returns None if `text` isn't a drop/keep command (caller falls through to
+    the single-row `N field=value` grammar). Otherwise returns the same
+    (save, reason, notes) contract as _apply_bulk_edit.
+    """
+    m = _ROW_COMMAND_RE.match(text.strip())
+    if not m:
+        return None
+    verb = m.group(1).lower()
+    args = m.group(2).strip().lower()
+    n = len(parsed)
+
+    if args == "all flagged":
+        if verb == "keep":
+            idxs = [i for i, r in enumerate(parsed) if r.get("dup") and not r.get("dup_keep")]
+        else:
+            idxs = [i for i, r in enumerate(parsed) if r.get("loose_dup")]
+        if not idxs:
+            return False, "invalid", []
+    elif args == "all":
+        idxs = list(range(n))
+    else:
+        idxs = _parse_row_targets(args, n)
+        if idxs is None:
+            return False, "invalid", []
+
+    notes: list[str] = []
+    for i in idxs:
+        row = parsed[i]
+        if verb == "keep":
+            if row.get("dup") and not row.get("dup_keep"):
+                row["dup_keep"] = True
+                row.pop("dup", None)
+                notes.append(f"row {i + 1}: will be saved even though it looked already imported")
+            elif row.get("dropped"):
+                row.pop("dropped", None)
+                notes.append(f"row {i + 1}: restored")
+        else:
+            if not row.get("dropped"):
+                row["dropped"] = True
+                notes.append(f"row {i + 1}: dropped — won't be saved")
+
+    return False, "edited", notes
+
+
 def _apply_bulk_edit(
     message: str, parsed: list[dict], lists: dict | None = None
 ) -> tuple[bool, str, list[str]]:
@@ -385,9 +677,15 @@ def _apply_bulk_edit(
     if normalized in {"cancel", "no"}:
         return False, "cancel", []
 
-    keep_match = re.match(r"^(\d+)\s+keep$", normalized)
-    if keep_match:
-        idx = int(keep_match.group(1)) - 1
+    row_command = _apply_row_command(text, parsed)
+    if row_command is not None:
+        return row_command
+
+    # Backward-compatible single-row "N keep" (pre-dedup-v2 grammar) — same
+    # effect as the new "keep N".
+    legacy_keep_match = re.match(r"^(\d+)\s+keep$", normalized)
+    if legacy_keep_match:
+        idx = int(legacy_keep_match.group(1)) - 1
         if not (0 <= idx < len(parsed)):
             return False, "invalid", []
         if not parsed[idx].get("dup"):
@@ -458,14 +756,16 @@ async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Resume an unfinished draft directly — no need to re-upload anything.
     draft = _load_user_draft(update.effective_user.id)
     if isinstance(draft, list) and draft:
-        if _flag_master_duplicates(draft):
-            _save_bulk_draft(update.effective_user.id, draft)
+        summary = _flag_master_duplicates(draft)
+        _save_bulk_draft(update.effective_user.id, draft)
         ctx.user_data["bulk_parsed"] = draft
         await update.message.reply_text(
             f"📋 You have an unfinished draft with {len(draft)} transaction(s). "
             f"Review it below — `save` to store, `cancel` to discard, "
             f"or edit rows first."
         )
+        for msg in _format_dedup_messages(summary):
+            await update.message.reply_text(msg)
         await _send_bulk_preview(update, draft)
         return BULK_CONFIRM
 
@@ -562,30 +862,25 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return BULK_CONFIRM
 
     parsed = _sort_bulk_rows(parsed)
-    draft_rows, merge_skipped = _merge_bulk_draft(uid, parsed)
+    pre_merge_len = len(_load_user_draft(uid))
+    draft_rows, _ = _merge_bulk_draft(uid, parsed)
     ctx.user_data["bulk_parsed"] = draft_rows
     log.info("User %s bulk parse completed: %d items (src=%s)", update.effective_user.id, len(parsed), src)
-    if merge_skipped:
+    merged_in = pre_merge_len
+    if merged_in > 0:
         await update.message.reply_text(
-            f"↺ {merge_skipped} row(s) skipped as already imported: already in this draft "
-            f"(likely the same photo/text sent twice)."
+            f"ℹ️ {merged_in} row(s) from a previous draft were merged in. "
+            f"The preview below is the full set that `save` will store.",
+            parse_mode="Markdown",
         )
-    if len(draft_rows) > len(parsed) - merge_skipped:
-        merged_in = len(draft_rows) - (len(parsed) - merge_skipped)
-        if merged_in > 0:
-            await update.message.reply_text(
-                f"ℹ️ {merged_in} row(s) from a previous draft were merged in. "
-                f"The preview below is the full set that `save` will store.",
-                parse_mode="Markdown",
-            )
 
-    dup_count = _flag_master_duplicates(draft_rows)
-    if dup_count:
+    # Two-pass, count-aware scan against MasterData — also picks up within-batch
+    # repeats (kept by default) since it runs on the full merged draft.
+    summary = _flag_master_duplicates(draft_rows)
+    if summary["flagged"] or summary["identical_groups"] or summary["loose_matches"]:
         _save_bulk_draft(uid, draft_rows)
-        await update.message.reply_text(
-            f"↺ {dup_count} row(s) skipped as already imported: they look like they're already "
-            f"in MasterData. Reply `N keep` (e.g. `3 keep`) to save one anyway."
-        )
+        for msg in _format_dedup_messages(summary):
+            await update.message.reply_text(msg)
 
     # Preview the MERGED draft — exactly what `save` will write.
     await _send_bulk_preview(update, draft_rows)
@@ -641,12 +936,12 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = _sort_bulk_rows(parsed)
     ctx.user_data["bulk_parsed"] = parsed
 
-    # Re-check against MasterData right before writing (the flag set at
-    # preview time may be stale) and against duplicates within this same
-    # batch — both are reported to the user, never silently dropped.
+    # Re-check against MasterData right before writing (the flags set at
+    # preview time may be stale) — count-aware, so within-batch repeats that
+    # aren't real MasterData duplicates are saved, never silently dropped.
     _flag_master_duplicates(parsed)
     skipped_dups: list[int] = []
-    seen_batch_keys: set[str] = set()
+    dropped_rows: list[int] = []
 
     transactions  = []
     errors        = []
@@ -656,11 +951,9 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if item.get("dup") and not item.get("dup_keep"):
             skipped_dups.append(i)
             continue
-        key = _row_dedup_key(item)
-        if key in seen_batch_keys and not item.get("dup_keep"):
-            skipped_dups.append(i)
+        if item.get("dropped"):
+            dropped_rows.append(i)
             continue
-        seen_batch_keys.add(key)
         try:
             if item.get("invalid"):
                 raise ValueError(item["invalid"])
@@ -722,6 +1015,10 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         nums = ", ".join(f"#{n}" for n in skipped_dups[:10])
         more = f", … and {len(skipped_dups) - 10} more" if len(skipped_dups) > 10 else ""
         msg += f"\n\n↺ {len(skipped_dups)} row(s) skipped as already imported: {nums}{more}"
+    if dropped_rows and not write_failed:
+        nums = ", ".join(f"#{n}" for n in dropped_rows[:10])
+        more = f", … and {len(dropped_rows) - 10} more" if len(dropped_rows) > 10 else ""
+        msg += f"\n\n❌ {len(dropped_rows)} row(s) dropped as requested: {nums}{more}"
     if errors:
         msg += "\n\n⚠️ Errors:\n" + "\n".join(errors[:5])
     if failed_items and not write_failed:
