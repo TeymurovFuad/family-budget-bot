@@ -44,6 +44,18 @@ Read at session start. Apply silently.
 - Create a separate PR for every logically distinct change. Never add unrelated improvements to an existing open PR.
 - Before deleting any branch, run `git worktree list` and remove associated worktrees first.
 
+## Parallel agent isolation
+<!-- 2026-07-22 -->
+- Never spawn two Developer (or other file-editing) agents concurrently against the same shared worktree directory — a second agent's `git checkout -b` silently carries the first agent's uncommitted, in-progress files onto its new branch, entangling both diffs.
+- Caught live: a recovery-queue-fix agent and an export-command agent both ran in the same worktree; the second agent's branch checkout picked up the first agent's uncommitted changes. Recovered only because the touched files happened not to overlap — overlapping edits would have caused silent corruption or lost work.
+- To run truly parallel file-editing agents for separate PRs: give each its own `git worktree add` (separate directory + checkout), not a shared worktree with different branch names.
+- If forced to share one worktree, run file-editing agents sequentially, and run `git status`/`git diff` immediately after each one reports before trusting its branch is clean.
+
+## Backlog and design capture
+<!-- 2026-07-22 -->
+- Brainstorm conclusions are committed to BACKLOG.md immediately in a small docs-only PR — never held in conversation context waiting for the implementation.
+- The implementing feature PR carries its own backlog check-offs and any design corrections discovered while building. No separate backlog-update PRs trail behind features.
+
 ## Blocker handling
 <!-- 2026-05-20 -->
 - When any role hits an environment blocker, instruct it to find a workaround first — never let it surface the blocker as a user task.
