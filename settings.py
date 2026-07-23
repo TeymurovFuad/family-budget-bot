@@ -75,3 +75,5 @@ except ValueError:
 
 BUDGET_CYCLE = bool(int(os.getenv("BUDGET_CYCLE", "0")))
 CYCLE_PROMPT_COOLDOWN_DAYS = 20
+# Public name for the income category that triggers cycle prompts.
+SALARY_CATEGORY = "Salary"

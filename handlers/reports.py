@@ -12,6 +12,7 @@ import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+import settings
 from config import auth, get_display_currency, SAVINGS_TARGET, log
 from log_decorators import log_call
 from data import (
@@ -31,11 +32,8 @@ def _build_cycle_block(df: "pd.DataFrame") -> str:
     cycle boundary exists.  Returns an empty string when the block should be
     omitted (no boundary recorded, or read error).
     """
-    import settings as _s
-    if not _s.BUDGET_CYCLE:
+    if not settings.BUDGET_CYCLE:
         return ""
-
-    from handlers.cycle import _SALARY_CATEGORY
 
     last_cycle = get_last_cycle_boundary(get_excel_path_for_reading())
     if last_cycle is None:
@@ -45,14 +43,15 @@ def _build_cycle_block(df: "pd.DataFrame") -> str:
     budgets     = load_budgets_from_excel(get_excel_path_for_reading())
     total_budget = sum(budgets.values())
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    cycle_sub = df[(df["Date"].dt.date >= cycle_date) & df["IsDone"]]
+    df_copy = df.copy()
+    df_copy["Date"] = pd.to_datetime(df_copy["Date"], errors="coerce")
+    cycle_sub = df_copy[(df_copy["Date"].dt.date >= cycle_date) & df_copy["IsDone"]]
 
     cycle_expense = cycle_sub[cycle_sub["Type"] == "Expense"]["_pln"].sum()
     cycle_savings = cycle_sub[cycle_sub["Type"] == "Savings"]["_pln"].sum()
     cycle_salary  = cycle_sub[
         (cycle_sub["Type"] == "Income") &
-        (cycle_sub["Category"].str.lower() == _SALARY_CATEGORY)
+        (cycle_sub["Category"].str.lower() == settings.SALARY_CATEGORY.lower())
     ]["_pln"].sum()
     unaccounted = cycle_salary - cycle_expense - cycle_savings
     unaccounted_marker = "✅" if unaccounted >= 0 else "❌"
@@ -94,16 +93,18 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     net_line = (f"✅ *Net:* {format_pln_as_currency(net, ccy, rates)}" if net >= 0
                 else f"⚠️ *Net:* {format_pln_as_currency(net, ccy, rates)}")
 
-    await update.message.reply_text(
+    summary_text = (
         f"📊 *{month} {year} — Summary* ({ccy})\n\n"
         f"💰 Income:   `{format_pln_as_currency(income, ccy, rates)}`\n"
         f"💸 Expenses: `{format_pln_as_currency(expense, ccy, rates)}`\n"
         f"🏦 Savings:  `{format_pln_as_currency(savings, ccy, rates)}`\n"
         f"{net_line}\n\n"
         f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*\n"
-        f"📈 Projected month-end spend: `{format_pln_as_currency(projected, ccy, rates)}`",
-        parse_mode="Markdown",
+        f"📈 Projected month-end spend: `{format_pln_as_currency(projected, ccy, rates)}`"
     )
+    if settings.BUDGET_CYCLE:
+        summary_text += _build_cycle_block(df)
+    await update.message.reply_text(summary_text, parse_mode="Markdown")
 
 
 @auth

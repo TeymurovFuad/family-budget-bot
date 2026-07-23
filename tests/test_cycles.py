@@ -350,3 +350,171 @@ class TestMaybePromptCycle:
         update.message.reply_text.assert_called_once()
         call_args = update.message.reply_text.call_args[0][0]
         assert "23 Jul 2026" in call_args
+
+
+class TestHandleCyclePromptResponse:
+    """Tests for handle_cycle_prompt_response."""
+
+    def _make_update(self, text="yes"):
+        update = MagicMock()
+        update.message.text = text
+        update.message.reply_text = AsyncMock()
+        return update
+
+    def _make_ctx(self, pending=None, include_key=True):
+        ctx = MagicMock()
+        ctx.user_data = {}
+        if include_key:
+            ctx.user_data["cycle_prompt_pending"] = pending or {"date": datetime.date(2026, 7, 23)}
+        return ctx
+
+    async def test_no_key_returns_silently(self):
+        """When cycle_prompt_pending absent, handler returns without error."""
+        from handlers.cycle import handle_cycle_prompt_response
+        ctx = self._make_ctx(include_key=False)
+        update = self._make_update("yes")
+        await handle_cycle_prompt_response(update, ctx)
+        update.message.reply_text.assert_not_called()
+
+    async def test_no_reply_skips_cycle(self):
+        """text == no -> keyboard removed, no cycle recorded."""
+        from handlers.cycle import handle_cycle_prompt_response
+        with patch("file_storage.append_cycle_boundary") as mock_acb:
+            ctx = self._make_ctx()
+            update = self._make_update("no")
+            await handle_cycle_prompt_response(update, ctx)
+        mock_acb.assert_not_called()
+        update.message.reply_text.assert_called_once()
+        assert "cycle_prompt_pending" not in ctx.user_data
+
+    async def test_yes_calls_append_with_txn_date(self):
+        """text == yes -> append_cycle_boundary called with txn_date."""
+        from handlers.cycle import handle_cycle_prompt_response
+        txn_date = datetime.date(2026, 7, 23)
+        with patch("file_storage.append_cycle_boundary") as mock_acb:
+            ctx = self._make_ctx({"date": txn_date})
+            update = self._make_update("yes")
+            await handle_cycle_prompt_response(update, ctx)
+        mock_acb.assert_called_once_with(txn_date, "Jul 2026")
+        update.message.reply_text.assert_called_once()
+        assert "cycle_prompt_pending" not in ctx.user_data
+
+    async def test_custom_valid_date_calls_append(self):
+        """Custom valid date -> parsed and append_cycle_boundary called."""
+        from handlers.cycle import handle_cycle_prompt_response
+        txn_date = datetime.date(2026, 7, 23)
+        with patch("file_storage.append_cycle_boundary") as mock_acb, \
+             patch("handlers.cycle.now_utc",
+                   return_value=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)):
+            ctx = self._make_ctx({"date": txn_date})
+            update = self._make_update("5 Aug")
+            await handle_cycle_prompt_response(update, ctx)
+        expected_date = datetime.date(2026, 8, 5)
+        mock_acb.assert_called_once_with(expected_date, "Aug 2026")
+
+    async def test_invalid_date_restores_pending_and_sends_error(self):
+        """Invalid date -> pending restored, error sent."""
+        from handlers.cycle import handle_cycle_prompt_response
+        txn_date = datetime.date(2026, 7, 23)
+        pending = {"date": txn_date}
+        with patch("file_storage.append_cycle_boundary") as mock_acb:
+            ctx = self._make_ctx(pending.copy())
+            update = self._make_update("not-a-date-at-all")
+            await handle_cycle_prompt_response(update, ctx)
+        mock_acb.assert_not_called()
+        assert "cycle_prompt_pending" in ctx.user_data
+        assert ctx.user_data["cycle_prompt_pending"]["date"] == txn_date
+        update.message.reply_text.assert_called_once()
+        call_text = update.message.reply_text.call_args[0][0]
+        assert "Could not parse" in call_text
+
+
+class TestCmdCycle:
+    """Tests for the /cycle command handler."""
+
+    # Matches ALLOWED_TELEGRAM_IDS[0] set by conftest (primary/write user).
+    _PRIMARY_UID = 123
+
+    def _make_update(self):
+        update = MagicMock()
+        update.effective_user.id = self._PRIMARY_UID
+        update.message.reply_text = AsyncMock()
+        return update
+
+    def _make_ctx(self, args=None):
+        ctx = MagicMock()
+        ctx.args = args or []
+        return ctx
+
+    async def test_budget_cycle_off_returns_silently(self, monkeypatch):
+        """BUDGET_CYCLE=False -> returns immediately, no reply."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
+        update = self._make_update()
+        ctx = self._make_ctx(["started"])
+        await cmd_cycle(update, ctx)
+        update.message.reply_text.assert_not_called()
+
+    async def test_no_args_sends_usage(self, monkeypatch):
+        """No arguments -> usage message sent."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+        update = self._make_update()
+        ctx = self._make_ctx([])
+        await cmd_cycle(update, ctx)
+        update.message.reply_text.assert_called_once()
+        assert "Usage" in update.message.reply_text.call_args[0][0]
+
+    async def test_wrong_subcommand_sends_usage(self, monkeypatch):
+        """Wrong subcommand -> usage message."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+        update = self._make_update()
+        ctx = self._make_ctx(["begin"])
+        await cmd_cycle(update, ctx)
+        update.message.reply_text.assert_called_once()
+        assert "Usage" in update.message.reply_text.call_args[0][0]
+
+    async def test_started_no_date_defaults_to_today(self, monkeypatch):
+        """/cycle started no date -> today, calls append_cycle_boundary."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
+        with patch("file_storage.append_cycle_boundary") as mock_acb:
+            update = self._make_update()
+            ctx = self._make_ctx(["started"])
+            await cmd_cycle(update, ctx)
+        mock_acb.assert_called_once_with(datetime.date(2026, 7, 23), "Jul 2026")
+        update.message.reply_text.assert_called_once()
+        assert "2026" in update.message.reply_text.call_args[0][0]
+
+    async def test_started_invalid_date_sends_error(self, monkeypatch):
+        """/cycle started invalid-date -> error reply."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+        update = self._make_update()
+        ctx = self._make_ctx(["started", "not-a-date"])
+        await cmd_cycle(update, ctx)
+        update.message.reply_text.assert_called_once()
+        assert "Could not parse" in update.message.reply_text.call_args[0][0]
+
+    async def test_append_raises_sends_error(self, monkeypatch):
+        """append_cycle_boundary raises -> error reply sent."""
+        import settings
+        from handlers.cycle import cmd_cycle
+        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
+        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
+        with patch("file_storage.append_cycle_boundary", side_effect=RuntimeError("disk full")):
+            update = self._make_update()
+            ctx = self._make_ctx(["started"])
+            await cmd_cycle(update, ctx)
+        update.message.reply_text.assert_called_once()
+        call_text = update.message.reply_text.call_args[0][0]
+        assert "Could not save cycle" in call_text or "disk full" in call_text

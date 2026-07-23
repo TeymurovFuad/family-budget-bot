@@ -1,5 +1,6 @@
 """handlers/cycle.py — /cycle command and salary-save cycle-boundary prompt."""
 
+import asyncio
 import re
 from datetime import date
 
@@ -9,9 +10,6 @@ from telegram.ext import ContextTypes
 import settings
 from config import auth_write, log
 from data import now_utc
-
-# Category name that triggers the cycle prompt (case-insensitive comparison).
-_SALARY_CATEGORY = "salary"
 
 _MONTH_ABBREVS: dict[str, int] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -56,7 +54,7 @@ def is_salary_income(transaction_type: str, category: str) -> bool:
     """True when the transaction is an income entry in the salary category."""
     return (
         transaction_type.strip() == "Income"
-        and category.strip().lower() == _SALARY_CATEGORY
+        and category.strip().lower() == settings.SALARY_CATEGORY.lower()
     )
 
 
@@ -85,7 +83,7 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     label = _cycle_label(cycle_date)
     try:
         from file_storage import append_cycle_boundary
-        append_cycle_boundary(cycle_date, label)
+        await asyncio.to_thread(append_cycle_boundary, cycle_date, label)
     except Exception as e:
         log.exception("Failed to record cycle boundary")
         await update.message.reply_text(f"❌ Could not save cycle: {e}")
@@ -155,7 +153,7 @@ async def handle_cycle_prompt_response(
     label = _cycle_label(cycle_date)
     try:
         from file_storage import append_cycle_boundary
-        append_cycle_boundary(cycle_date, label)
+        await asyncio.to_thread(append_cycle_boundary, cycle_date, label)
     except Exception as e:
         log.exception("Failed to record cycle boundary from prompt")
         await update.message.reply_text(
