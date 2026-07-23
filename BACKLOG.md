@@ -4,6 +4,52 @@ Findings from the whole-team review (Architect, Designer, Developer, PO, fresh-e
 of 2026-07-21 on branch `feat/bulk-import-draft-ordering`. Grouped by planned follow-up PR.
 Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
+## Session handoff — read this first if resuming in a new session
+
+> **Always verify before acting — this note is a snapshot, not live state.**
+> Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
+> `git log --oneline -5` first; trust those over anything written here.
+> Update this section at the end of every session so the next one starts clean.
+> *(Last updated: 2026-07-23)*
+
+### PR state at last update
+- **All PRs #1–#17 merged** (assuming PR #17 lands; verify with `gh pr list`).
+- No open PRs expected. If any appear, check their review status before merging.
+
+### Standing mechanics (doesn't change session to session)
+- **Push/merge**: `fuadteymurov` is NOT a collaborator on
+  `TeymurovFuad/family-budget-bot`. Pushes go to `fork` remote
+  (`fuadteymurov/family-budget-bot`), PRs opened
+  `--head fuadteymurov:branch --base master`. **Merging requires the repo
+  owner** — always ask the user; never assume it can be automated.
+- **Worktree isolation**: always give each parallel file-editing agent its own
+  `git worktree add` — shared worktrees caused branch entanglement this session.
+  See `.claude/memories/orchestrator-memory.md` "Parallel agent isolation".
+- **DeepSeek tokens are paid** — budget ~20 live API calls per debug session;
+  prefer mocked tests. See `.claude/memories/project-memory.md`.
+
+### Next up (priority order — update when items complete)
+  1. **Bank-statement profiles** — biggest remaining designed feature. Full
+     design in "bank-statement profiles — agreed design" section below. Reuses
+     dedup v2's drop/keep grammar; feeds batch-level timestamp disambiguation.
+  2. **Budget cycles + `/summary` picker UX** — touches the workbook (new
+     `Cycles` sheet, `Cycle Dashboard` sheet). Designs in "budget cycles —
+     agreed design" and "/summary picker UX — agreed design" sections below.
+  3. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
+     and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
+     items in "dedup review notes (PR #16, 2026-07-23)"); UX group (person
+     attribution — check overlap with dedup v2 grammar before implementing);
+     token-economy and infra/performance groups.
+  4. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
+     match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
+
+### Recent context
+- Dedup v2 (PR #16) merged 2026-07-23. Five non-blocking findings queued in
+  "dedup review notes (PR #16)" below. DOCUMENTATION.md updated for the new
+  `drop`/`keep` grammar (PR #17).
+- Security/PII audit 2026-07-22: clean. One low-priority nit: `deploy/budget-bot.service`
+  hardcodes `User=ubuntu` — reveals VM OS-user convention, no IP/credentials.
+
 ## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
 
 - [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
@@ -192,6 +238,42 @@ reasoning in the preview, and offers a one-command override.
       Makes categorization deterministic and cuts DeepSeek calls.
       *(done: `merchant_map.py`, JSON at `data/merchant_map.json` via the user-prefs pattern —
       no workbook change; auto-seeds from MasterData on first use; 🧠 markers in the preview)*
+
+## Follow-up: dedup review notes (PR #16, 2026-07-23)
+
+Four non-blocking findings from the PR #16 adversarial review — safe to merge as-is, queued as follow-up:
+
+- [ ] **`_parse_row_targets` inconsistent OOB feedback** — `keep 1 5` on a 1-row draft silently
+      drops the out-of-range `5` rather than reporting it; a lone out-of-range token does error.
+      Unified: any target list with at least one valid index silently ignores OOB extras, but
+      a list with zero valid indices should error consistently.
+      (`handlers/bulk_conv.py` `_parse_row_targets`)
+- [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message
+      phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited
+      BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never
+      improvised"). Deliberate re-alignment pass, not urgent.
+- [ ] **`_bulk_footer` redundant suggestion for single-flagged-row case** — when exactly one row
+      is dup-flagged the footer renders e.g. `keep 3`, `keep 3`, or `keep all flagged` — the first
+      example duplicates the second.
+      (`handlers/bulk_conv.py` `_bulk_footer`)
+- [ ] **`_format_dedup_messages` mass-loose-match-hint denominator is wrong** — it folds
+      already-skipped strict-dup counts into `total_new` (the denominator for the "most rows
+      loose-matched" ratio), undercounting it in mixed strict+loose batches — exactly the
+      bank-reformatted-descriptions scenario the hint exists for. Fix: denominator should be
+      rows the strict pass left as new.
+      (`handlers/bulk_conv.py` `_format_dedup_messages`)
+- [ ] **`bulk_receive` reads the draft file twice** — `pre_merge_len = len(_load_user_draft(uid))`
+      is called immediately before `_merge_bulk_draft`, which calls `_load_user_draft` internally
+      as its first step. On local backend this is negligible; on GCS/S3 it's two network downloads
+      for the same file. Fix: have `_merge_bulk_draft` return the pre-merge count alongside
+      the merged list, or cache the read.
+      (`handlers/bulk_conv.py` `bulk_receive`, `_merge_bulk_draft`)
+- [x] **DOCUMENTATION.md not updated for dedup v2 user-facing grammar** — the `/bulk` section
+      only documents `N field=value`, `save`, and `cancel`. The new `drop N`, `keep N`,
+      `drop 4-6 9`, `keep all flagged`, `drop all flagged`, `drop all`, `keep all` grammar is
+      completely absent, as are the dedup advisory messages and how to respond to them.
+      *(done: "Bulk Import via /bulk" section updated in PR #17 — command table + duplicate
+      detection block covering strict/count-aware, loose advisory, and within-batch behaviour.)*
 
 ## Follow-up: dedup review notes (PR #7, 2026-07-22)
 

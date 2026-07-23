@@ -289,11 +289,39 @@ Import a whole bank statement or receipt in one go:
    Every correction is reported before the preview.
 5. The bot shows a numbered preview, split across several messages for large
    imports (row numbers stay stable across pages), sorted by date.
-6. Edit any row by replying like `2 category=Transport` or
-   `1 description=Lunch` — the preview refreshes after each edit.
+6. Review the preview and reply with commands to adjust it:
+
+   | Command | What it does |
+   |---|---|
+   | `2 category=Transport` | Edit a field on row 2 |
+   | `1 description=Lunch` | Edit the description on row 1 |
+   | `drop 3` | Remove row 3 from this import |
+   | `drop 4 6` | Remove rows 4 and 6 |
+   | `drop 4-6 9` | Remove rows 4, 5, 6, and 9 |
+   | `keep 3` | Restore a dropped row, or force-save a skipped duplicate |
+   | `drop all` | Remove every row |
+   | `keep all` | Restore every row |
+
 7. Send `save` (or `/save` — both work) to write all rows to MasterData.
    The confirmation names the exact destination file (local path or cloud
    object). Send `cancel` to discard the draft.
+
+**Duplicate detection.** The bot automatically compares each row against
+MasterData before showing the preview:
+
+- **Already imported** (strict match — same date, amount, currency, and
+  description): the row is skipped by default and marked `↺` in the preview.
+  Reply `keep N` or `keep all flagged` to save it anyway (e.g. a genuine
+  second payment of the same amount to the same merchant).
+- **Count-aware:** if you upload 3 identical rows and 2 are already saved,
+  the bot saves 1 and skips 2 — it shows the math so you can verify.
+- **Possible duplicate** (loose match — same date and amount, different
+  description): the row is **saved by default** and flagged `⚠️` as an
+  advisory. Reply `drop N` or `drop all flagged` if it's the same payment
+  with a reformatted merchant name.
+- **Identical rows within one batch** (e.g. three 2 PLN car-wash payments
+  same day): all are kept by default and annotated. Reply `drop N` to remove
+  one if it's a scan error.
 
 **Drafts survive interruptions.** The draft is stored per user on disk, so if
 the review session times out (30 minutes) or the bot restarts, just run
