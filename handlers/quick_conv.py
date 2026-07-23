@@ -12,6 +12,7 @@ from data import load_rates, load_reference_data
 from excel_ops import append_transaction
 from formatters import format_pln_as_currency, sanitize_description
 import merchant_map
+from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
 from models import Transaction
 from states import QUICK_CONFIRM
@@ -167,6 +168,7 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         log.info("User %s quick-add saved", uid)
         await update.message.reply_text("✅ Saved.", reply_markup=ReplyKeyboardRemove())
         await check_budget_alert(update, transaction.category, ccy, rates)
+        await maybe_prompt_cycle_start(update, transaction)
     except Exception as e:
         log.exception("quick_confirm failed for user %s", uid)
         await update.message.reply_text(f"❌ Failed: {e}", reply_markup=ReplyKeyboardRemove())

@@ -9,7 +9,7 @@ from config import TIMEZONE, auth_write, get_display_currency, _last_saved, log
 from data import load_rates, load_reference_data, now_utc, get_rate
 from excel_ops import append_transaction
 from formatters import sanitize_description
-from handlers.cycle import is_salary_income, maybe_prompt_cycle
+from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
 from models import Transaction, AddTransactionState
 from validators import parse_amount
@@ -292,17 +292,12 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove(),
         )
         await check_budget_alert(update, transaction.category, disp_ccy, state.rates)
+        await maybe_prompt_cycle_start(update, transaction)
     except Exception as e:
         log.exception("Failed to save transaction for user %s", uid)
         await update.message.reply_text(f"❌ Failed to save: {e}", reply_markup=ReplyKeyboardRemove())
 
     ctx.user_data.clear()
-    # Offer a cycle-boundary prompt after a salary-income save.
-    try:
-        if is_salary_income(transaction.transaction_type, transaction.category):
-            await maybe_prompt_cycle(update, ctx, transaction.date)
-    except Exception:
-        pass  # cycle prompt is best-effort — never block the save confirmation
     return ConversationHandler.END
 
 

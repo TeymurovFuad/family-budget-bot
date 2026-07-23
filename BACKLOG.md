@@ -558,36 +558,45 @@ but shifts ±4-5 days, so cycle boundaries are RECORDED EVENTS, never date formu
 Answers "which salary funds this?" and "what happened to each salary?" (leftover /
 unaccounted tracking — the old manual dashboard metric).
 
-> **Phase 1 merged in PR #23.** Items marked ✅ below shipped. Items marked [ ] are
-> Phase 2 and remain pending.
+> **Phase 1 merged in PR #23; PR #30 consolidates the implementation** (dedicated
+> `cycles.py` module, inline-button prompt, cycle-scoped `/budget`, template Cycles
+> sheet). Items marked [x] shipped; items marked [ ] are follow-up PRs.
 
 - [x] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
       everyone else. When off, none of the below activates.
-      *(done: `settings.BUDGET_CYCLE = bool(int(os.getenv("BUDGET_CYCLE", "0")))`)*
+      *(done: `settings.BUDGET_CYCLE` plus `settings.CYCLE_REPROMPT_MIN_AGE_DAYS` and
+      `settings.SALARY_CATEGORY`; every cycle code path is gated on the flag.)*
 - [x] **Cycle ledger** — one row per cycle: start date + label. Labels always carry the
       year ("Aug 2026", never bare "Aug") so multi-year resolution is unambiguous.
       Lives in the dedicated `Cycles` sheet (see below — NOT Lists columns).
       Boundaries are written once and never recomputed — no retroactive
       re-bucketing, late edits cannot silently move history between cycles.
-      *(done: `CyclesSchema` in `excel_schema.py`; `Cycles` sheet auto-created on first
-      use via `append_cycle_boundary` in `file_storage.py`)*
+      *(done: `cycles.py` — `load_cycles`/`record_cycle_start` via `CyclesSchema`
+      header lookup; duplicate start dates are a no-op, rows are never rewritten.)*
 - [x] **Boundary capture, user-confirmed** — two inputs, same ledger:
       (a) bot saves an Income row with category Salary → prompt: "💰 Salary received.
       Start the new budget cycle from 23 Jul? (yes / no / different date)" — the bot
       proposes, only the user's confirmation records; a mis-categorized refund cannot
       open a cycle. (b) `/cycle started [date]` manual command any time.
       No salary logged + no command = current cycle continues; the bot never guesses.
-      *(done: `maybe_prompt_cycle` in `handlers/cycle.py` called from `add_conv.py` and
-      `bulk_conv.py`; `cmd_cycle` handles the manual command; cooldown guard uses
-      `CYCLE_PROMPT_COOLDOWN_DAYS = 20`)*
-- [x] **Bot reports per cycle** — with the flag on, `/summary` appends a cycle block
-      (current-cycle expenses, savings, salary, unaccounted).
-      *(done: `_build_cycle_block` in `handlers/reports.py`; budget bars and
-      days-remaining are Phase 2)*
+      *(done: `handlers/cycle.py` — `maybe_prompt_cycle_start` fires from /add and
+      quick-add saves with inline Yes / No / Different date buttons; "Different date"
+      points at `/cycle started YYYY-MM-DD`; prompt only when the current cycle is
+      ≥ `CYCLE_REPROMPT_MIN_AGE_DAYS` old.)*
+- [x] **Bot reports per cycle** — with the flag on, `/summary` and budget bars compute
+      over the current cycle (last boundary → today); days-remaining uses no assumption
+      about cycle length. Monthly scheduled report fires on cycle close (boundary
+      confirmation) instead of the 1st, reporting the cycle that just closed.
+      *(done for /summary and /budget: cycle-scoped via `cycles.cycle_totals`, upper
+      bound open-ended at today, daily-average instead of month-end projection.
+      Scheduled report on cycle close is NOT yet moved — still fires on the 1st;
+      follow-up with the Cycle Dashboard PR.)*
 - [x] **Unaccounted metric** — per cycle: salary received − tracked expenses − tracked
       savings = unaccounted ("not reported"); negative = over-reported (untracked income
-      or previous cycle's leftover being spent). Shown in bot cycle reports.
-      *(done: rendered in the `/summary` cycle block)*
+      or previous cycle's leftover being spent). Shown in bot cycle reports and on the
+      Cycle Dashboard.
+      *(done for bot reports: shown in the cycle /summary with an "over-reported" note
+      when negative. Cycle Dashboard sheet is a later PR.)*
 - [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet;
       same layout, same category rows, same budget targets (shared Lists budget column —
       one edit updates both). Filter is a single cycle selector (dropdown fed by the
@@ -600,10 +609,13 @@ unaccounted tracking — the old manual dashboard metric).
       cycles are purely additive; disabling the flag corrupts nothing.
 - [ ] **Sync check** — repair-script-pattern check that both dashboards carry the same
       category rows (new category must be added to both sheets).
-- [ ] **Cycles sheet, not JSON** — the ledger lives in a dedicated `Cycles` sheet in the
+- [x] **Cycles sheet, not JSON** — the ledger lives in a dedicated `Cycles` sheet in the
       main workbook (start date + label per row) so Dashboard formulas can reference it;
       included in the template (harmless when the flag is off); auto-created on first
       use for existing workbooks; bot access through excel_schema.
+      *(done: `excel_schema.CyclesSchema` + `cycles.ensure_cycles_sheet`; sheet added
+      to `data/Expenses_Template.xlsx`, to the fallback workbook builder, to
+      `_repair_template_workbook`, and auto-created on first `record_cycle_start`.)*
 - [ ] **Historical backfill: `/cycles detect`** — one-pass scan of the whole history:
       every Income row with category Salary (fallback: largest recurring end-of-month
       income for rows imported before categories were clean). Unambiguous months are

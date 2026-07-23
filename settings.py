@@ -63,6 +63,13 @@ STATEMENT_PROFILES_DIR = Path(
 if not STATEMENT_PROFILES_DIR.is_absolute():
     STATEMENT_PROFILES_DIR = PROJECT_ROOT / STATEMENT_PROFILES_DIR
 
+BUDGET_CYCLE = os.getenv("BUDGET_CYCLE", "0").strip() == "1"
+SALARY_CATEGORY = os.getenv("SALARY_CATEGORY", "Salary")
+try:
+    CYCLE_REPROMPT_MIN_AGE_DAYS = int(os.getenv("CYCLE_REPROMPT_MIN_AGE_DAYS", "20"))
+except ValueError:
+    CYCLE_REPROMPT_MIN_AGE_DAYS = 20
+
 # Logging configuration
 LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_LOG_DIR))).expanduser()
 if not LOG_DIR.is_absolute():
@@ -73,7 +80,3 @@ try:
 except ValueError:
     LOG_KEEP_DAYS = 20
 
-BUDGET_CYCLE = bool(int(os.getenv("BUDGET_CYCLE", "0")))
-CYCLE_PROMPT_COOLDOWN_DAYS = 20
-# Public name for the income category that triggers cycle prompts.
-SALARY_CATEGORY = "Salary"

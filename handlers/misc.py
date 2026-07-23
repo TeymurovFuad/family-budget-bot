@@ -58,6 +58,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "*Settings*\n"
         "/setcurrency — change the display currency\n"
         "/setbudget — set the monthly budget limit for a category (owner only)\n"
+        "/cycle — show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a new one (owner only, needs BUDGET_CYCLE=1)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
         "/help — this list\n\n"
