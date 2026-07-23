@@ -98,13 +98,18 @@ def match_profile(headers: list[str], profiles: dict[tuple, dict]) -> dict | Non
     return profiles.get(fp)
 
 
+def profile_safe_name(name: str) -> str:
+    """Sanitize a profile name for use as a filename stem — keep only safe chars."""
+    return re.sub(r"[^\w\-]", "_", name.strip())
+
+
 def save_profile(profile: dict, profiles_dir: str | Path) -> None:
     """Write profile to <profiles_dir>/<name>.json."""
     profiles_dir = Path(profiles_dir)
     profiles_dir.mkdir(parents=True, exist_ok=True)
     name = str(profile.get("name") or "unnamed").strip()
     # Sanitize filename — keep only safe chars.
-    safe_name = re.sub(r"[^\w\-]", "_", name)
+    safe_name = profile_safe_name(name)
     path = profiles_dir / f"{safe_name}.json"
     path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info("statement_profiles: saved profile '%s' → %s", name, path)
@@ -260,7 +265,7 @@ def _parse_row_dict(
             return None  # both zero/empty — balance or fee-waiver row; skip
 
         if debit_val > 0.0 and credit_val > 0.0:
-            log.debug(
+            log.warning(
                 "statement_profiles: both debit (%.2f) and credit (%.2f) non-zero — preferring debit",
                 debit_val, credit_val,
             )
@@ -510,8 +515,12 @@ def validate_profile_mapping(profile: dict) -> list[str]:
           * amount (single-column mode)
           * both debit AND credit (split-column mode)
       - Never both amount AND debit/credit together.
+      - sign_convention must be consistent with column_map:
+          * debit_credit_split ↔ col_map has debit+credit (not amount)
+          * any other convention ↔ col_map has amount (not debit/credit)
     """
     col_map = profile.get("column_map") or {}
+    sign_convention = profile.get("sign_convention") or "negative_expense"
     errors: list[str] = []
 
     if not col_map.get("date"):
@@ -540,6 +549,18 @@ def validate_profile_mapping(profile: dict) -> list[str]:
         )
     elif not has_amount and not has_debit and not has_credit:
         errors.append("no amount column mapped (need amount OR debit + credit)")
+
+    # sign_convention cross-check
+    if sign_convention == SIGN_DEBIT_CREDIT_SPLIT and has_amount and not has_debit and not has_credit:
+        errors.append(
+            "sign_convention is 'debit_credit_split' but only 'amount' is mapped — "
+            "map debit and credit columns instead, or change the sign_convention"
+        )
+    elif sign_convention != SIGN_DEBIT_CREDIT_SPLIT and (has_debit or has_credit) and not has_amount:
+        errors.append(
+            f"sign_convention is '{sign_convention}' but debit/credit columns are mapped instead of amount — "
+            "set sign_convention to 'debit_credit_split' or map a single amount column"
+        )
 
     return errors
 

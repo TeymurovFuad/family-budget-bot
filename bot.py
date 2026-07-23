@@ -144,7 +144,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("export",  cmd_export))
 
     # ── profile list / delete inline callbacks (global — outside any conversation) ──
-    app.add_handler(CallbackQueryHandler(bulk_profile_list_callback, pattern="^profile_del"))
+    app.add_handler(CallbackQueryHandler(bulk_profile_list_callback, pattern="^profile_del[_:]"))
 
     # ── range report inline callback ──────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_range_callback, pattern="^range:"))

@@ -58,14 +58,9 @@ def _is_statement_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in _STATEMENT_EXTENSIONS
 
 
-def _profile_safe_name(name: str) -> str:
-    """Same sanitization as save_profile — produces the filename stem."""
-    return re.sub(r"[^\w\-]", "_", name.strip())
-
-
 async def _cmd_bulk_profile_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """List all saved profiles with inline Delete buttons."""
-    profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+    profiles = await asyncio.to_thread(sp.list_profiles, settings.STATEMENT_PROFILES_DIR)
     if not profiles:
         await update.message.reply_text("No statement profiles saved yet.")
         return ConversationHandler.END
@@ -77,10 +72,12 @@ async def _cmd_bulk_profile_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         fp_count = len(p.get("fingerprint") or [])
         sign = p.get("sign_convention") or "?"
         lines.append(f"• {name} ({fp_count} columns, {sign})")
-        safe = _profile_safe_name(name)
+        safe = sp.profile_safe_name(name)
         cb = f"profile_del:{safe}"
         if len(cb.encode()) <= 64:
             buttons.append([InlineKeyboardButton(f"❌ Delete {name}", callback_data=cb)])
+        else:
+            lines[-1] += f"  (use /bulk profile delete {name} — name too long for button)"
 
     await update.message.reply_text(
         "\n".join(lines),
@@ -108,13 +105,13 @@ async def bulk_profile_list_callback(update: Update, ctx: ContextTypes.DEFAULT_T
 
     if data.startswith("profile_del_confirm:"):
         safe_name = data[len("profile_del_confirm:"):]
-        profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+        profiles = await asyncio.to_thread(sp.list_profiles, settings.STATEMENT_PROFILES_DIR)
         target = next(
-            (p for p in profiles if _profile_safe_name(p.get("name") or "") == safe_name),
+            (p for p in profiles if sp.profile_safe_name(p.get("name") or "") == safe_name),
             None,
         )
         name = target.get("name") if target else safe_name
-        deleted = sp.delete_profile(name, settings.STATEMENT_PROFILES_DIR)
+        deleted = await asyncio.to_thread(sp.delete_profile, name, settings.STATEMENT_PROFILES_DIR)
         if deleted:
             await query.edit_message_text(f"✅ Profile '{name}' deleted.")
         else:
@@ -125,9 +122,9 @@ async def bulk_profile_list_callback(update: Update, ctx: ContextTypes.DEFAULT_T
 
     if data.startswith("profile_del:"):
         safe_name = data[len("profile_del:"):]
-        profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+        profiles = await asyncio.to_thread(sp.list_profiles, settings.STATEMENT_PROFILES_DIR)
         target = next(
-            (p for p in profiles if _profile_safe_name(p.get("name") or "") == safe_name),
+            (p for p in profiles if sp.profile_safe_name(p.get("name") or "") == safe_name),
             None,
         )
         name = target.get("name") if target else safe_name
@@ -1312,7 +1309,7 @@ async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     args = ctx.args or []
     if args and args[0].lower() == "profile":
         subcommand = args[1].lower() if len(args) > 1 else "list"
-        if subcommand == "list" or len(args) < 2:
+        if subcommand == "list":
             return await _cmd_bulk_profile_list(update, ctx)
         elif subcommand == "delete":
             name = " ".join(args[2:]).strip()
@@ -1322,7 +1319,7 @@ async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "Use /bulk profile list to see all saved profiles."
                 )
                 return ConversationHandler.END
-            deleted = sp.delete_profile(name, settings.STATEMENT_PROFILES_DIR)
+            deleted = await asyncio.to_thread(sp.delete_profile, name, settings.STATEMENT_PROFILES_DIR)
             if deleted:
                 await update.message.reply_text(f"✅ Profile '{name}' deleted.")
             else:
