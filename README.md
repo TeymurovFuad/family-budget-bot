@@ -449,6 +449,7 @@ Every time you push code to `main`, the next scheduled run uses the updated code
 | `XLSX_PATH` | local mode only | — | `data/Expenses_Improved.xlsx` |
 | `DISPLAY_CURRENCY` | bot + reports | — | `PLN` |
 | `TIMEZONE` | bot + reports | — | `Europe/Warsaw` |
+| `BUDGET_CYCLE` | bot | — | `0` — set to `1` to enable salary-period cycle tracking and cycle-aware `/summary` output |
 
 If `GCS_BUCKET_NAME` is not set, both scripts fall back to reading a local file at `XLSX_PATH`.
 This means local development works without any GCS setup at all.
