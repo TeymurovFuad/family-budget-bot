@@ -1,0 +1,17 @@
+{
+  "name": "ExampleBankA",
+  "delimiter": ";",
+  "encoding": "utf-8",
+  "header_row": 0,
+  "fingerprint": ["TransactionDate", "Value", "Curr", "Merchant"],
+  "column_map": {
+    "date": "TransactionDate",
+    "amount": "Value",
+    "currency": "Curr",
+    "description": "Merchant",
+    "time": null
+  },
+  "date_format": "%d.%m.%Y",
+  "decimal_separator": ",",
+  "sign_convention": "negative_expense"
+}

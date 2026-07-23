@@ -303,10 +303,19 @@ class AIProvider(ABC):
 
     To add a new provider:
       1. Subclass AIProvider
-      2. Implement parse_text, parse_quick, parse_image
+      2. Implement chat, parse_text, parse_quick, parse_image
       3. Add to _PROVIDER_MAP below
       4. Set AI_PROVIDER=<name> in .env
     """
+
+    @abstractmethod
+    def chat(self, messages: list[dict]) -> str:
+        """
+        Send a single chat-completion request and return the raw string response.
+        This is the low-level primitive used by propose_mapping and any other caller
+        that needs direct message-level control. Declared here so callers never need
+        to reach for a private _chat that may not exist on other providers.
+        """
 
     @abstractmethod
     def parse_text(self, text: str, lists: dict) -> list[dict]:
@@ -354,6 +363,10 @@ class DeepSeekProvider(AIProvider):
             kwargs["max_tokens"] = max_tokens
         resp = self._client_().chat.completions.create(**kwargs)
         return resp.choices[0].message.content
+
+    def chat(self, messages: list[dict]) -> str:
+        """Public AIProvider.chat — delegates to the internal _chat (no token cap)."""
+        return self._chat(messages)
 
     def parse_text(self, text: str, lists: dict) -> list[dict]:
         chunks = _chunk_statement_text(text)

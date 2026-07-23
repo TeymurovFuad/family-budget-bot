@@ -41,6 +41,16 @@ _auth_patcher.start()
 _auth_write_patcher = _mock.patch("config.auth_write", lambda f: f)
 _auth_write_patcher.start()
 
+# Handler modules may already be imported (e.g. tests/test_bulk_conv_profiles.py
+# is collected first alphabetically) with the REAL decorators baked in. Reload
+# them so the pass-through patch takes effect regardless of collection order —
+# the mirror of the reload trick tests/test_write_gate.py uses to get the real
+# gate back afterwards.
+import importlib as _importlib
+for _mod_name in list(sys.modules):
+    if _mod_name.startswith("handlers."):
+        _importlib.reload(sys.modules[_mod_name])
+
 # ── Project imports (after env + auth patch) ──────────────────────────────────
 import settings
 import states
@@ -74,7 +84,9 @@ SAMPLE_LISTS = {
 }
 
 
-def make_update(text="hello", user_id=12345, photo=None, document=None):
+def make_update(text="hello", user_id=123, photo=None, document=None):
+    # Default user 123 matches conftest's ALLOWED_TELEGRAM_IDS primary user,
+    # so handlers behind @auth_write work without per-test overrides.
     upd = MagicMock()
     upd.message.text = text
     upd.message.reply_text = AsyncMock()
@@ -698,7 +710,7 @@ class TestAddConvConfirm:
         ctx = self._make_ctx()
         upd = make_update("✅ Save")
         fake_last_saved = {
-            12345: (100.0, "PLN", "Groceries", datetime.now(timezone.utc))
+            123: (100.0, "PLN", "Groceries", datetime.now(timezone.utc))
         }
         with patch("handlers.add_conv._last_saved", fake_last_saved), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
@@ -1065,7 +1077,7 @@ def test_bulk_draft_path_is_defined_in_settings():
 
 class TestBulkConvCmdBulk:
     async def test_cmd_bulk_returns_bulk_receive(self):
-        upd = make_update("/bulk")
+        upd = make_update("/bulk", user_id=123)  # primary user required by @auth_write
         ctx = make_ctx()
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "bulk_drafts"
@@ -1075,7 +1087,7 @@ class TestBulkConvCmdBulk:
         assert result == states.BULK_RECEIVE
 
     async def test_cmd_bulk_sends_instructions(self):
-        upd = make_update("/bulk")
+        upd = make_update("/bulk", user_id=123)  # primary user required by @auth_write
         ctx = make_ctx()
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "bulk_drafts"

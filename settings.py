@@ -57,6 +57,12 @@ MERCHANT_MAP_PATH = Path(os.getenv("MERCHANT_MAP_PATH", str(DATA_DIR / "merchant
 if not MERCHANT_MAP_PATH.is_absolute():
     MERCHANT_MAP_PATH = PROJECT_ROOT / MERCHANT_MAP_PATH
 
+STATEMENT_PROFILES_DIR = Path(
+    os.getenv("STATEMENT_PROFILES_DIR", str(DATA_DIR / "statement_profiles"))
+).expanduser()
+if not STATEMENT_PROFILES_DIR.is_absolute():
+    STATEMENT_PROFILES_DIR = PROJECT_ROOT / STATEMENT_PROFILES_DIR
+
 # Logging configuration
 LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_LOG_DIR))).expanduser()
 if not LOG_DIR.is_absolute():

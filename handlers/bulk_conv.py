@@ -6,10 +6,17 @@ import re
 from datetime import datetime, date, timezone
 from pathlib import Path
 
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
+import ai_parser
 from ai_parser import parse_text, parse_image, _chunk_statement_text
 from config import auth, auth_write, log
 from data import load_dedup_evidence, load_reference_data
@@ -17,7 +24,12 @@ import settings
 from excel_ops import async_append_batch
 import merchant_map
 from models import Transaction
-from states import BULK_RECEIVE, BULK_CONFIRM
+import statement_profiles as sp
+from states import (
+    BULK_RECEIVE, BULK_CONFIRM,
+    BULK_STATEMENT, BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME,
+    BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD,
+)
 from validators import (
     clean_merchant_description,
     coerce_bool,
@@ -26,6 +38,355 @@ from validators import (
     parse_amount,
     validate_parsed_row,
 )
+
+# ── Statement-profile helpers ─────────────────────────────────────────────────
+
+_STATEMENT_EXTENSIONS = {".csv", ".xlsx", ".xls", ".txt"}
+
+# All standard fields a user can assign a column to (plus "skip").
+_MAPPABLE_FIELDS = ("date", "amount", "currency", "description", "time", "skip")
+
+
+def _load_profiles() -> dict:
+    """Load profiles from STATEMENT_PROFILES_DIR; returns fingerprint→profile dict."""
+    return sp.load_profiles(settings.STATEMENT_PROFILES_DIR)
+
+
+def _is_statement_file(filename: str) -> bool:
+    return Path(filename).suffix.lower() in _STATEMENT_EXTENSIONS
+
+
+def _read_statement_headers_and_sniff(
+    file_bytes: bytes,
+    filename: str,
+) -> tuple[list[str], dict | None]:
+    """
+    Read the header row from a CSV/XLSX/TXT file.
+    Returns (headers, provisional_profile_or_None).
+    provisional_profile is only set for .txt files when a delimiter is detected;
+    for CSV/XLSX it is None (profile comes from the registry).
+    Returns ([], None) when the file cannot be sniffed (caller falls through).
+    """
+    import csv as _csv
+    import io as _io
+    ext = Path(filename).suffix.lower()
+
+    if ext in {".xlsx", ".xls"}:
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True, read_only=True)
+            ws = wb.active
+            first_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            wb.close()
+            if first_row:
+                return [str(c or "").strip() for c in first_row], None
+        except Exception as exc:
+            log.warning("_read_statement_headers XLSX error: %s", exc)
+        return [], None
+
+    # CSV or TXT — decode first.
+    try:
+        content = file_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        content = file_bytes.decode("latin-1", errors="replace")
+
+    if ext == ".txt":
+        delim = sp.sniff_txt_delimiter(content)
+        if not delim:
+            return [], None  # caller falls through to AI free-form path
+        reader = _csv.reader(_io.StringIO(content), delimiter=delim)
+        headers = [h.strip() for h in next(reader, [])]
+        if not headers:
+            return [], None
+        provisional = {
+            "name": "",
+            "delimiter": delim,
+            "encoding": "utf-8",
+            "header_row": 0,
+            "fingerprint": headers,
+            "column_map": {f: None for f in ("date", "amount", "currency", "description", "time")},
+            "date_format": "%Y-%m-%d",
+            "decimal_separator": ".",
+            "sign_convention": "negative_expense",
+        }
+        return headers, provisional
+
+    # Plain CSV — sniff delimiter.
+    delim = sp.sniff_txt_delimiter(content, candidates=(";", ",", "\t")) or ","
+    reader = _csv.reader(_io.StringIO(content), delimiter=delim)
+    headers = [h.strip() for h in next(reader, [])]
+    return headers, None
+
+
+def _get_sample_rows(file_bytes: bytes, filename: str, delimiter: str = ",", n: int = 3) -> list[list]:
+    """Return up to n data rows (after the header) as lists of strings."""
+    import csv as _csv
+    import io as _io
+    ext = Path(filename).suffix.lower()
+    if ext in {".xlsx", ".xls"}:
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(_io.BytesIO(file_bytes), data_only=True, read_only=True)
+            ws = wb.active
+            rows = []
+            for i, row in enumerate(ws.iter_rows(values_only=True)):
+                if i == 0:
+                    continue
+                rows.append([str(c) if c is not None else "" for c in row])
+                if len(rows) >= n:
+                    break
+            wb.close()
+            return rows
+        except Exception:
+            return []
+    try:
+        content = file_bytes.decode("utf-8", errors="replace")
+    except Exception:
+        content = file_bytes.decode("latin-1", errors="replace")
+    reader = _csv.reader(_io.StringIO(content), delimiter=delimiter)
+    next(reader, None)  # skip header
+    rows = []
+    for row in reader:
+        rows.append(row)
+        if len(rows) >= n:
+            break
+    return rows
+
+
+def _format_profile_confirm_message(proposal: dict) -> str:
+    """Render the profile-confirmation message for the user."""
+    col_map = proposal.get("column_map") or {}
+    date_fmt = proposal.get("date_format") or "?"
+    decimal_sep = proposal.get("decimal_separator") or "."
+    sign = proposal.get("sign_convention") or "?"
+
+    lines = ["New statement format detected. My reading:"]
+    for field in ("date", "amount", "currency", "description", "time"):
+        col = col_map.get(field)
+        if not col:
+            lines.append(f"• {field} → (not mapped)")
+            continue
+        detail = ""
+        if field == "date":
+            detail = f" ({date_fmt})"
+        elif field == "amount":
+            sep_word = "comma" if decimal_sep == "," else "dot"
+            sign_word = "negative = expense" if sign == "negative_expense" else sign
+            detail = f" ({sep_word} decimal, {sign_word})"
+        lines.append(f"• column '{col}' → {field}{detail}")
+
+    return "\n".join(lines)
+
+
+def _profile_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("Looks right", callback_data="profile_ok"),
+        InlineKeyboardButton("Fix a column", callback_data="profile_fix"),
+        InlineKeyboardButton("Cancel", callback_data="profile_cancel"),
+    ]])
+
+
+def _column_pick_keyboard(headers: list[str]) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(h, callback_data=f"fix_col:{h}")]
+        for h in headers
+    ]
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="profile_cancel")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _field_pick_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(f, callback_data=f"fix_field:{f}")]
+        for f in _MAPPABLE_FIELDS
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+async def _finish_profile_parse(
+    update: Update,
+    ctx: ContextTypes.DEFAULT_TYPE,
+    file_bytes: bytes,
+    filename: str,
+    profile: dict,
+    profile_name: str,
+) -> int:
+    """
+    After a profile is confirmed (matched or newly created): parse the file,
+    normalize rows, run merchant memory + validation, merge into the draft,
+    run dedup, and send the preview. Returns the next conversation state.
+    """
+    uid = update.effective_user.id
+    lists = ctx.user_data.get("lists") or load_reference_data()
+    ctx.user_data["lists"] = lists
+
+    loop = asyncio.get_running_loop()
+    parsed = await loop.run_in_executor(
+        None, lambda: sp.parse_statement(file_bytes, filename, profile)
+    )
+
+    if not parsed:
+        await update.effective_message.reply_text("No transactions found in the statement.")
+        return ConversationHandler.END
+
+    parsed, corrections = _normalize_parsed_rows(parsed, lists)
+    memory_notes = _apply_merchant_memory(parsed)
+    parsed, validator_corrections = _validate_bulk_rows(parsed, lists)
+    corrections += validator_corrections
+
+    if memory_notes:
+        shown = "\n".join(f"  • {n}" for n in memory_notes[:10])
+        more = f"\n  … and {len(memory_notes) - 10} more" if len(memory_notes) > 10 else ""
+        await update.effective_message.reply_text(
+            f"🧠 {len(memory_notes)} row(s) categorized from merchant memory:\n{shown}{more}"
+        )
+    if corrections:
+        shown = "\n".join(f"  • {c}" for c in corrections[:10])
+        more = f"\n  … and {len(corrections) - 10} more" if len(corrections) > 10 else ""
+        await update.effective_message.reply_text(
+            f"🛡 Auto-corrected {len(corrections)} value(s):\n{shown}{more}"
+        )
+
+    parsed = _sort_bulk_rows(parsed)
+    draft_rows, _ = _merge_bulk_draft(uid, parsed)
+    ctx.user_data["bulk_parsed"] = draft_rows
+
+    summary = _flag_master_duplicates(draft_rows)
+    if summary["flagged"] or summary["identical_groups"] or summary["loose_matches"]:
+        _save_bulk_draft(uid, draft_rows)
+        for msg in _format_dedup_messages(summary):
+            await update.effective_message.reply_text(msg)
+
+    n_rows = len([r for r in parsed if r])
+    await update.effective_message.reply_text(
+        f"📄 Parsed with profile '{profile_name}' — {n_rows} row(s)."
+    )
+    await _send_bulk_preview_msg(update, draft_rows)
+    return BULK_CONFIRM
+
+
+async def _send_bulk_preview_msg(update: Update, parsed: list[dict]) -> None:
+    """Send bulk preview — works from both message and callback_query update."""
+    keyboard = ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True)
+    pages = _format_bulk_preview(parsed)
+    msg_obj = update.message or (update.callback_query.message if update.callback_query else None)
+    if not msg_obj:
+        return
+    for i, page in enumerate(pages):
+        try:
+            await msg_obj.reply_text(
+                page,
+                parse_mode="Markdown",
+                reply_markup=keyboard if i == len(pages) - 1 else None,
+            )
+        except BadRequest:
+            await msg_obj.reply_text(
+                page,
+                reply_markup=keyboard if i == len(pages) - 1 else None,
+            )
+
+
+# ── Profile-confirmation callback handler ────────────────────────────────────
+
+@auth
+async def bulk_profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Handle inline-keyboard callbacks during BULK_PROFILE_CONFIRM /
+    BULK_PROFILE_FIX_COL / BULK_PROFILE_FIX_FIELD states.
+    """
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if data == "profile_cancel":
+        ctx.user_data.pop("_stmt_proposal", None)
+        ctx.user_data.pop("_stmt_file_bytes", None)
+        ctx.user_data.pop("_stmt_filename", None)
+        ctx.user_data.pop("_stmt_headers", None)
+        await query.edit_message_text("Statement import cancelled.")
+        return ConversationHandler.END
+
+    if data == "profile_ok":
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        file_bytes = ctx.user_data.get("_stmt_file_bytes") or b""
+        filename = ctx.user_data.get("_stmt_filename") or "file.csv"
+        await query.edit_message_text(
+            _format_profile_confirm_message(proposal) + "\n\nName this format? (e.g. MyBankA)"
+        )
+        return BULK_PROFILE_NAME
+
+    if data == "profile_fix":
+        headers = ctx.user_data.get("_stmt_headers") or []
+        await query.edit_message_text(
+            "Which column do you want to re-assign?",
+            reply_markup=_column_pick_keyboard(headers),
+        )
+        return BULK_PROFILE_FIX_COL
+
+    if data.startswith("fix_col:"):
+        col = data[len("fix_col:"):]
+        ctx.user_data["_stmt_fix_col"] = col
+        await query.edit_message_text(
+            f"Assign column '{col}' to which field?",
+            reply_markup=_field_pick_keyboard(),
+        )
+        return BULK_PROFILE_FIX_FIELD
+
+    if data.startswith("fix_field:"):
+        field = data[len("fix_field:"):]
+        col = ctx.user_data.get("_stmt_fix_col") or ""
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        col_map = proposal.setdefault("column_map", {})
+        # Clear old mapping for this field, then set new one.
+        for k in list(col_map.keys()):
+            if col_map[k] == col:
+                col_map[k] = None
+        if field != "skip":
+            col_map[field] = col
+        ctx.user_data["_stmt_proposal"] = proposal
+        headers = ctx.user_data.get("_stmt_headers") or []
+        await query.edit_message_text(
+            _format_profile_confirm_message(proposal),
+            reply_markup=_profile_confirm_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    # Unrecognised callback — ignore.
+    return BULK_PROFILE_CONFIRM
+
+
+@auth
+async def bulk_profile_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Receive the profile name from the user, save profile, parse statement."""
+    name = (update.message.text or "").strip()
+    if not name:
+        await update.message.reply_text("Please enter a name for this format.")
+        return BULK_PROFILE_NAME
+
+    proposal = ctx.user_data.get("_stmt_proposal") or {}
+    file_bytes = ctx.user_data.get("_stmt_file_bytes") or b""
+    filename = ctx.user_data.get("_stmt_filename") or "file.csv"
+
+    profile = {**proposal, "name": name}
+    # Determine delimiter for CSV: carry from provisional profile or sniff again.
+    if not profile.get("delimiter"):
+        ext = Path(filename).suffix.lower()
+        if ext not in {".xlsx", ".xls"}:
+            try:
+                content = file_bytes.decode("utf-8", errors="replace")
+            except Exception:
+                content = file_bytes.decode("latin-1", errors="replace")
+            profile["delimiter"] = sp.sniff_txt_delimiter(content, candidates=(";", ",", "\t")) or ","
+
+    sp.save_profile(profile, settings.STATEMENT_PROFILES_DIR)
+    log.info("User %s saved statement profile '%s'", update.effective_user.id, name)
+    await update.message.reply_text(f"✅ Profile '{name}' saved — using it now.")
+
+    # Clean up temp state.
+    for key in ("_stmt_proposal", "_stmt_file_bytes", "_stmt_filename", "_stmt_headers", "_stmt_fix_col"):
+        ctx.user_data.pop(key, None)
+
+    return await _finish_profile_parse(update, ctx, file_bytes, filename, profile, name)
 
 
 
@@ -796,15 +1157,77 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         elif update.message.document:
             src = 'document'
             document = update.message.document
+            filename = document.file_name or "file.txt"
             file = await document.get_file()
-            file_bytes = await file.download_as_bytearray()
-            mime_type = (document.mime_type or "").lower()
-            if mime_type and not mime_type.startswith("text/") and "plain" not in mime_type:
-                await update.message.reply_text("Please upload a plain text file (.txt).")
-                return BULK_RECEIVE
-            text = file_bytes.decode("utf-8", errors="replace")
-            await _announce_parse_plan(update, text)
-            parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
+            file_bytes = bytes(await file.download_as_bytearray())
+
+            # ── Statement-profile fast path ──────────────────────────────────
+            if _is_statement_file(filename):
+                headers, provisional = _read_statement_headers_and_sniff(file_bytes, filename)
+                if headers:
+                    # Try exact profile match.
+                    profiles = _load_profiles()
+                    matched = sp.match_profile(headers, profiles)
+                    if matched:
+                        profile_name = matched.get("name") or filename
+                        await update.message.reply_text(f"📄 Matched profile '{profile_name}', parsing…")
+                        ctx.user_data["lists"] = lists
+                        return await _finish_profile_parse(
+                            update, ctx, file_bytes, filename, matched, profile_name
+                        )
+                    # No match — propose via AI (one call).
+                    await update.message.reply_text("🔍 New format — asking AI to map columns…")
+                    sample_rows = _get_sample_rows(
+                        file_bytes, filename,
+                        delimiter=(provisional or {}).get("delimiter") or ","
+                    )
+                    proposal = await loop.run_in_executor(
+                        None,
+                        lambda: sp.propose_mapping(headers, sample_rows, ai_parser.get_provider()),
+                    )
+                    if proposal:
+                        # Merge provisional settings (delimiter etc.) into the AI proposal.
+                        if provisional:
+                            for k in ("delimiter", "encoding", "header_row"):
+                                if k not in proposal:
+                                    proposal[k] = provisional.get(k)
+                        ctx.user_data["_stmt_proposal"] = proposal
+                        ctx.user_data["_stmt_file_bytes"] = file_bytes
+                        ctx.user_data["_stmt_filename"] = filename
+                        ctx.user_data["_stmt_headers"] = headers
+                        ctx.user_data["lists"] = lists
+                        await update.message.reply_text(
+                            _format_profile_confirm_message(proposal),
+                            reply_markup=_profile_confirm_keyboard(),
+                        )
+                        return BULK_PROFILE_CONFIRM
+                    # AI returned nothing — fall through to AI text path.
+                    log.info("propose_mapping returned empty for %s; falling back to AI text", filename)
+
+                # .txt with no consistent delimiter or empty headers — fall through.
+                ext = Path(filename).suffix.lower()
+                if ext in {".xlsx", ".xls"}:
+                    await update.message.reply_text(
+                        "Could not read headers from this XLSX file. "
+                        "Please make sure it is a valid bank export."
+                    )
+                    return BULK_RECEIVE
+                # CSV/TXT fall-through: treat as raw text.
+                try:
+                    text = file_bytes.decode("utf-8", errors="replace")
+                except Exception:
+                    text = file_bytes.decode("latin-1", errors="replace")
+                await _announce_parse_plan(update, text)
+                parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
+            else:
+                # Not a recognised statement extension — existing plain-text path.
+                mime_type = (document.mime_type or "").lower()
+                if mime_type and not mime_type.startswith("text/") and "plain" not in mime_type:
+                    await update.message.reply_text("Please upload a plain text file (.txt).")
+                    return BULK_RECEIVE
+                text = file_bytes.decode("utf-8", errors="replace")
+                await _announce_parse_plan(update, text)
+                parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
 
         elif update.message.text:
             src = 'text'
