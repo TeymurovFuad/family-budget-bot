@@ -4,6 +4,52 @@ Findings from the whole-team review (Architect, Designer, Developer, PO, fresh-e
 of 2026-07-21 on branch `feat/bulk-import-draft-ordering`. Grouped by planned follow-up PR.
 Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
+## Session handoff (2026-07-23) — read this first if resuming in a new session
+
+- **PR #16 ("Dedup v2") is open, unreviewed as of this note** —
+  https://github.com/TeymurovFuad/family-budget-bot/pull/16. A review agent was
+  dispatched (adversarial review against the exact BACKLOG.md "dedup v2 — agreed
+  design" acceptance criteria: verify the within-batch keep-by-default inversion
+  actually happened in code, count-aware math correctness, loose pass never
+  auto-skips, drop/keep grammar edge cases, stable numbering, message wording
+  drift) but its result was NOT retrieved before this session ended — check for
+  a completed background task first; if none, re-run the review before merging.
+  Branch: `feature/dedup-v2` on the `fork` remote (`fuadteymurov/family-budget-bot`),
+  based cleanly on `master`, 855 tests passing at push time.
+- **All other PRs from this session (#1–#15) are merged.** Nothing else pending.
+- **Push/merge mechanics for this repo**: `fuadteymurov` (the working account) is
+  NOT a collaborator on `TeymurovFuad/family-budget-bot` — pushes go to the
+  `fork` remote (`fuadteymurov/family-budget-bot`), PRs are opened
+  `--head fuadteymurov:branch --base master`, and MERGING requires the repo
+  owner (not automatable from this account) — always ask the user to merge.
+- **Worktree isolation lesson learned this session** — running two file-editing
+  agents in the same shared worktree caused real branch/file entanglement
+  more than once. Always give each agent its OWN temp `git worktree add`
+  (see `.claude/memories/orchestrator-memory.md` "Parallel agent isolation").
+- **Next up, in rough priority order (no hard requirement, pick freely)**:
+  1. Merge PR #16 once reviewed.
+  2. Bank-statement profiles (BACKLOG.md "bank-statement profiles — agreed
+     design") — biggest remaining designed feature, reuses dedup v2's
+     drop/keep grammar and feeds it batch-level timestamp disambiguation.
+  3. Budget cycles + `/summary` picker UX (BACKLOG.md "budget cycles —
+     agreed design" and "/summary picker UX — agreed design") — large,
+     touches the workbook (new `Cycles` sheet, `Cycle Dashboard` sheet).
+  4. Smaller standalone items: UX group (person attribution, bulk edit
+     skip/delete — largely superseded by dedup v2's grammar now, re-check
+     for overlap before implementing), code-clarity/module-size sweep
+     (300-line hard cap / 150-200 target, `file_storage.py` and
+     `bulk_conv.py` are the known offenders), token-economy group,
+     infra & performance group, various PR-review-notes sections scattered
+     through the file (search for "review notes" headings).
+  5. Optional: rename the `Żabka` test fixture in `tests/test_merchant_map.py`
+     to match the "Old Tbilisi" doc-example rename (PR #14) — was explicitly
+     deferred as its own tiny code PR, never actioned.
+- **Security/PII audit run 2026-07-22**: clean bill of health (no real data or
+  secrets ever entered git history; verified, not just current-state-checked).
+  One optional hygiene nit not yet fixed: `deploy/budget-bot.service` hardcodes
+  `User=ubuntu` / `/home/ubuntu/budget-bot` — reveals VM OS-user convention,
+  no IP/credentials. Low priority.
+
 ## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
 
 - [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
