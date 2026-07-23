@@ -39,6 +39,18 @@ parses instantly with zero AI calls. Profiles live on the bot's disk only —
 no bank names or account details in the repo. See DOCUMENTATION.md for the
 full bulk-import workflow (duplicate detection, editing a preview, drafts).
 
+### Budget cycles (optional)
+
+Set `BUDGET_CYCLE=1` to track your budget **salary-to-salary** instead of
+1st-to-1st. Cycle boundaries are recorded events, never date formulas: when you
+save a Salary income (and the current cycle is old enough, or none exists yet)
+the bot asks whether to start a new cycle — only your confirmation records it —
+and `/cycle started [YYYY-MM-DD]` records one manually any time. With the flag
+on, `/summary` and `/budget` cover the current cycle (last salary → today) and
+the summary shows an **unaccounted** metric: salary − tracked expenses − tracked
+savings. The ledger lives in a `Cycles` sheet in the workbook; with the flag off
+nothing changes.
+
 ---
 
 ## Recommended: one command, $0/month, self-updating
@@ -261,7 +273,9 @@ cleaned up automatically after each test.
 | `XLSX_PATH` | local mode only | — | `data/Expenses_Improved.xlsx` |
 | `DISPLAY_CURRENCY` | bot + reports | — | `PLN` |
 | `TIMEZONE` | bot + reports | — | `Europe/Warsaw` |
-| `BUDGET_CYCLE` | bot | — | `0` — set to `1` to enable salary-period cycle tracking and cycle-aware `/summary` output |
+| `BUDGET_CYCLE` | bot | — | `0` — set to `1` for salary-to-salary budget cycles (cycle-scoped `/summary` and `/budget`) |
+| `CYCLE_REPROMPT_MIN_AGE_DAYS` | bot | — | `20` |
+| `SALARY_CATEGORY` | bot | — | `Salary` |
 
 If `GCS_BUCKET_NAME` is not set, both scripts fall back to reading a local
 file at `XLSX_PATH`. This means local development works without any GCS

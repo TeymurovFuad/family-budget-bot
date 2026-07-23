@@ -214,7 +214,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
 | `DISPLAY_CURRENCY` | — | `PLN` | Default display currency. Change to `EUR` or `AZN` when relocating |
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
-| `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old |
+| `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old, or if no cycle has been recorded yet |
 | `SALARY_CATEGORY` | — | `Salary` | Category name that marks salary income for cycle detection and the unaccounted metric |
 
 ### Commands

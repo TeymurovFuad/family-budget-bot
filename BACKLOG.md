@@ -568,6 +568,50 @@ write paths — commit 309df08.
 - [ ] **Callback "yes" date not re-validated against future dates** — currently
       unreachable but cheap to harden. (handlers/cycle.py)
 
+### PR #30 review notes (2026-07-24)
+
+- [ ] **Ledger row order unspecified** — backfill will append boundaries out of
+      chronological order; the Dashboard PR must compute "next start"
+      order-independently (MINIFS) or backfill must insert sorted.
+      (cycles.py `record_cycle_start`)
+- [ ] **Layering inversion between file_storage and cycles** — file_storage.py
+      does function-local imports from cycles.py while cycles.py imports
+      file_storage; move `ensure_cycles_sheet` down to the schema/storage layer
+      before the Dashboard PR adds more scaffolding.
+- [ ] **Duplicate labels for two boundaries in one calendar month** —
+      `cycle_label` gives "Jul 2026" for both; decide label-uniqueness vs
+      keying by start date before the Dashboard dropdown is built.
+- [ ] **Unparseable ledger dates mishandled** — `record_cycle_start`'s next_row
+      scan can overwrite a trailing row whose date fails to parse, and
+      `load_cycles` silently drops such rows; advance past any non-blank row
+      and surface unparseable rows. (cycles.py)
+- [ ] **Flag-on removes the calendar view entirely** until the /summary picker
+      PR ships — the picker PR is the usability completion of cycles, don't
+      deprioritize it.
+- [ ] **check_budget_alert still calendar-scoped** while /budget is
+      cycle-scoped — contradictory percentages after every save when the flag
+      is on. (handlers/reports.py)
+- [ ] **Backdated Salary save proposes a backdated boundary with no undo
+      path** — `should_prompt_new_cycle` gates on today's cycle age, not the
+      transaction date; no `/cycle delete` exists and hand-editing the Cycles
+      sheet is undocumented. (handlers/cycle.py)
+- [ ] **Prompt text "(yes / no / different date)" invites typed replies** that
+      fall into the group-0 quick-add AI parser (wasted paid call /
+      hallucinated row) — drop the parenthetical or handle the typed text.
+      (handlers/cycle.py)
+- [ ] **User-editable Label cell interpolated raw into Markdown messages** — a
+      label containing markdown chars breaks /summary, /budget and /cycle
+      replies entirely; escape or sanitize. (cycles.py, handlers/reports.py)
+- [ ] **auth_write on CallbackQueryHandler never answers the callback query on
+      denial** — a non-owner tapping Yes/No sees a hanging spinner.
+      Pre-existing decorator gap, newly exposed. (config.py)
+- [ ] **handlers/reports.py now ~730 lines** (rule cap 300 for new modules) —
+      move `_current_cycle_bounds` / `_send_cycle_summary` toward cycles.py
+      during the module-size sweep.
+- [ ] **Static /help and DOCUMENTATION command-table wording for /summary and
+      /budget stays calendar-based** when the flag flips them to cycle scope —
+      polish the descriptions.
+
 ## Follow-up PR: budget cycles — agreed design (brainstorm 2026-07-22)
 
 Goal: restore the user's pre-bot salary-period tracking. Salary arrives around the 25th
