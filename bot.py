@@ -44,7 +44,10 @@ from handlers.add_conv import (
     add_person, add_date, add_desc, add_skip_desc, add_recurring,
     add_confirm, add_cancel,
 )
-from handlers.bulk_conv import cmd_bulk, bulk_receive, bulk_confirm, bulk_timeout
+from handlers.bulk_conv import (
+    cmd_bulk, bulk_receive, bulk_confirm, bulk_timeout,
+    bulk_profile_callback, bulk_profile_name,
+)
 from handlers.delete_conv import cmd_delete, delete_pick
 from handlers.edit_conv import (
     cmd_edit, edit_pick, edit_field, edit_value, edit_confirm,
@@ -69,7 +72,9 @@ from states import (
     ADD_PERSON, ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
     DELETE_PICK, SET_CCY,
     EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM,
-    BULK_RECEIVE, BULK_CONFIRM, QUICK_CONFIRM,
+    BULK_RECEIVE, BULK_CONFIRM,
+    BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME, BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD,
+    QUICK_CONFIRM,
     SET_BUDGET_PICK, SET_BUDGET_AMOUNT,
 )
 
@@ -214,6 +219,12 @@ def build_application() -> Application:
                 CommandHandler("save", bulk_confirm),
                 CommandHandler("cancel", bulk_confirm),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bulk_confirm),
+            ],
+            BULK_PROFILE_CONFIRM: [CallbackQueryHandler(bulk_profile_callback)],
+            BULK_PROFILE_FIX_COL: [CallbackQueryHandler(bulk_profile_callback)],
+            BULK_PROFILE_FIX_FIELD: [CallbackQueryHandler(bulk_profile_callback)],
+            BULK_PROFILE_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bulk_profile_name),
             ],
             ConversationHandler.TIMEOUT: [
                 MessageHandler(filters.ALL, bulk_timeout),
