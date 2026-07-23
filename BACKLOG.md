@@ -6,16 +6,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Session handoff (2026-07-23) — read this first if resuming in a new session
 
-- **PR #16 ("Dedup v2") is open, unreviewed as of this note** —
-  https://github.com/TeymurovFuad/family-budget-bot/pull/16. A review agent was
-  dispatched (adversarial review against the exact BACKLOG.md "dedup v2 — agreed
-  design" acceptance criteria: verify the within-batch keep-by-default inversion
-  actually happened in code, count-aware math correctness, loose pass never
-  auto-skips, drop/keep grammar edge cases, stable numbering, message wording
-  drift) but its result was NOT retrieved before this session ended — check for
-  a completed background task first; if none, re-run the review before merging.
-  Branch: `feature/dedup-v2` on the `fork` remote (`fuadteymurov/family-budget-bot`),
-  based cleanly on `master`, 855 tests passing at push time.
+- **PR #16 ("Dedup v2") reviewed ✅ PASS — ready to merge** —
+  https://github.com/TeymurovFuad/family-budget-bot/pull/16.
+  855 tests passing. Four non-blocking findings queued in "dedup review notes
+  (PR #16, 2026-07-23)" above — no blockers. Merge when convenient.
 - **All other PRs from this session (#1–#15) are merged.** Nothing else pending.
 - **Push/merge mechanics for this repo**: `fuadteymurov` (the working account) is
   NOT a collaborator on `TeymurovFuad/family-budget-bot` — pushes go to the
@@ -220,6 +214,30 @@ reasoning in the preview, and offers a one-command override.
       Makes categorization deterministic and cuts DeepSeek calls.
       *(done: `merchant_map.py`, JSON at `data/merchant_map.json` via the user-prefs pattern —
       no workbook change; auto-seeds from MasterData on first use; 🧠 markers in the preview)*
+
+## Follow-up: dedup review notes (PR #16, 2026-07-23)
+
+Four non-blocking findings from the PR #16 adversarial review — safe to merge as-is, queued as follow-up:
+
+- [ ] **`_parse_row_targets` inconsistent OOB feedback** — `keep 1 5` on a 1-row draft silently
+      drops the out-of-range `5` rather than reporting it; a lone out-of-range token does error.
+      Unified: any target list with at least one valid index silently ignores OOB extras, but
+      a list with zero valid indices should error consistently.
+      (`handlers/bulk_conv.py` `_parse_row_targets`)
+- [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message
+      phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited
+      BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never
+      improvised"). Deliberate re-alignment pass, not urgent.
+- [ ] **`_bulk_footer` redundant suggestion for single-flagged-row case** — when exactly one row
+      is dup-flagged the footer renders e.g. `keep 3`, `keep 3`, or `keep all flagged` — the first
+      example duplicates the second.
+      (`handlers/bulk_conv.py` `_bulk_footer`)
+- [ ] **`_format_dedup_messages` mass-loose-match-hint denominator is wrong** — it folds
+      already-skipped strict-dup counts into `total_new` (the denominator for the "most rows
+      loose-matched" ratio), undercounting it in mixed strict+loose batches — exactly the
+      bank-reformatted-descriptions scenario the hint exists for. Fix: denominator should be
+      rows the strict pass left as new.
+      (`handlers/bulk_conv.py` `_format_dedup_messages`)
 
 ## Follow-up: dedup review notes (PR #7, 2026-07-22)
 
