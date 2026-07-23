@@ -10,17 +10,19 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-23 — PR #23 merged, docs PR opened)*
+> *(Last updated: 2026-07-23 — PRs #23, #24, #27 merged, docs PR opened)*
 
 ### PR state at last update
-- **All PRs #1–#23 merged**, including bank-statement profiles (PR #18),
+- **All PRs #1–#27 merged**, including bank-statement profiles (PR #18),
   auto-update Telegram notification (PR #19), orchestrator-memory update
-  (PR #21), bank-statement profiles docs (PR #22), and budget cycles Phase 1
+  (PR #21), bank-statement profiles docs (PR #22), budget cycles Phase 1
   (PR #23: `BUDGET_CYCLE` flag, `CyclesSchema`, `/cycle started`, salary
-  prompt, cycle-aware `/summary`).
-- **Next open work**: budget cycles Phase 2 (Cycle Dashboard sheet,
-  `/cycles detect` backfill, `/summary` picker UX). See "budget cycles —
-  agreed design" and "/summary picker UX — agreed design" sections below.
+  prompt, cycle-aware `/summary`), cycles docs (PR #24), and debit/credit
+  split columns + profile deletion (PR #27).
+- **Next open work**: budget cycles Phase 2 (`/summary` picker UX is next up,
+  plus Cycle Dashboard sheet and `/cycles detect` backfill). See "budget
+  cycles — agreed design" and "/summary picker UX — agreed design" sections
+  below.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -54,6 +56,9 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
      match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
+- PRs #23, #24, #27 merged 2026-07-23: budget cycles Phase 1, cycles docs,
+  and debit/credit split columns + profile deletion. Phase 2 (`/summary`
+  picker UX) is next up.
 - Budget cycles Phase 1 (PR #23) merged 2026-07-23. DOCUMENTATION.md, README,
   and BACKLOG updated in the follow-up docs PR. Phase 2 items (Cycle Dashboard,
   `/cycles detect`, `/summary` picker UX) remain pending — see "budget cycles —
@@ -737,6 +742,22 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
 - [ ] **Test: unknown encoding in profile → `LookupError` fallback** — `parse_statement` catches `LookupError` when `profile["encoding"]` specifies an unknown codec and falls back to `utf-8, errors="replace"`. The fallback is untested and silent; add a test and consider surfacing a warning to the user.
 - [ ] **Test: zero-amount row classification** — `"0.00"` passes the empty-check and under `negative_expense` becomes Income type with value 0 (possibly a fee-waiver or balance row). Test and document the intended behavior.
 - [ ] **Test fixture: shallow copy of `BANKA_PROFILE` fixture** — `test_multiple_profiles_loaded` does `{**BANKA_PROFILE, ...}` which is a shallow copy; `column_map` is the same object as `BANKA_PROFILE["column_map"]`. Any future test mutating `p2["column_map"]` in-place would corrupt the shared fixture. Use `copy.deepcopy(BANKA_PROFILE)` in the fixture or a factory function.
+
+## Follow-up: profile review notes (PR #27, 2026-07-23)
+
+Non-blocking findings from the PR #27 review (debit/credit split columns + profile deletion):
+
+- [ ] **`validate_profile_mapping` `amount+credit` conflict case untested** — the
+      symmetric `amount+debit` conflict is covered by a test; add the `amount+credit`
+      counterpart. (`statement_profiles.py`)
+- [ ] **Parser behaviour untested for debit-only split mapping** — when
+      `sign_convention` is `debit_credit_split` but `column_map` contains only
+      `debit` (no `credit`), the parser's behaviour is untested; add coverage and
+      document the intended result. (`statement_profiles.py`)
+- [ ] **Possible test-isolation flake** —
+      `tests/test_cycles.py::TestAppendCycleBoundary::test_creates_sheet_and_appends`
+      failed once in a full-suite run but passes in isolation and on rerun;
+      investigate test ordering / shared state.
 
 ## Notes
 
