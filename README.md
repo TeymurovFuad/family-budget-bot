@@ -43,12 +43,18 @@ Each button opens its respective command flow without typing a slash command.
 
 ### Bulk import
 
-`/bulk` — import many transactions at once from a photo, a plain-text (`.txt`)
-file, or pasted text. The AI extracts every transaction, auto-validates the
-results against the Lists sheet, and shows an editable preview before anything
-is written. Send `save` (or `/save`) to store the batch, `cancel` to discard.
-Unfinished drafts are kept per user — run `/bulk` again to resume after a
-timeout or bot restart.
+`/bulk` — import many transactions at once from a photo, a CSV/XLSX bank
+statement, a plain-text (`.txt`) file, or pasted text. The AI extracts every
+transaction, auto-validates the results against the Lists sheet, and shows an
+editable preview before anything is written. Send `save` (or `/save`) to store
+the batch, `cancel` to discard. Unfinished drafts are kept per user — run
+`/bulk` again to resume after a timeout or bot restart.
+
+CSV/XLSX statements use **saved profiles**: the first upload from a new bank
+format triggers one AI call to map the columns (sample data is masked); you
+confirm and name the profile, and every later statement with the same columns
+parses instantly with zero AI calls. Profiles live on the bot's disk only —
+no bank names or account details in the repo.
 
 ---
 

@@ -13,12 +13,14 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > *(Last updated: 2026-07-23)*
 
 ### PR state at last update
-- **All PRs #1–#17 merged** (assuming PR #17 lands; verify with `gh pr list`).
-- No open PRs expected. If any appear, check their review status before merging.
-- **New capability added (branch `feature/update-notification`, not yet a PR):**
-  `deploy/auto-update.sh` now sends a best-effort Telegram message to the
-  primary owner after a successful auto-update, listing merged PR titles
-  between the old and new commit. See README "Host and forget" section.
+- **All PRs #1–#20 merged**, including bank-statement profiles (PR #18),
+  auto-update Telegram notification (PR #19), and the squash-merge /
+  plain-language-PR-title convention (PR #20).
+- **PR #21 open (draft)**: orchestrator-memory update (parallel-agent
+  isolation + backlog-capture rules). Docs-only; owner merges when ready.
+- **PR-title rule is live**: titles become the Telegram changelog verbatim —
+  write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
+  always squash-merge. See `.github/pull_request_template.md`.
 
 ### Standing mechanics (doesn't change session to session)
 - **Push/merge**: `fuadteymurov` is NOT a collaborator on
@@ -33,21 +35,23 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **Bank-statement profiles** — biggest remaining designed feature. Full
-     design in "bank-statement profiles — agreed design" section below. Reuses
-     dedup v2's drop/keep grammar; feeds batch-level timestamp disambiguation.
-  2. **Budget cycles + `/summary` picker UX** — touches the workbook (new
+  1. **Budget cycles + `/summary` picker UX** — touches the workbook (new
      `Cycles` sheet, `Cycle Dashboard` sheet). Designs in "budget cycles —
      agreed design" and "/summary picker UX — agreed design" sections below.
-  3. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
+  2. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
      and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
-     items in "dedup review notes (PR #16, 2026-07-23)"); UX group (person
-     attribution — check overlap with dedup v2 grammar before implementing);
-     token-economy and infra/performance groups.
-  4. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
+     items in "dedup review notes (PR #16, 2026-07-23)"); PR #18 review
+     backlog items ("bank-statement profiles review notes (PR #18)" below);
+     UX group (person attribution — check overlap with dedup v2 grammar
+     before implementing); token-economy and infra/performance groups.
+  3. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
      match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
+- Bank-statement profiles (PR #18) merged 2026-07-23. DOCUMENTATION.md and
+  README updated post-merge. Test-suite hardening landed in the same PR:
+  handler-test auth bypass is now immune to pytest collection order (reload
+  trick mirrored from test_write_gate.py).
 - Dedup v2 (PR #16) merged 2026-07-23. Five non-blocking findings queued in
   "dedup review notes (PR #16)" below. DOCUMENTATION.md updated for the new
   `drop`/`keep` grammar (PR #17).
