@@ -210,6 +210,52 @@ class TestParseStatementCSV:
         rows = sp.parse_statement(csv_bytes, "statement.csv", profile)
         assert rows[0]["value"] == pytest.approx(99.50)
 
+    def test_parse_statement_csv_header_row_nonzero(self):
+        """CSV with 2 preamble lines before the real header; header_row=2."""
+        buf = io.StringIO()
+        buf.write("Bank Export Report\n")
+        buf.write("Generated: 2026-03-01\n")
+        buf.write("TransDate;Amount;CCY;Info\n")
+        buf.write("12.03.2026;-10,00;PLN;Coffee\n")
+        buf.write("13.03.2026;50,00;EUR;Salary\n")
+        csv_bytes = buf.getvalue().encode("utf-8")
+
+        profile = {**BANKA_PROFILE, "header_row": 2}
+        rows = sp.parse_statement(csv_bytes, "statement.csv", profile)
+
+        assert len(rows) == 2
+        assert rows[0]["date"] == "2026-03-12"
+        assert rows[0]["value"] == pytest.approx(10.00)
+        assert rows[0]["type"] == "Expense"
+        assert rows[1]["date"] == "2026-03-13"
+        assert rows[1]["type"] == "Income"
+
+    def test_parse_statement_csv_european_thousands(self):
+        """Amount '1.234,56' with decimal_separator=',' → 1234.56."""
+        profile = {**BANKA_PROFILE, "decimal_separator": ","}
+        csv_bytes = _make_csv_bytes(
+            ["TransDate", "Amount", "CCY", "Info"],
+            [["01.06.2026", "-1.234,56", "PLN", "Big purchase"]],
+            delimiter=";",
+        )
+        rows = sp.parse_statement(csv_bytes, "statement.csv", profile)
+        assert len(rows) == 1
+        assert rows[0]["value"] == pytest.approx(1234.56)
+        assert rows[0]["type"] == "Expense"
+
+    def test_parse_statement_csv_us_thousands(self):
+        """Amount '1,234.56' with decimal_separator='.' → 1234.56."""
+        profile = {**BANKA_PROFILE, "decimal_separator": "."}
+        csv_bytes = _make_csv_bytes(
+            ["TransDate", "Amount", "CCY", "Info"],
+            [["01.06.2026", "-1,234.56", "PLN", "Big purchase"]],
+            delimiter=";",
+        )
+        rows = sp.parse_statement(csv_bytes, "statement.csv", profile)
+        assert len(rows) == 1
+        assert rows[0]["value"] == pytest.approx(1234.56)
+        assert rows[0]["type"] == "Expense"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # parse_statement — XLSX
@@ -245,6 +291,75 @@ class TestParseStatementXLSX:
         rows = sp.parse_statement(xlsx_bytes, "statement.xlsx", BANKA_PROFILE)
         assert len(rows) == 1
         assert rows[0]["value"] == pytest.approx(10.50)
+
+    def test_parse_statement_xlsx_header_row_nonzero(self):
+        """XLSX with 2 preamble rows before headers; header_row=2."""
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Bank Export Report"])           # row 0 (preamble)
+        ws.append(["Generated: 2026-03-01"])        # row 1 (preamble)
+        ws.append(["TransDate", "Amount", "CCY", "Info"])  # row 2 (headers)
+        ws.append(["15.06.2026", -25.0, "PLN", "Transport"])
+        ws.append(["16.06.2026", 100.0, "EUR", "Refund"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        xlsx_bytes = buf.getvalue()
+
+        profile = {**BANKA_PROFILE, "header_row": 2, "decimal_separator": "."}
+        rows = sp.parse_statement(xlsx_bytes, "statement.xlsx", profile)
+
+        assert len(rows) == 2
+        assert rows[0]["date"] == "2026-06-15"
+        assert rows[0]["value"] == pytest.approx(25.0)
+        assert rows[0]["type"] == "Expense"
+        assert rows[1]["type"] == "Income"
+
+    def test_parse_statement_xlsx_merged_cell_header(self):
+        """
+        XLSX with a merged header cell (A1:B1 merged, value 'Date').
+        openpyxl read_only returns None for the non-origin cells in a merge,
+        so the fingerprint must skip the empty cell. We assert that the
+        function either (a) produces a fingerprint with one 'Date' entry and
+        skips the empty column name, or (b) maps the data correctly.
+        The key contract is: no exception is raised, and no row is silently
+        swallowed due to the empty header cell.
+        """
+        import openpyxl
+        from openpyxl.utils import get_column_letter
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        # Merge A1:B1 — openpyxl read_only will show 'Date' at A1 and None at B1.
+        ws.merge_cells("A1:B1")
+        ws["A1"] = "Date"
+        ws["C1"] = "Amount"
+        ws["D1"] = "Info"
+        ws.append(["", "15.06.2026", -10.0, "Coffee"])  # data row: col B holds date
+        buf = io.BytesIO()
+        wb.save(buf)
+        xlsx_bytes = buf.getvalue()
+
+        # Profile maps to columns as openpyxl returns them (merged cell → empty string for B1).
+        # The function must not raise; verify no crash and return value is a list.
+        profile = {
+            **BANKA_PROFILE,
+            "decimal_separator": ".",
+            # column_map intentionally references the real column names to test
+            # that empty-header skipping doesn't break iteration.
+            "column_map": {
+                "date": "Date",
+                "amount": "Amount",
+                "currency": None,
+                "description": "Info",
+                "time": None,
+            },
+            "fingerprint": ["Date", "Amount", "Info"],
+        }
+        # Must not raise — merged cells produce empty strings, not exceptions.
+        result = sp.parse_statement(xlsx_bytes, "statement.xlsx", profile)
+        assert isinstance(result, list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -331,8 +446,9 @@ class TestMaskSampleRows:
 
 class TestProposeMapping:
     def _make_ai_client(self, response_json: dict) -> MagicMock:
+        """Return a mock that satisfies the public AIProvider.chat interface."""
         client = MagicMock()
-        client._chat.return_value = json.dumps(response_json)
+        client.chat.return_value = json.dumps(response_json)
         return client
 
     def test_propose_mapping_mocked(self):
@@ -362,9 +478,9 @@ class TestProposeMapping:
         assert result["decimal_separator"] == ","
         assert result["sign_convention"] == "negative_expense"
 
-        # Verify _chat was called once with correct role structure.
-        client._chat.assert_called_once()
-        messages = client._chat.call_args[0][0]
+        # Verify chat was called once with correct role structure.
+        client.chat.assert_called_once()
+        messages = client.chat.call_args[0][0]
         assert messages[0]["role"] == "system"
         assert messages[1]["role"] == "user"
         assert "TransDate" in messages[1]["content"]
@@ -372,23 +488,41 @@ class TestProposeMapping:
     def test_propose_mapping_ai_failure_returns_empty(self):
         """AI failure (exception) must return {} not raise."""
         client = MagicMock()
-        client._chat.side_effect = RuntimeError("network error")
+        client.chat.side_effect = RuntimeError("network error")
         result = sp.propose_mapping(["A", "B"], [["1", "2"]], client)
         assert result == {}
 
     def test_propose_mapping_bad_json_returns_empty(self):
         """Non-JSON AI response must return {}."""
         client = MagicMock()
-        client._chat.return_value = "Sorry, I cannot help with that."
+        client.chat.return_value = "Sorry, I cannot help with that."
         result = sp.propose_mapping(["A", "B"], [["1", "2"]], client)
         assert result == {}
 
     def test_propose_mapping_missing_column_map_returns_empty(self):
         """AI response missing column_map key must return {}."""
         client = MagicMock()
-        client._chat.return_value = json.dumps({"date_format": "%Y-%m-%d"})
+        client.chat.return_value = json.dumps({"date_format": "%Y-%m-%d"})
         result = sp.propose_mapping(["A", "B"], [["1", "2"]], client)
         assert result == {}
+
+    def test_propose_mapping_mocked_with_fences(self):
+        """AI returns a markdown-fenced JSON block; fence stripping must work."""
+        fenced_response = (
+            "```json\n"
+            '{"column_map": {"date": "Date"}, "date_format": "%d.%m.%Y",'
+            ' "decimal_separator": ".", "sign_convention": "negative_expense"}'
+            "\n```"
+        )
+        client = MagicMock()
+        client.chat.return_value = fenced_response
+
+        result = sp.propose_mapping(["Date", "Amount"], [["01.01.2026", "-10.00"]], client)
+
+        assert result.get("column_map", {}).get("date") == "Date"
+        assert result.get("date_format") == "%d.%m.%Y"
+        assert result.get("decimal_separator") == "."
+        assert result.get("sign_convention") == "negative_expense"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

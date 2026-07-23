@@ -385,9 +385,8 @@ def propose_mapping(
     Makes ONE chat completion call; returns the parsed dict on success or {}
     on failure. The caller handles fallback.
 
-    ai_client must implement a _chat(messages) → str interface (same as
-    DeepSeekProvider._chat but accessible from outside). Pass the provider
-    instance from ai_parser.get_provider().
+    ai_client must implement the AIProvider.chat(messages) → str interface.
+    Pass the provider instance from ai_parser.get_provider().
     """
     masked = mask_sample_rows(sample_rows, {})
     prompt = _build_mapping_prompt(headers, masked[: min(3, len(masked))])
@@ -396,7 +395,7 @@ def propose_mapping(
             {"role": "system", "content": _MAPPING_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
-        raw = ai_client._chat(messages)
+        raw = ai_client.chat(messages)
         # Strip markdown fences if the model added them.
         raw = raw.strip()
         if raw.startswith("```"):
