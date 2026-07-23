@@ -19,13 +19,10 @@ Read at session start. Apply silently.
 
 ## Layer and role sync
 <!-- 2026-05-13 -->
-- All memory is project-local — no global repo dependency after `/memory init`.
-- `/memory init` runs once per project. Existing projects do not automatically receive template updates — copy new files manually if needed.
+- All memory is project-local — no global repo dependency.
 
 <!-- 2026-06-27 -->
-- The project is fully self-contained after `/memory init`. No project file (`memories/`, `commands/`, `agents/`, `tools/`) may reference `~/.ai-memory` — that path is known only to `commands/memory.md`.
-- `commands/memory.md` is the sole bridge between the project and `~/.ai-memory`. It touches that path only when the user explicitly calls `/memory merge`, `/memory pull`, or `/memory init`. All other roles are unaware `~/.ai-memory` exists.
-- `.claude/agents/` files follow the same isolation as `memories/` — project-local only, synced from the template only via `/memory init` or `/memory merge`.
+- `.claude/agents/` files follow the same isolation as `memories/` — project-local only.
 
 ## PR and branch workflow
 <!-- 2026-05-13 -->
