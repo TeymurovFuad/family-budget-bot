@@ -238,6 +238,17 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       bank-reformatted-descriptions scenario the hint exists for. Fix: denominator should be
       rows the strict pass left as new.
       (`handlers/bulk_conv.py` `_format_dedup_messages`)
+- [ ] **`bulk_receive` reads the draft file twice** — `pre_merge_len = len(_load_user_draft(uid))`
+      is called immediately before `_merge_bulk_draft`, which calls `_load_user_draft` internally
+      as its first step. On local backend this is negligible; on GCS/S3 it's two network downloads
+      for the same file. Fix: have `_merge_bulk_draft` return the pre-merge count alongside
+      the merged list, or cache the read.
+      (`handlers/bulk_conv.py` `bulk_receive`, `_merge_bulk_draft`)
+- [ ] **DOCUMENTATION.md not updated for dedup v2 user-facing grammar** — the `/bulk` section
+      only documents `N field=value`, `save`, and `cancel`. The new `drop N`, `keep N`,
+      `drop 4-6 9`, `keep all flagged`, `drop all flagged`, `drop all`, `keep all` grammar is
+      completely absent, as are the dedup advisory messages and how to respond to them.
+      Update the "Bulk Import via /bulk" section.
 
 ## Follow-up: dedup review notes (PR #7, 2026-07-22)
 
