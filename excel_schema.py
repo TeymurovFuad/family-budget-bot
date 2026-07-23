@@ -234,3 +234,12 @@ class ListsSchema:
     goal_name:   Any = col("Goal Name")
     alloc_pct:   Any = col("Alloc %")
     goal_pln:    Any = col("Goal (PLN)")
+
+
+# ── Cycles sheet ──────────────────────────────────────────────────────────────
+
+@dataclass
+class CyclesSchema:
+    """Column declarations for the Cycles sheet (one row per budget cycle)."""
+    start_date: Any = col("StartDate")
+    label:      Any = col("Label")
