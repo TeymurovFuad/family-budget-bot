@@ -47,6 +47,7 @@ from handlers.add_conv import (
 from handlers.bulk_conv import (
     cmd_bulk, bulk_receive, bulk_confirm, bulk_timeout,
     bulk_profile_callback, bulk_profile_name,
+    bulk_profile_list_callback,
 )
 from handlers.delete_conv import cmd_delete, delete_pick
 from handlers.edit_conv import (
@@ -141,6 +142,9 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("range",   cmd_range))
     app.add_handler(CommandHandler("cycle",   cmd_cycle))
     app.add_handler(CommandHandler("export",  cmd_export))
+
+    # ── profile list / delete inline callbacks (global — outside any conversation) ──
+    app.add_handler(CallbackQueryHandler(bulk_profile_list_callback, pattern="^profile_del[_:]"))
 
     # ── range report inline callback ──────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_range_callback, pattern="^range:"))

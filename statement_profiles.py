@@ -15,10 +15,20 @@ Profile JSON schema (all keys):
   header_row        int   — 0-based row index of the header (default 0)
   fingerprint       list  — column names that uniquely identify this format
   column_map        dict  — maps standard field → source column name (or null)
-                            fields: date, amount, currency, description, time
+                            single-amount fields: date, amount, currency, description, time
+                            split-column fields:  date, debit, credit, currency, description, time
   date_format       str   — strptime pattern, e.g. "%d.%m.%Y"
   decimal_separator str   — "," or "."
   sign_convention   str   — "negative_expense" | "positive_expense" | "always_expense"
+                          | "debit_credit_split"
+
+Split-column mode (sign_convention == SIGN_DEBIT_CREDIT_SPLIT):
+  column_map must have "debit" and "credit" keys instead of "amount".
+  Each row typically has a value in exactly one column; the other is 0 or empty.
+  debit non-zero → Expense, credit non-zero → Income.
+  If both are non-zero (unusual) debit wins and a debug note is logged.
+  If both are zero/empty the row is skipped (balance or fee-waiver line).
+  Amount is always stored as a positive float; type carries Expense/Income.
 """
 
 import csv
@@ -30,6 +40,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+# Named constant for the split-column sign convention.
+SIGN_DEBIT_CREDIT_SPLIT = "debit_credit_split"
 
 # Standard output fields every parsed row provides.
 _STANDARD_FIELDS = ("date", "amount", "currency", "description", "time")
@@ -85,16 +98,62 @@ def match_profile(headers: list[str], profiles: dict[tuple, dict]) -> dict | Non
     return profiles.get(fp)
 
 
+def profile_safe_name(name: str) -> str:
+    """Sanitize a profile name for use as a filename stem — keep only safe chars."""
+    return re.sub(r"[^\w\-]", "_", name.strip())
+
+
 def save_profile(profile: dict, profiles_dir: str | Path) -> None:
     """Write profile to <profiles_dir>/<name>.json."""
     profiles_dir = Path(profiles_dir)
     profiles_dir.mkdir(parents=True, exist_ok=True)
     name = str(profile.get("name") or "unnamed").strip()
     # Sanitize filename — keep only safe chars.
-    safe_name = re.sub(r"[^\w\-]", "_", name)
+    safe_name = profile_safe_name(name)
     path = profiles_dir / f"{safe_name}.json"
     path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info("statement_profiles: saved profile '%s' → %s", name, path)
+
+
+def delete_profile(name: str, profiles_dir: str | Path) -> bool:
+    """
+    Delete the saved profile whose 'name' field matches exactly.
+    Returns True if a profile was deleted, False if not found.
+    """
+    profiles_dir = Path(profiles_dir)
+    if not profiles_dir.exists():
+        return False
+    for path in profiles_dir.glob("*.json"):
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8"))
+            if profile.get("name") == name:
+                path.unlink()
+                log.info("statement_profiles: deleted profile '%s' → %s", name, path)
+                return True
+        except Exception as exc:
+            log.warning("statement_profiles: could not read %s during delete: %s", path.name, exc)
+    return False
+
+
+def list_profiles(profiles_dir: str | Path) -> list[dict]:
+    """
+    Return all saved profile dicts sorted by name (case-insensitive).
+    Only files with a non-empty 'name' field are included — bare JSON objects
+    without a 'name' (e.g. map files) are silently skipped.
+    """
+    profiles_dir = Path(profiles_dir)
+    result: list[dict] = []
+    if not profiles_dir.exists():
+        return result
+    for path in profiles_dir.glob("*.json"):
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(profile, dict) and profile.get("name"):
+                result.append(profile)
+        except Exception as exc:
+            log.warning("statement_profiles: could not load %s: %s", path.name, exc)
+    result.sort(key=lambda p: str(p.get("name") or "").lower())
+    return result
 
 
 # ── Masking helper ────────────────────────────────────────────────────────────
@@ -102,17 +161,24 @@ def save_profile(profile: dict, profiles_dir: str | Path) -> None:
 def mask_sample_rows(rows: list[list], column_map_proposal: dict) -> list[list]:
     """
     Replace amount-looking and account-number-looking cell values with "***".
-    column_map_proposal maps field → source_column_name; the amount column is
-    always masked. Cells matching _AMOUNT_RE or _ACCOUNT_RE are also masked.
+    column_map_proposal maps field → source_column_name; the amount, debit, and
+    credit columns are masked by name. Cells matching _AMOUNT_RE or _ACCOUNT_RE
+    are also masked regardless of column.
     """
-    # Determine which indices look like amounts from the proposal.
-    amount_col = column_map_proposal.get("amount") or ""
+    masked_col_names = {
+        c for c in (
+            column_map_proposal.get("amount"),
+            column_map_proposal.get("debit"),
+            column_map_proposal.get("credit"),
+        )
+        if c
+    }
     masked = []
     for row in rows:
         new_row = []
         for cell in row:
             s = str(cell).strip()
-            if s == amount_col or _AMOUNT_RE.match(s) or _ACCOUNT_RE.match(s):
+            if s in masked_col_names or _AMOUNT_RE.match(s) or _ACCOUNT_RE.match(s):
                 new_row.append("***")
             else:
                 new_row.append(cell)
@@ -151,24 +217,92 @@ def _parse_row_dict(
     """
     Map one CSV/XLSX row dict (column_name → cell_value) into the standard
     output format. Returns None if the row appears to be a header or is empty.
+
+    Supports two amount modes controlled by sign_convention:
+      - Single-column (negative_expense / positive_expense / always_expense):
+        column_map["amount"] is the source column.
+      - Split-column (debit_credit_split):
+        column_map["debit"] → expense column, column_map["credit"] → income column.
+        The row is skipped when both are zero/empty.
     """
     col_map: dict[str, str | None] = profile.get("column_map") or {}
     decimal_sep: str = profile.get("decimal_separator") or "."
     date_fmt: str = profile.get("date_format") or "%Y-%m-%d"
     sign_convention: str = profile.get("sign_convention") or "negative_expense"
 
-    # Amount
-    amount_col = col_map.get("amount")
-    if not amount_col or amount_col not in row:
-        return None
-    raw_amount = str(row.get(amount_col) or "").strip()
-    if not raw_amount:
-        return None
-    try:
-        amount = _normalize_amount(raw_amount, decimal_sep)
-    except ValueError:
-        log.debug("statement_profiles: skipping row — unparseable amount %r", raw_amount)
-        return None
+    # ── Amount / type resolution ──────────────────────────────────────────────
+    if sign_convention == SIGN_DEBIT_CREDIT_SPLIT:
+        debit_col = col_map.get("debit")
+        credit_col = col_map.get("credit")
+        if not debit_col and not credit_col:
+            return None  # profile misconfigured — no amount columns at all
+
+        raw_debit = (
+            str(row.get(debit_col) or "").strip()
+            if debit_col and debit_col in row
+            else ""
+        )
+        raw_credit = (
+            str(row.get(credit_col) or "").strip()
+            if credit_col and credit_col in row
+            else ""
+        )
+
+        debit_val = 0.0
+        credit_val = 0.0
+        if raw_debit:
+            try:
+                debit_val = abs(_normalize_amount(raw_debit, decimal_sep))
+            except ValueError:
+                pass
+        if raw_credit:
+            try:
+                credit_val = abs(_normalize_amount(raw_credit, decimal_sep))
+            except ValueError:
+                pass
+
+        if debit_val == 0.0 and credit_val == 0.0:
+            return None  # both zero/empty — balance or fee-waiver row; skip
+
+        if debit_val > 0.0 and credit_val > 0.0:
+            log.warning(
+                "statement_profiles: both debit (%.2f) and credit (%.2f) non-zero — preferring debit",
+                debit_val, credit_val,
+            )
+            amount = debit_val
+            txn_type = "Expense"
+        elif debit_val > 0.0:
+            amount = debit_val
+            txn_type = "Expense"
+        else:
+            amount = credit_val
+            txn_type = "Income"
+    else:
+        # Single-column mode.
+        amount_col = col_map.get("amount")
+        if not amount_col or amount_col not in row:
+            return None
+        raw_amount = str(row.get(amount_col) or "").strip()
+        if not raw_amount:
+            return None
+        try:
+            amount = _normalize_amount(raw_amount, decimal_sep)
+        except ValueError:
+            log.debug("statement_profiles: skipping row — unparseable amount %r", raw_amount)
+            return None
+
+        if sign_convention == "negative_expense":
+            txn_type = "Expense" if amount < 0 else "Income"
+            amount = abs(amount)
+        elif sign_convention == "positive_expense":
+            txn_type = "Expense" if amount > 0 else "Income"
+            amount = abs(amount)
+        else:
+            # "always_expense" or unknown
+            txn_type = "Expense"
+            amount = abs(amount)
+
+    # ── Shared fields ─────────────────────────────────────────────────────────
 
     # Date
     date_col = col_map.get("date")
@@ -198,18 +332,6 @@ def _parse_row_dict(
     if time_col and time_col in row:
         raw_t = str(row[time_col]).strip()
         time_val = raw_t or None
-
-    # Sign convention → transaction type
-    if sign_convention == "negative_expense":
-        txn_type = "Expense" if amount < 0 else "Income"
-        amount = abs(amount)
-    elif sign_convention == "positive_expense":
-        txn_type = "Expense" if amount > 0 else "Income"
-        amount = abs(amount)
-    else:
-        # "always_expense" or unknown
-        txn_type = "Expense"
-        amount = abs(amount)
 
     return {
         "date": parsed_date.isoformat() if parsed_date else "",
@@ -351,8 +473,8 @@ _MAPPING_SYSTEM_PROMPT = (
     "Do not add any explanation or markdown fences."
 )
 
-_REQUIRED_FIELDS = ("date", "amount", "currency", "description", "time")
-_SIGN_CONVENTIONS = ("negative_expense", "positive_expense", "always_expense")
+_REQUIRED_FIELDS = ("date", "amount", "debit", "credit", "currency", "description", "time")
+_SIGN_CONVENTIONS = ("negative_expense", "positive_expense", "always_expense", SIGN_DEBIT_CREDIT_SPLIT)
 
 
 def _build_mapping_prompt(headers: list[str], sample_rows: list[list]) -> str:
@@ -365,14 +487,82 @@ def _build_mapping_prompt(headers: list[str], sample_rows: list[list]) -> str:
         f"Sample rows (sensitive values masked):\n{rows_text}\n\n"
         f"Map each header to one of these standard fields: {list(_REQUIRED_FIELDS)}.\n"
         f"A header may map to null if it is not needed.\n\n"
+        f"SPLIT COLUMNS: If the bank uses two separate amount columns — one for "
+        f"debits/withdrawals/expenses and one for credits/deposits/income — map them "
+        f"to 'debit' and 'credit' instead of 'amount', and set sign_convention to "
+        f"'{SIGN_DEBIT_CREDIT_SPLIT}'. In that case column_map must have 'debit' and "
+        f"'credit' but NOT 'amount'. Do NOT map balance or running-total columns "
+        f"(they accumulate across rows, not per-transaction amounts).\n\n"
         f"Return JSON with exactly these keys:\n"
-        f"  column_map: {{date: str|null, amount: str|null, currency: str|null, "
-        f"description: str|null, time: str|null}}\n"
+        f"  column_map: {{date: str|null, amount: str|null, debit: str|null, "
+        f"credit: str|null, currency: str|null, description: str|null, time: str|null}}\n"
         f"  date_format: str  (strptime pattern, e.g. \"%d.%m.%Y\")\n"
         f"  decimal_separator: \",\" or \".\"\n"
         f"  sign_convention: one of {list(_SIGN_CONVENTIONS)}\n\n"
         f"column_map values must be header strings from the provided list, or null."
     )
+
+
+def validate_profile_mapping(profile: dict) -> list[str]:
+    """
+    Check that a profile has the minimum required fields mapped.
+    Returns a list of human-readable error strings (empty = valid).
+
+    Rules:
+      - date must be mapped.
+      - currency must be mapped.
+      - Exactly one of these must be present:
+          * amount (single-column mode)
+          * both debit AND credit (split-column mode)
+      - Never both amount AND debit/credit together.
+      - sign_convention must be consistent with column_map:
+          * debit_credit_split ↔ col_map has debit+credit (not amount)
+          * any other convention ↔ col_map has amount (not debit/credit)
+    """
+    col_map = profile.get("column_map") or {}
+    sign_convention = profile.get("sign_convention") or "negative_expense"
+    errors: list[str] = []
+
+    if not col_map.get("date"):
+        errors.append("date column is not mapped")
+    if not col_map.get("currency"):
+        errors.append("currency column is not mapped")
+
+    has_amount = bool(col_map.get("amount"))
+    has_debit = bool(col_map.get("debit"))
+    has_credit = bool(col_map.get("credit"))
+
+    if has_amount and (has_debit or has_credit):
+        errors.append(
+            "amount and debit/credit are both mapped — use either a single amount "
+            "column OR debit + credit columns, not both"
+        )
+    elif has_debit and not has_credit:
+        errors.append(
+            f"debit column '{col_map['debit']}' is mapped but credit column is missing — "
+            "also map the credit column, or switch to a single amount column"
+        )
+    elif has_credit and not has_debit:
+        errors.append(
+            f"credit column '{col_map['credit']}' is mapped but debit column is missing — "
+            "also map the debit column, or switch to a single amount column"
+        )
+    elif not has_amount and not has_debit and not has_credit:
+        errors.append("no amount column mapped (need amount OR debit + credit)")
+
+    # sign_convention cross-check
+    if sign_convention == SIGN_DEBIT_CREDIT_SPLIT and has_amount and not has_debit and not has_credit:
+        errors.append(
+            "sign_convention is 'debit_credit_split' but only 'amount' is mapped — "
+            "map debit and credit columns instead, or change the sign_convention"
+        )
+    elif sign_convention != SIGN_DEBIT_CREDIT_SPLIT and (has_debit or has_credit) and not has_amount:
+        errors.append(
+            f"sign_convention is '{sign_convention}' but debit/credit columns are mapped instead of amount — "
+            "set sign_convention to 'debit_credit_split' or map a single amount column"
+        )
+
+    return errors
 
 
 def propose_mapping(

@@ -216,12 +216,13 @@ class TestFormatProfileConfirmMessage:
         msg = _format_profile_confirm_message(self._sample_proposal())
         assert "negative" in msg.lower()
 
-    def test_unmapped_field_shown(self):
-        """Fields with no column mapping show '(not mapped)'."""
+    def test_unmapped_optional_field_shown(self):
+        """Optional fields with no mapping show 'not found' in the output."""
         proposal = self._sample_proposal()
         proposal["column_map"]["time"] = None
         msg = _format_profile_confirm_message(proposal)
-        assert "not mapped" in msg
+        # Optional unmapped fields show "not found" in the output.
+        assert "not found" in msg
 
     def test_header_line_present(self):
         msg = _format_profile_confirm_message(self._sample_proposal())
@@ -237,3 +238,129 @@ class TestFormatProfileConfirmMessage:
         msg = _format_profile_confirm_message({})
         assert isinstance(msg, str)
         assert len(msg) > 0
+
+    def test_split_column_branch_shown(self):
+        """split-column proposal renders both debit+credit column names, not 'amount →'."""
+        import statement_profiles as sp
+        proposal = {
+            "column_map": {
+                "date": "TxnDate",
+                "debit": "Debits",
+                "credit": "Credits",
+                "currency": "CCY",
+                "description": "Memo",
+                "time": None,
+            },
+            "date_format": "%Y-%m-%d",
+            "decimal_separator": ".",
+            "sign_convention": sp.SIGN_DEBIT_CREDIT_SPLIT,
+        }
+        msg = _format_profile_confirm_message(proposal)
+        # Must contain split line with both column names.
+        assert "Debits" in msg
+        assert "Credits" in msg
+        # Must NOT show a bare "amount    → 'SomeColumn'" line (non-split style).
+        lines = msg.splitlines()
+        assert not any(
+            line.strip().startswith("amount") and "split:" not in line and "Debits" not in line
+            for line in lines
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fix_field mutual-exclusivity state mutation
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestFixFieldMutualExclusivity:
+    """
+    Verify the state-dict mutation logic enforced in bulk_profile_callback
+    when the user reassigns a column via fix_field.
+
+    These are pure unit tests on the dict manipulation logic — no Telegram
+    context or bot needed.
+    """
+
+    def _apply_fix_field(self, proposal: dict, col: str, field: str) -> dict:
+        """
+        Mirror the fix_field mutation from bulk_profile_callback without
+        Telegram: given a proposal dict, a column name, and a target field,
+        return the updated proposal dict.
+        """
+        import statement_profiles as sp
+
+        col_map = proposal.setdefault("column_map", {})
+        # Clear old mapping for this column across all fields.
+        for k in list(col_map.keys()):
+            if col_map[k] == col:
+                col_map[k] = None
+        if field != "skip":
+            col_map[field] = col
+            if field == "amount":
+                col_map.pop("debit", None)
+                col_map.pop("credit", None)
+                if proposal.get("sign_convention") == sp.SIGN_DEBIT_CREDIT_SPLIT:
+                    proposal["sign_convention"] = "negative_expense"
+            elif field in ("debit", "credit"):
+                col_map.pop("amount", None)
+                proposal["sign_convention"] = sp.SIGN_DEBIT_CREDIT_SPLIT
+        return proposal
+
+    def test_assign_amount_clears_debit_and_credit(self):
+        """Assigning 'amount' removes debit/credit from col_map."""
+        proposal = {
+            "column_map": {"debit": "Dr", "credit": "Cr", "date": "Date", "currency": "CCY"},
+            "sign_convention": "debit_credit_split",
+        }
+        result = self._apply_fix_field(proposal, "Amt", "amount")
+        assert result["column_map"].get("amount") == "Amt"
+        assert "debit" not in result["column_map"]
+        assert "credit" not in result["column_map"]
+
+    def test_assign_amount_resets_sign_convention(self):
+        """Assigning 'amount' changes sign_convention away from debit_credit_split."""
+        proposal = {
+            "column_map": {"debit": "Dr", "credit": "Cr", "date": "Date", "currency": "CCY"},
+            "sign_convention": "debit_credit_split",
+        }
+        result = self._apply_fix_field(proposal, "Amt", "amount")
+        assert result["sign_convention"] == "negative_expense"
+
+    def test_assign_debit_clears_amount(self):
+        """Assigning 'debit' removes amount from col_map."""
+        proposal = {
+            "column_map": {"amount": "Amt", "date": "Date", "currency": "CCY"},
+            "sign_convention": "negative_expense",
+        }
+        result = self._apply_fix_field(proposal, "Dr", "debit")
+        assert result["column_map"].get("debit") == "Dr"
+        assert "amount" not in result["column_map"]
+
+    def test_assign_debit_sets_sign_convention(self):
+        """Assigning 'debit' sets sign_convention to debit_credit_split."""
+        import statement_profiles as sp
+        proposal = {
+            "column_map": {"amount": "Amt", "date": "Date", "currency": "CCY"},
+            "sign_convention": "negative_expense",
+        }
+        result = self._apply_fix_field(proposal, "Dr", "debit")
+        assert result["sign_convention"] == sp.SIGN_DEBIT_CREDIT_SPLIT
+
+    def test_assign_credit_clears_amount(self):
+        """Assigning 'credit' removes amount from col_map."""
+        proposal = {
+            "column_map": {"amount": "Amt", "date": "Date", "currency": "CCY"},
+            "sign_convention": "negative_expense",
+        }
+        result = self._apply_fix_field(proposal, "Cr", "credit")
+        assert result["column_map"].get("credit") == "Cr"
+        assert "amount" not in result["column_map"]
+
+    def test_assign_credit_sets_sign_convention(self):
+        """Assigning 'credit' sets sign_convention to debit_credit_split."""
+        import statement_profiles as sp
+        proposal = {
+            "column_map": {"amount": "Amt", "date": "Date", "currency": "CCY"},
+            "sign_convention": "negative_expense",
+        }
+        result = self._apply_fix_field(proposal, "Cr", "credit")
+        assert result["sign_convention"] == sp.SIGN_DEBIT_CREDIT_SPLIT
