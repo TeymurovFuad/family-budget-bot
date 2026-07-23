@@ -104,6 +104,28 @@ def clean_merchant_description(text) -> str:
     return s or original
 
 
+def _normalize_dedup_value(value) -> str:
+    """
+    Normalize a transaction value for dedup-key hashing. Routes through
+    parse_amount so locale-formatted draft strings ("1,234.56", "1 234,56")
+    are parsed the same way user/AI input is parsed everywhere else, instead
+    of falling back to a raw-string key that would never match Excel's
+    float-derived key (BACKLOG "Locale-formatted draft values fall back to
+    raw-string keys").
+    """
+    try:
+        return f"{parse_amount(value):.2f}"
+    except (TypeError, ValueError):
+        return _normalize_str(value)
+
+
+def _dedup_key_parts(txn_date, value, currency) -> tuple[str, str, str]:
+    d = str(txn_date or "").strip()[:10]
+    v = _normalize_dedup_value(value)
+    ccy = _normalize_str(currency).upper() or "PLN"
+    return d, v, ccy
+
+
 def make_dedup_key(txn_date, value, currency, description) -> str:
     """
     Stable identity key for a transaction: sha1(date|value|currency|cleaned-description).
@@ -114,17 +136,27 @@ def make_dedup_key(txn_date, value, currency, description) -> str:
     stripped, merchant junk cleaned, whitespace collapsed, case-folded) so a
     raw statement description and its cleaned stored form produce the SAME key.
     """
-    d = str(txn_date or "").strip()[:10]
-    try:
-        v = f"{float(str(value).replace(',', '.')):.2f}"
-    except (TypeError, ValueError):
-        v = _normalize_str(value)
-    ccy = _normalize_str(currency).upper() or "PLN"
+    d, v, ccy = _dedup_key_parts(txn_date, value, currency)
     # lstrip("'"): write_transaction_row prepends ' to =+-@ descriptions
     # (formula-injection guard) — the stored form must still match the draft.
     desc = clean_merchant_description(_normalize_str(description).lstrip("'"))
     desc = re.sub(r"\s+", " ", desc).lower()
     return hashlib.sha1(f"{d}|{v}|{ccy}|{desc}".encode("utf-8")).hexdigest()
+
+
+def make_loose_dedup_key(txn_date, value, currency) -> str:
+    """
+    Loose identity key: sha1(date|value|currency) — no description.
+
+    Used by the dedup-v2 two-pass scan: the strict key (make_dedup_key)
+    decides automatic skip/keep behaviour; this loose key only ADVISES —
+    a loose match with a strict miss means "maybe the same payment, the
+    description changed" (bank reformatted an export, merchant memory
+    rewrote a label, ...), never "definitely a duplicate". Rows that only
+    loose-match are saved by default and surfaced to the user instead.
+    """
+    d, v, ccy = _dedup_key_parts(txn_date, value, currency)
+    return hashlib.sha1(f"{d}|{v}|{ccy}".encode("utf-8")).hexdigest()
 
 
 def validate_parsed_row(

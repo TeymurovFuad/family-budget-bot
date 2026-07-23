@@ -101,39 +101,54 @@ criteria — exact wording reviewed at implementation, never improvised. Standin
 the bot never blocks an import with a question; it decides a default, shows its
 reasoning in the preview, and offers a one-command override.
 
-- [ ] **Count-aware matching (multiset, not set)** — keys are compared with occurrence
+- [x] **Count-aware matching (multiset, not set)** — keys are compared with occurrence
       counts on both sides. Upload has 3 identical rows, MasterData has 2 in range →
       save 1, skip 2, and say the math: "3 identical rows found, 2 already in your
       sheet → saving 1, skipping 2. Reply `keep all` if these are new payments."
-- [ ] **Within-batch identical rows are KEPT by default** (inverts PR #7 behaviour) —
+      *(done: `data.load_dedup_evidence` returns MasterData rows as multiset evidence
+      lists; `handlers.bulk_conv._flag_master_duplicates` groups draft rows by strict
+      key and flags only `min(group_size, master_count)` — the excess is kept. Message
+      wording uses `keep all flagged` instead of bare `keep all` so the reply only
+      overrides this group, not the whole batch — see "all flagged scopes" below.)*
+- [x] **Within-batch identical rows are KEPT by default** (inverts PR #7 behaviour) —
       repetition inside one source is almost always real (e.g. several 2 PLN car-wash
       payments same day). Preview annotates instead of dropping:
       "rows 4, 5, 6 are identical — keeping all 3; reply `drop N` if one is a scan error."
-- [ ] **Multi-row `drop` / `keep` grammar with stable numbering** — `drop 4 6`,
+      *(done: `_merge_bulk_draft` no longer hard-skips repeats; `_flag_master_duplicates`
+      annotates same-key groups with no MasterData match as `identical_group` on every
+      row, rendered in the preview and reported in `_format_dedup_messages`.)*
+- [x] **Multi-row `drop` / `keep` grammar with stable numbering** — `drop 4 6`,
       `drop 4-6 9 12`, `keep 3 7-9`; one reply, one re-rendered preview. Row numbers
       never shift mid-draft (no renumbering until save) so batch commands stay safe.
       `N field=value` edit grammar stays single-row.
-- [ ] **Two-pass scan: strict decides, loose advises** — pass 1 (strict key
+      *(done: `handlers.bulk_conv._apply_row_command` + `_parse_row_targets`; dropped
+      rows stay in the list marked `row["dropped"]`, never removed, so numbering is
+      stable across sequential commands.)*
+- [x] **Two-pass scan: strict decides, loose advises** — pass 1 (strict key
       date|value|currency|cleaned-description) drives all automatic skip/keep behaviour.
       Pass 2 (loose key date|value|currency, no description) runs only on rows pass 1
       called new; matches get NO automatic action (saved by default) and are surfaced
-      as an advisory showing BOTH descriptions side by side:
-      "⚠️ Possible duplicates (matched on date+amount, but description differs):
-       row 9: 45.98 PLN 'Old Tbilisi Warszawa 4211' (12 May) ↔ existing: 45.98 PLN 'Old Tbilisi' (12 May).
-       Saving them. Reply `drop 9` if it's the same payment."
+      as an advisory showing BOTH descriptions side by side.
       Asymmetry is deliberate: wrong advisory costs one line of reading; wrong skip
       loses a transaction. Loose pass reuses the same MasterData read — no extra
       workbook access, no AI calls.
-- [ ] **Mass loose-match hint** — when most rows of a batch loose-match (bank
+      *(done: `data.load_dedup_evidence` computes strict+loose evidence in ONE read;
+      `validators.make_loose_dedup_key` added; `_flag_master_duplicates` pass 2 only
+      sets `loose_dup`/`loose_other_date`/`loose_other_desc`, never `dup`.)*
+- [x] **Mass loose-match hint** — when most rows of a batch loose-match (bank
       reformatted descriptions between exports), say so explicitly and offer
       `drop all flagged` in one command.
-- [ ] **Strict-flag evidence in message** — skip lines show date, amount, merchant AND
-      what was matched, so a false match is spottable without opening Excel:
-      "↺ row 7: 45.98 PLN 'Old Tbilisi' (12 May) — matches an entry saved 12 May.
-       Skipping. Reply `keep 7` if this is a separate payment."
-- [ ] **Deleted rows reappear as new on re-import — accepted, no tombstones** —
+      *(done: `_format_dedup_messages` appends the hint when >=3 loose matches cover
+      at least half of the batch's "new" rows.)*
+- [x] **Strict-flag evidence in message** — skip lines show date, amount, merchant AND
+      what was matched, so a false match is spottable without opening Excel.
+      *(done: single-occurrence strict matches (`single_skips`) render "matches an
+      entry saved {date}"; preview rows show the same evidence date inline.)*
+- [x] **Deleted rows reappear as new on re-import — accepted, no tombstones** —
       decided: the bank file says the transaction happened; preview shows it as new,
-      user can drop it. No deleted-key state is kept.
+      user can drop it. No deleted-key state is kept. *(done: no code change needed —
+      dedup only ever compares against what's currently in MasterData; nothing tracks
+      deletions, matching the decision as written.)*
 - [ ] **Timestamp disambiguates within-batch only (corrected by design review
       2026-07-22)** — MasterData has no time column, so HH:MM must NEVER enter keys
       compared against stored rows (time-bearing draft keys would never match timeless
@@ -142,22 +157,25 @@ reasoning in the preview, and offers a one-command override.
       apart WITHIN one batch (exact per-day counts for count-aware matching);
       cross-import keys stay timeless. A MasterData Time column is deliberately out of
       scope; revisit only if timeless+count-aware dedup proves insufficient.
-- [ ] **Unified row-command grammar** — `drop` and `keep` as verbs; targets `N`, `N M`,
+      *(deferred: no current source provides time data — nothing to implement now;
+      revisit once a statement profile actually supplies a time column.)*
+- [x] **Unified row-command grammar** — `drop` and `keep` as verbs; targets `N`, `N M`,
       `N-M`, `all`, `all flagged`; alongside existing `N field=value`, `save`, `cancel`.
       One parser for all preview states (dedup flags, validation flags, manual pruning).
       Supersedes the UX-group "skip N / delete N" item — implement once, here.
-- [ ] **Contextual command footer — show only what applies** — every preview ends with a
+      *(done: `_apply_row_command` is tried before the single-row `N field=value`
+      regex in `_apply_bulk_edit`; the pre-dedup-v2 `N keep` syntax still works too.)*
+- [x] **Contextual command footer — show only what applies** — every preview ends with a
       short hint line, but content adapts to state; a user who has no duplicates never
-      reads a word about duplicates:
-      * nothing flagged: "✏️ 2 category=Transport · drop 3 · save · cancel"
-      * dedup skips present, add: "↺ 2 rows skipped as already imported — keep 5,
-        keep 4-6, or keep all flagged to save them anyway."
-      * loose-match advisory present, add its block with: "drop 9 / drop all flagged".
-      Every conditional message carries a worked example of the command that answers it.
-- [ ] **`all flagged` scopes to the block it is printed under** — `keep all flagged`
+      reads a word about duplicates.
+      *(done: `handlers.bulk_conv._bulk_footer` builds the base edit/save/cancel line
+      plus a dup-skip block and/or a loose-match block only when those rows exist.)*
+- [x] **`all flagged` scopes to the block it is printed under** — `keep all flagged`
       under the skip list acts on skipped rows only; `drop all flagged` under the
       advisory acts on advisory rows only; plain `drop all` / `keep all` act on the
       whole batch.
+      *(done: `_apply_row_command` maps `keep all flagged` -> rows with `dup` set,
+      `drop all flagged` -> rows with `loose_dup` set, independent of `all`/`all M-N`.)*
 
 ## Follow-up PR: merchant memory & description quality
 
@@ -177,11 +195,14 @@ reasoning in the preview, and offers a one-command override.
 
 ## Follow-up: dedup review notes (PR #7, 2026-07-22)
 
-- [ ] **Within-batch identical rows have no keep override** — two genuinely identical same-day
+- [x] **Within-batch identical rows have no keep override** — two genuinely identical same-day
       transactions in one statement are dropped by `_merge_bulk_draft`'s `seen` set and
       `bulk_confirm`'s `seen_batch_keys`; `N keep` is rejected because `_apply_bulk_edit`
       requires `parsed[idx].get("dup")`, which only MasterData flags set. Allow `keep` on
       within-batch dups or use count-aware keys.
+      *(fixed by dedup v2 above: within-batch identical rows are kept by default via
+      count-aware matching, so there's no skip left to override for the pure-repeat case;
+      `_merge_bulk_draft`'s `seen` set and `bulk_confirm`'s `seen_batch_keys` were removed.)*
 - [x] **Guard-quoted descriptions defeat dedup** — `write_transaction_row` prepends `'` to
       descriptions starting with `=+-@` (excel_schema.py); read-back keys hash `'foo` vs draft
       `foo`, so dedup silently never fires for those rows. Strip the guard quote in
@@ -189,10 +210,13 @@ reasoning in the preview, and offers a one-command override.
       leading-`=` description.
       *(fixed in the merchant-memory PR: `make_dedup_key` now strips a leading `'` and runs
       `clean_merchant_description` before hashing; round-trip test in tests/test_merchant_map.py)*
-- [ ] **Locale-formatted draft values fall back to raw-string keys** — `make_dedup_key` value
+- [x] **Locale-formatted draft values fall back to raw-string keys** — `make_dedup_key` value
       normalization: `"1,234.56"`-style strings fail float() and fall back to the raw string,
       never matching Excel's float-derived key; route through validators.parse_amount before
       hashing.
+      *(done: `validators._normalize_dedup_value` now calls `parse_amount` before hashing,
+      shared by both `make_dedup_key` and `make_loose_dedup_key`; tests in test_dedup.py
+      cover thousands-comma and European decimal-comma formats.)*
 
 ## Follow-up PR: infra & performance
 

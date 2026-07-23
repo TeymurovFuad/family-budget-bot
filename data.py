@@ -12,7 +12,7 @@ from config import log
 from excel_schema import MasterDataSchema, header_of, load_currency_rates_from_path
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
 from models import MONTH_NAMES
-from validators import make_dedup_key
+from validators import make_dedup_key, make_loose_dedup_key
 
 
 # ── time ──────────────────────────────────────────────────────────────────────
@@ -102,13 +102,28 @@ def load_data() -> pd.DataFrame:
     return df
 
 
-def load_dedup_keys(start=None, end=None) -> set[str]:
+def load_dedup_evidence(start=None, end=None) -> dict:
     """
-    Dedup keys (see validators.make_dedup_key) of MasterData rows whose Date
-    falls in [start, end] (date objects, both optional/inclusive). Uses the RAW
-    Value + Currency as stored. Returns an empty set on any read failure —
-    dedup then simply doesn't flag anything, it never blocks an import.
+    Multiset evidence of MasterData rows for dedup-v2's count-aware, two-pass
+    scan. Reads MasterData ONCE (the loose pass reuses this same read — no
+    extra workbook access, no AI calls) and returns:
+
+        {
+          "strict": {strict_key: [(date_iso, description), ...]},
+          "loose":  {loose_key:  [(date_iso, description), ...]},
+        }
+
+    strict_key = date|value|currency|cleaned-description (validators.make_dedup_key)
+    loose_key  = date|value|currency, no description (validators.make_loose_dedup_key)
+
+    len(evidence["strict"][key]) / len(evidence["loose"][key]) is that key's
+    multiset count in MasterData — the basis for count-aware matching ("3
+    identical rows found, 2 already in your sheet -> saving 1, skipping 2").
+    Only rows whose Date falls in [start, end] (date objects, both
+    optional/inclusive) are counted. Returns empty dicts on any read
+    failure — dedup never blocks an import, it just stops flagging anything.
     """
+    empty = {"strict": {}, "loose": {}}
     try:
         df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
         date_h  = header_of(MasterDataSchema, "date")
@@ -116,22 +131,34 @@ def load_dedup_keys(start=None, end=None) -> set[str]:
         ccy_h   = header_of(MasterDataSchema, "currency")
         desc_h  = header_of(MasterDataSchema, "description")
         if date_h not in df.columns or value_h not in df.columns:
-            return set()
+            return empty
         dates = pd.to_datetime(df[date_h], errors="coerce")
         mask = dates.notna() & df[value_h].notna()
         if start is not None:
             mask &= dates >= pd.Timestamp(start)
         if end is not None:
             mask &= dates <= pd.Timestamp(end)
-        keys: set[str] = set()
+        strict: dict[str, list[tuple[str, str]]] = {}
+        loose: dict[str, list[tuple[str, str]]] = {}
         for i in df.index[mask]:
-            keys.add(make_dedup_key(
-                dates.loc[i].date().isoformat(),
-                df.at[i, value_h],
-                df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else "PLN",
-                df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else "",
-            ))
-        return keys
+            date_iso = dates.loc[i].date().isoformat()
+            value = df.at[i, value_h]
+            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else "PLN"
+            desc = df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else ""
+            strict_key = make_dedup_key(date_iso, value, ccy, desc)
+            loose_key = make_loose_dedup_key(date_iso, value, ccy)
+            strict.setdefault(strict_key, []).append((date_iso, str(desc)))
+            loose.setdefault(loose_key, []).append((date_iso, str(desc)))
+        return {"strict": strict, "loose": loose}
     except Exception as e:
-        log.warning("Could not load dedup keys from MasterData: %s", e)
-        return set()
+        log.warning("Could not load dedup evidence from MasterData: %s", e)
+        return empty
+
+
+def load_dedup_keys(start=None, end=None) -> set[str]:
+    """
+    Backward-compatible view of load_dedup_evidence: the set of strict dedup
+    keys (see validators.make_dedup_key) present in MasterData in [start, end].
+    Prefer load_dedup_evidence for count-aware / loose-match callers.
+    """
+    return set(load_dedup_evidence(start, end)["strict"].keys())
