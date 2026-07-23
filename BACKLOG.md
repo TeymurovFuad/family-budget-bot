@@ -6,11 +6,11 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Session handoff (2026-07-23) — read this first if resuming in a new session
 
-- **PR #16 ("Dedup v2") reviewed ✅ PASS — ready to merge** —
-  https://github.com/TeymurovFuad/family-budget-bot/pull/16.
-  855 tests passing. Four non-blocking findings queued in "dedup review notes
-  (PR #16, 2026-07-23)" above — no blockers. Merge when convenient.
-- **All other PRs from this session (#1–#15) are merged.** Nothing else pending.
+- **All PRs #1–#16 are merged.** PR #17 (this handoff + docs) is the only
+  open PR; merge it and the slate is clean.
+- **Dedup v2 (PR #16) post-merge state**: five non-blocking findings queued in
+  "dedup review notes (PR #16, 2026-07-23)". DOCUMENTATION.md updated for the
+  new `drop`/`keep` grammar in PR #17.
 - **Push/merge mechanics for this repo**: `fuadteymurov` (the working account) is
   NOT a collaborator on `TeymurovFuad/family-budget-bot` — pushes go to the
   `fork` remote (`fuadteymurov/family-budget-bot`), PRs are opened
@@ -21,21 +21,20 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   more than once. Always give each agent its OWN temp `git worktree add`
   (see `.claude/memories/orchestrator-memory.md` "Parallel agent isolation").
 - **Next up, in rough priority order (no hard requirement, pick freely)**:
-  1. Merge PR #16 once reviewed.
-  2. Bank-statement profiles (BACKLOG.md "bank-statement profiles — agreed
+  1. Bank-statement profiles (BACKLOG.md "bank-statement profiles — agreed
      design") — biggest remaining designed feature, reuses dedup v2's
      drop/keep grammar and feeds it batch-level timestamp disambiguation.
-  3. Budget cycles + `/summary` picker UX (BACKLOG.md "budget cycles —
+  2. Budget cycles + `/summary` picker UX (BACKLOG.md "budget cycles —
      agreed design" and "/summary picker UX — agreed design") — large,
      touches the workbook (new `Cycles` sheet, `Cycle Dashboard` sheet).
-  4. Smaller standalone items: UX group (person attribution, bulk edit
+  3. Smaller standalone items: UX group (person attribution, bulk edit
      skip/delete — largely superseded by dedup v2's grammar now, re-check
      for overlap before implementing), code-clarity/module-size sweep
      (300-line hard cap / 150-200 target, `file_storage.py` and
      `bulk_conv.py` are the known offenders), token-economy group,
      infra & performance group, various PR-review-notes sections scattered
      through the file (search for "review notes" headings).
-  5. Optional: rename the `Żabka` test fixture in `tests/test_merchant_map.py`
+  4. Optional: rename the `Żabka` test fixture in `tests/test_merchant_map.py`
      to match the "Old Tbilisi" doc-example rename (PR #14) — was explicitly
      deferred as its own tiny code PR, never actioned.
 - **Security/PII audit run 2026-07-22**: clean bill of health (no real data or
