@@ -72,3 +72,8 @@ try:
     LOG_KEEP_DAYS = int(os.getenv("LOG_KEEP_DAYS", "20"))
 except ValueError:
     LOG_KEEP_DAYS = 20
+
+BUDGET_CYCLE = bool(int(os.getenv("BUDGET_CYCLE", "0")))
+CYCLE_PROMPT_COOLDOWN_DAYS = 20
+# Public name for the income category that triggers cycle prompts.
+SALARY_CATEGORY = "Salary"

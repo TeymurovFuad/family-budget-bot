@@ -23,6 +23,7 @@ from data import load_dedup_evidence, load_reference_data
 import settings
 from excel_ops import async_append_batch
 import merchant_map
+from handlers.cycle import is_salary_income, maybe_prompt_cycle
 from models import Transaction
 import statement_profiles as sp
 from states import (
@@ -1411,6 +1412,16 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             log.exception("bulk_confirm batch write failed for user %s", update.effective_user.id)
             errors.append(f"Write failed: {e}")
             write_failed = True
+
+    # Offer a cycle-boundary prompt if any saved transaction is a salary-income entry.
+    if not write_failed and transactions:
+        salary_txns = [t for t in transactions if is_salary_income(t.transaction_type, t.category)]
+        if salary_txns:
+            txn_date = max(t.date for t in salary_txns)
+            try:
+                await maybe_prompt_cycle(update, ctx, txn_date)
+            except Exception:
+                pass  # cycle prompt is best-effort
 
     if write_failed:
         # The whole batch write failed — nothing was saved, so keep every row

@@ -58,6 +58,7 @@ from handlers.misc import (
     cmd_setbudget, setbudget_pick, setbudget_amount,
 )
 from handlers.quick_conv import handle_quick_add, quick_confirm
+from handlers.cycle import cmd_cycle, handle_cycle_prompt_response
 from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
     cmd_savings, cmd_report, cmd_rates, cmd_chart,
@@ -107,6 +108,7 @@ BOT_COMMANDS = [
     BotCommand("export",      "Download your Excel workbook"),
     BotCommand("setcurrency", "Change the display currency"),
     BotCommand("setbudget",   "Set the monthly budget for a category (owner only)"),
+    BotCommand("cycle",       "Record a new budget-cycle start date (owner only)"),
     BotCommand("menu",        "Show the button menu"),
     BotCommand("help",        "List all commands with what they do"),
     BotCommand("start",       "Welcome message and main menu"),
@@ -137,6 +139,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("rates",   cmd_rates))
     app.add_handler(CommandHandler("chart",   cmd_chart))
     app.add_handler(CommandHandler("range",   cmd_range))
+    app.add_handler(CommandHandler("cycle",   cmd_cycle))
     app.add_handler(CommandHandler("export",  cmd_export))
 
     # ── range report inline callback ──────────────────────────────────────────
@@ -147,6 +150,12 @@ def build_application() -> Application:
         filters.TEXT & ~filters.COMMAND,
         handle_range_text,
     ), group=1)
+
+    # ── cycle prompt reply (yes/no/date after salary save) ───────────────────
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_cycle_prompt_response,
+    ), group=2)
 
     # ── /setcurrency conversation ─────────────────────────────────────────────
     app.add_handler(ConversationHandler(
