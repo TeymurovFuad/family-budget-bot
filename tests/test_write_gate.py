@@ -48,12 +48,14 @@ import handlers.bulk_conv as _bulk_conv_mod
 import handlers.delete_conv as _delete_conv_mod
 import handlers.edit_conv as _edit_conv_mod
 import handlers.quick_conv as _quick_conv_mod
+import handlers.misc as _misc_mod
 
 importlib.reload(_add_conv_mod)
 importlib.reload(_bulk_conv_mod)
 importlib.reload(_delete_conv_mod)
 importlib.reload(_edit_conv_mod)
 importlib.reload(_quick_conv_mod)
+importlib.reload(_misc_mod)
 
 from config import auth_write
 from handlers.add_conv import cmd_add
