@@ -10,14 +10,17 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-23)*
+> *(Last updated: 2026-07-23 — PR #23 merged, docs PR opened)*
 
 ### PR state at last update
-- **All PRs #1–#20 merged**, including bank-statement profiles (PR #18),
-  auto-update Telegram notification (PR #19), and the squash-merge /
-  plain-language-PR-title convention (PR #20).
-- **PR #21 open (draft)**: orchestrator-memory update (parallel-agent
-  isolation + backlog-capture rules). Docs-only; owner merges when ready.
+- **All PRs #1–#23 merged**, including bank-statement profiles (PR #18),
+  auto-update Telegram notification (PR #19), orchestrator-memory update
+  (PR #21), bank-statement profiles docs (PR #22), and budget cycles Phase 1
+  (PR #23: `BUDGET_CYCLE` flag, `CyclesSchema`, `/cycle started`, salary
+  prompt, cycle-aware `/summary`).
+- **Next open work**: budget cycles Phase 2 (Cycle Dashboard sheet,
+  `/cycles detect` backfill, `/summary` picker UX). See "budget cycles —
+  agreed design" and "/summary picker UX — agreed design" sections below.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -35,9 +38,12 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **Budget cycles + `/summary` picker UX** — touches the workbook (new
-     `Cycles` sheet, `Cycle Dashboard` sheet). Designs in "budget cycles —
-     agreed design" and "/summary picker UX — agreed design" sections below.
+  1. **Budget cycles + `/summary` picker UX** — Phase 1 merged in PR #23
+     (`BUDGET_CYCLE` flag, `CyclesSchema`, `/cycle started`, salary prompt,
+     cycle-aware `/summary`). Phase 2 — Cycle Dashboard sheet, `/cycles detect`
+     backfill, and `/summary` picker button UX — still pending. Designs in
+     "budget cycles — agreed design" and "/summary picker UX — agreed design"
+     sections below.
   2. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
      and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
      items in "dedup review notes (PR #16, 2026-07-23)"); PR #18 review
@@ -48,6 +54,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
      match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
+- Budget cycles Phase 1 (PR #23) merged 2026-07-23. DOCUMENTATION.md, README,
+  and BACKLOG updated in the follow-up docs PR. Phase 2 items (Cycle Dashboard,
+  `/cycles detect`, `/summary` picker UX) remain pending — see "budget cycles —
+  agreed design" section.
 - Bank-statement profiles (PR #18) merged 2026-07-23. DOCUMENTATION.md and
   README updated post-merge. Test-suite hardening landed in the same PR:
   handler-test auth bypass is now immune to pytest collection order (reload
@@ -543,27 +553,36 @@ but shifts ±4-5 days, so cycle boundaries are RECORDED EVENTS, never date formu
 Answers "which salary funds this?" and "what happened to each salary?" (leftover /
 unaccounted tracking — the old manual dashboard metric).
 
-- [ ] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
+> **Phase 1 merged in PR #23.** Items marked ✅ below shipped. Items marked [ ] are
+> Phase 2 and remain pending.
+
+- [x] **`BUDGET_CYCLE=1` env flag** — off by default; calendar behaviour unchanged for
       everyone else. When off, none of the below activates.
-- [ ] **Cycle ledger** — one row per cycle: start date + label. Labels always carry the
+      *(done: `settings.BUDGET_CYCLE = bool(int(os.getenv("BUDGET_CYCLE", "0")))`)*
+- [x] **Cycle ledger** — one row per cycle: start date + label. Labels always carry the
       year ("Aug 2026", never bare "Aug") so multi-year resolution is unambiguous.
       Lives in the dedicated `Cycles` sheet (see below — NOT Lists columns).
       Boundaries are written once and never recomputed — no retroactive
       re-bucketing, late edits cannot silently move history between cycles.
-- [ ] **Boundary capture, user-confirmed** — two inputs, same ledger:
+      *(done: `CyclesSchema` in `excel_schema.py`; `Cycles` sheet auto-created on first
+      use via `append_cycle_boundary` in `file_storage.py`)*
+- [x] **Boundary capture, user-confirmed** — two inputs, same ledger:
       (a) bot saves an Income row with category Salary → prompt: "💰 Salary received.
       Start the new budget cycle from 23 Jul? (yes / no / different date)" — the bot
       proposes, only the user's confirmation records; a mis-categorized refund cannot
       open a cycle. (b) `/cycle started [date]` manual command any time.
       No salary logged + no command = current cycle continues; the bot never guesses.
-- [ ] **Bot reports per cycle** — with the flag on, `/summary` and budget bars compute
-      over the current cycle (last boundary → today); days-remaining uses no assumption
-      about cycle length. Monthly scheduled report fires on cycle close (boundary
-      confirmation) instead of the 1st, reporting the cycle that just closed.
-- [ ] **Unaccounted metric** — per cycle: salary received − tracked expenses − tracked
+      *(done: `maybe_prompt_cycle` in `handlers/cycle.py` called from `add_conv.py` and
+      `bulk_conv.py`; `cmd_cycle` handles the manual command; cooldown guard uses
+      `CYCLE_PROMPT_COOLDOWN_DAYS = 20`)*
+- [x] **Bot reports per cycle** — with the flag on, `/summary` appends a cycle block
+      (current-cycle expenses, savings, salary, unaccounted).
+      *(done: `_build_cycle_block` in `handlers/reports.py`; budget bars and
+      days-remaining are Phase 2)*
+- [x] **Unaccounted metric** — per cycle: salary received − tracked expenses − tracked
       savings = unaccounted ("not reported"); negative = over-reported (untracked income
-      or previous cycle's leftover being spent). Shown in bot cycle reports and on the
-      Cycle Dashboard.
+      or previous cycle's leftover being spent). Shown in bot cycle reports.
+      *(done: rendered in the `/summary` cycle block)*
 - [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet;
       same layout, same category rows, same budget targets (shared Lists budget column —
       one edit updates both). Filter is a single cycle selector (dropdown fed by the

@@ -213,6 +213,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `XLSX_PATH` | — | `data/Expenses_Improved.xlsx` | Path to the Excel file |
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
 | `DISPLAY_CURRENCY` | — | `PLN` | Default display currency. Change to `EUR` or `AZN` when relocating |
+| `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-period cycle tracking and cycle-aware `/summary` output |
 
 ### Commands
 
@@ -237,10 +238,11 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/setcurrency EUR` | Switch display currency for this session |
 | `/setcurrency` | Pick display currency from a keyboard |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
+| `/cycle started [date]` | Record a new salary-cycle boundary — **owner only**; requires `BUDGET_CYCLE=1` |
 | `/export` | Download the live Excel workbook as a Telegram document |
 
-`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, and quick-add
-(typed transactions) are **owner-only** — only the first ID listed in
+`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, `/cycle`, and
+quick-add (typed transactions) are **owner-only** — only the first ID listed in
 `ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
 read/report commands.
 
@@ -347,6 +349,108 @@ pending rows — save or cancel before importing more.
 keeps a rolling `.bak` copy of the previous version next to the workbook, so a
 crash mid-save can never corrupt your data. The `.bak` file is normal — it's
 your automatic one-step backup.
+
+---
+
+## Budget Cycles
+
+Budget cycles let you track spending relative to your salary period instead of
+calendar months. Salary typically arrives around the 25th of the month but can
+shift ±4–5 days, so cycle boundaries are recorded events confirmed by you —
+never computed from fixed dates.
+
+### Enabling cycles
+
+Set `BUDGET_CYCLE=1` in `.env` and restart the bot. When the variable is
+absent or set to `0` the feature is completely off and all behaviour is
+identical to the default calendar mode.
+
+### Recording a boundary: /cycle started
+
+```
+/cycle started [date]
+```
+
+Accepted date formats:
+
+| Format | Example |
+|---|---|
+| `today` | Use today's date |
+| ISO date | `2026-07-23` |
+| Short form | `23 Jul` |
+
+`/cycle started` is **owner-only** — only the first ID in
+`ALLOWED_TELEGRAM_IDS` can call it.
+
+When no date argument is provided, `today` is assumed. The boundary is
+written immediately to the `Cycles` sheet in the workbook with a label such
+as "Jul 2026". Labels always include the year so multi-year history is
+unambiguous.
+
+### Salary-cycle prompt
+
+When `BUDGET_CYCLE=1` and you save a transaction of type **Income** with
+category **Salary** (via `/add` or `/bulk`), the bot automatically asks
+whether to open a new budget cycle:
+
+```
+💰 Salary received. Start the new budget cycle from 23 Jul? (yes / no / different date)
+```
+
+**When it fires:** The prompt only appears when the last recorded boundary is
+more than 20 days in the past. A salary row saved inside an active cycle
+(< 20 days since the last boundary) is silently counted as income for the
+current cycle without re-prompting.
+
+**How to respond:**
+
+| Reply | Effect |
+|---|---|
+| `yes` | Records a new cycle starting on the salary transaction date |
+| `no` | Dismisses the prompt; the current cycle continues |
+| A date (e.g. `25 Jul`) | Records a new cycle starting on the typed date |
+
+If you type an unrecognised date, the bot asks again. Any other message
+cancels the prompt.
+
+### Cycle block in /summary
+
+When `BUDGET_CYCLE=1` and at least one boundary has been recorded, `/summary`
+appends a cycle block below the regular monthly figures:
+
+```
+──────────────────────────
+💰 Current cycle: Jul 2026
+Expenses: 3,450 PLN / 9,205 PLN budget
+Savings:  1,000 PLN
+Salary:   6,000 PLN
+Unaccounted: ✅ 1,550 PLN
+```
+
+What each line means:
+
+| Line | Meaning |
+|---|---|
+| **Current cycle** | The label of the latest recorded boundary |
+| **Expenses** | Total spending (Expense rows, IsDone=True) since the cycle start date, shown against the sum of all monthly budget targets |
+| **Savings** | Total savings (Savings rows, IsDone=True) since the cycle start date |
+| **Salary** | Total income in the Salary category since the cycle start date |
+| **Unaccounted** | Salary − Expenses − Savings |
+
+**Unaccounted:** a positive value means money is accounted for — salary
+minus what you spent and saved leaves a surplus that is either still in your
+account or will appear in a future transaction. A negative value means
+you have logged more spending and savings than salary in this cycle, which
+usually indicates untracked income from a previous cycle being spent, or a
+mis-categorised refund logged as a new income row.
+
+### What does not change
+
+All calendar-mode commands (`/week`, `/budget`, `/report`, `/range`, etc.)
+and the existing Dashboard sheet continue to work exactly as before.
+Cycles are purely additive. Setting `BUDGET_CYCLE=0` at any point leaves
+the `Cycles` sheet in the workbook untouched and simply stops the feature
+from activating — no data is lost.
 
 ---
 
