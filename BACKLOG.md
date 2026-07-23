@@ -244,11 +244,12 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       for the same file. Fix: have `_merge_bulk_draft` return the pre-merge count alongside
       the merged list, or cache the read.
       (`handlers/bulk_conv.py` `bulk_receive`, `_merge_bulk_draft`)
-- [ ] **DOCUMENTATION.md not updated for dedup v2 user-facing grammar** — the `/bulk` section
+- [x] **DOCUMENTATION.md not updated for dedup v2 user-facing grammar** — the `/bulk` section
       only documents `N field=value`, `save`, and `cancel`. The new `drop N`, `keep N`,
       `drop 4-6 9`, `keep all flagged`, `drop all flagged`, `drop all`, `keep all` grammar is
       completely absent, as are the dedup advisory messages and how to respond to them.
-      Update the "Bulk Import via /bulk" section.
+      *(done: "Bulk Import via /bulk" section updated in PR #17 — command table + duplicate
+      detection block covering strict/count-aware, loose advisory, and within-batch behaviour.)*
 
 ## Follow-up: dedup review notes (PR #7, 2026-07-22)
 
