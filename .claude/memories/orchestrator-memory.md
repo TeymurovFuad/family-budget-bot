@@ -56,6 +56,11 @@ Read at session start. Apply silently.
 - Brainstorm conclusions are committed to BACKLOG.md immediately in a small docs-only PR — never held in conversation context waiting for the implementation.
 - The implementing feature PR carries its own backlog check-offs and any design corrections discovered while building. No separate backlog-update PRs trail behind features.
 
+## Documentation delivery
+<!-- 2026-07-23 -->
+- Feature documentation ships inside the feature's own branch and PR — the developer agent's job includes DOCUMENTATION.md/README updates, or TW is routed to the feature branch before the PR opens.
+- A separate docs-only PR is permitted only for documentation unrelated to any in-flight feature (standalone guides, backlog housekeeping).
+
 ## Blocker handling
 <!-- 2026-05-20 -->
 - When any role hits an environment blocker, instruct it to find a workaround first — never let it surface the blocker as a user task.
