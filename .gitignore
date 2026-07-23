@@ -45,6 +45,12 @@ data/*.json
 
 data/bulk_drafts/
 
+# Statement profiles — user-created format configs (may contain local paths)
+# Only the example and the directory anchor are committed.
+data/statement_profiles/*.json
+!data/statement_profiles/example.json
+!data/statement_profiles/.gitkeep
+
 # Template is safe to commit — contains no personal data
 !data/Expenses_Template.xlsx
 
