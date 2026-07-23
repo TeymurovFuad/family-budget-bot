@@ -67,7 +67,7 @@ notify_update() {
         text="$header"
     fi
 
-    curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+    curl -s --connect-timeout 5 --max-time 10 -X POST "https://api.telegram.org/bot${token}/sendMessage" \
         --data-urlencode "chat_id=${chat_id}" \
         --data-urlencode "text=${text}" \
         > /dev/null || echo "auto-update: failed to send Telegram update notification"
