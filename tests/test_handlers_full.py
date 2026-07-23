@@ -1065,7 +1065,7 @@ def test_bulk_draft_path_is_defined_in_settings():
 
 class TestBulkConvCmdBulk:
     async def test_cmd_bulk_returns_bulk_receive(self):
-        upd = make_update("/bulk")
+        upd = make_update("/bulk", user_id=123)  # primary user required by @auth_write
         ctx = make_ctx()
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "bulk_drafts"
@@ -1075,7 +1075,7 @@ class TestBulkConvCmdBulk:
         assert result == states.BULK_RECEIVE
 
     async def test_cmd_bulk_sends_instructions(self):
-        upd = make_update("/bulk")
+        upd = make_update("/bulk", user_id=123)  # primary user required by @auth_write
         ctx = make_ctx()
         with tempfile.TemporaryDirectory() as tmpdir:
             empty_dir = Path(tmpdir) / "bulk_drafts"
