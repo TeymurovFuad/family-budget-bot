@@ -28,10 +28,12 @@ notify_update() {
     local env_file="$REPO_DIR/.env"
     [ -f "$env_file" ] || { echo "auto-update: no .env found, skipping update notification"; return 0; }
 
+    local strip_quotes='s/^["'"'"']//; s/["'"'"']$//'
+
     local token
-    token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" | head -n1 | cut -d= -f2-)
+    token=$(grep -E '^TELEGRAM_BOT_TOKEN=' "$env_file" | head -n1 | cut -d= -f2- | sed -e "$strip_quotes")
     local ids_raw
-    ids_raw=$(grep -E '^ALLOWED_TELEGRAM_IDS=' "$env_file" | head -n1 | cut -d= -f2-)
+    ids_raw=$(grep -E '^ALLOWED_TELEGRAM_IDS=' "$env_file" | head -n1 | cut -d= -f2- | sed -e "$strip_quotes")
     local chat_id
     chat_id=$(echo "$ids_raw" | cut -d, -f1 | tr -d '[:space:]')
 
@@ -40,9 +42,16 @@ notify_update() {
         return 0
     fi
 
-    # PR titles = first non-empty line of each merge commit's body in the updated range.
+    # PR titles: this repo uses squash-merge-only (protected master), so every PR lands
+    # as a single-parent commit whose subject GitHub formats as "<PR title> (#<PR number>)".
+    # One commit = one subject line = one title, so we just read subjects (no --merges,
+    # no multi-line body parsing, no blank-line heuristics needed). We still filter to
+    # subjects ending in "(#N)" so any stray non-squash commit in the range is skipped
+    # rather than mis-treated as a title.
     local titles
-    titles=$(git log "$LOCAL..$REMOTE" --merges --format='%b' | awk 'BEGIN{p=1} /^$/{p=1;next} p{print;p=0}')
+    titles=$(git log "$LOCAL..$REMOTE" --format='%s' | \
+        grep -E '\(#[0-9]+\)$' | \
+        sed -E 's/ \(#[0-9]+\)$//') || true
 
     local short_local short_remote header text
     short_local=$(git rev-parse --short "$LOCAL")

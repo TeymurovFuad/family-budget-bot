@@ -658,10 +658,13 @@ The bot's `.env` and `data/` are untouched by updates (both are gitignored).
 After a successful pull + restart, the updater also sends a Telegram message
 to the primary owner (the first ID in `ALLOWED_TELEGRAM_IDS`) announcing the
 update, e.g. `🔄 Bot updated (commit 68331e3 -> 4ad94e9)` followed by a bullet
-list of merged PR titles (extracted from `git log LOCAL..REMOTE --merges`)
-between the old and new commit. If no merge commits are found (e.g. a
-non-merge push), it falls back to the plain "Bot updated" line with no
-bullets. This notification is best-effort and sent via a direct `curl` call
+list of merged PR titles (extracted from commit subjects between the old and
+new commit, matched by GitHub's squash-merge suffix `(#<PR number>)` — this
+repo is squash-merge-only, so each PR lands as one commit whose subject is
+`<PR title> (#<PR number>)`; do not include the PR number yourself in the
+title, GitHub appends it once at merge time). If no subjects match that
+pattern (e.g. a non-PR push), it falls back to the plain "Bot updated" line
+with no bullets. This notification is best-effort and sent via a direct `curl` call
 to the Telegram Bot API (not through the bot process) — if it fails, it's
 logged but never blocks or rolls back the update/restart that already
 happened.
