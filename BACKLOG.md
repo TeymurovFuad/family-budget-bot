@@ -15,6 +15,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 ### PR state at last update
 - **All PRs #1–#17 merged** (assuming PR #17 lands; verify with `gh pr list`).
 - No open PRs expected. If any appear, check their review status before merging.
+- **New capability added (branch `feature/update-notification`, not yet a PR):**
+  `deploy/auto-update.sh` now sends a best-effort Telegram message to the
+  primary owner after a successful auto-update, listing merged PR titles
+  between the old and new commit. See README "Host and forget" section.
 
 ### Standing mechanics (doesn't change session to session)
 - **Push/merge**: `fuadteymurov` is NOT a collaborator on
