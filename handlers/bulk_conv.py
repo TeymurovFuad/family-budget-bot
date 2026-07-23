@@ -45,7 +45,8 @@ from validators import (
 _STATEMENT_EXTENSIONS = {".csv", ".xlsx", ".xls", ".txt"}
 
 # All standard fields a user can assign a column to (plus "skip").
-_MAPPABLE_FIELDS = ("date", "amount", "currency", "description", "time", "skip")
+# "debit" and "credit" support split-column bank formats (one column per direction).
+_MAPPABLE_FIELDS = ("date", "amount", "debit", "credit", "currency", "description", "time", "skip")
 
 
 def _load_profiles() -> dict:
@@ -55,6 +56,92 @@ def _load_profiles() -> dict:
 
 def _is_statement_file(filename: str) -> bool:
     return Path(filename).suffix.lower() in _STATEMENT_EXTENSIONS
+
+
+def _profile_safe_name(name: str) -> str:
+    """Same sanitization as save_profile — produces the filename stem."""
+    return re.sub(r"[^\w\-]", "_", name.strip())
+
+
+async def _cmd_bulk_profile_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """List all saved profiles with inline Delete buttons."""
+    profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+    if not profiles:
+        await update.message.reply_text("No statement profiles saved yet.")
+        return ConversationHandler.END
+
+    lines = ["*Saved statement profiles:*"]
+    buttons = []
+    for p in profiles:
+        name = p.get("name") or "?"
+        fp_count = len(p.get("fingerprint") or [])
+        sign = p.get("sign_convention") or "?"
+        lines.append(f"• {name} ({fp_count} columns, {sign})")
+        safe = _profile_safe_name(name)
+        cb = f"profile_del:{safe}"
+        if len(cb.encode()) <= 64:
+            buttons.append([InlineKeyboardButton(f"❌ Delete {name}", callback_data=cb)])
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons) if buttons else None,
+    )
+    return ConversationHandler.END
+
+
+@auth_write
+async def bulk_profile_list_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle inline-button callbacks for profile deletion:
+      profile_del:<safe_name>         → show confirmation
+      profile_del_confirm:<safe_name> → delete and confirm
+      profile_del_cancel              → cancel
+    """
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if data == "profile_del_cancel":
+        await query.edit_message_text("Deletion cancelled.")
+        return
+
+    if data.startswith("profile_del_confirm:"):
+        safe_name = data[len("profile_del_confirm:"):]
+        profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+        target = next(
+            (p for p in profiles if _profile_safe_name(p.get("name") or "") == safe_name),
+            None,
+        )
+        name = target.get("name") if target else safe_name
+        deleted = sp.delete_profile(name, settings.STATEMENT_PROFILES_DIR)
+        if deleted:
+            await query.edit_message_text(f"✅ Profile '{name}' deleted.")
+        else:
+            await query.edit_message_text(
+                f"Profile '{name}' not found — it may have already been deleted."
+            )
+        return
+
+    if data.startswith("profile_del:"):
+        safe_name = data[len("profile_del:"):]
+        profiles = sp.list_profiles(settings.STATEMENT_PROFILES_DIR)
+        target = next(
+            (p for p in profiles if _profile_safe_name(p.get("name") or "") == safe_name),
+            None,
+        )
+        name = target.get("name") if target else safe_name
+        confirm_cb = f"profile_del_confirm:{safe_name}"
+        if len(confirm_cb.encode()) > 64:
+            await query.edit_message_text("Profile name too long to delete via button.")
+            return
+        await query.edit_message_text(
+            f"Delete profile '{name}'? This cannot be undone.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Yes, delete", callback_data=confirm_cb),
+                InlineKeyboardButton("Cancel", callback_data="profile_del_cancel"),
+            ]]),
+        )
 
 
 def _read_statement_headers_and_sniff(
@@ -105,7 +192,9 @@ def _read_statement_headers_and_sniff(
             "encoding": "utf-8",
             "header_row": 0,
             "fingerprint": headers,
-            "column_map": {f: None for f in ("date", "amount", "currency", "description", "time")},
+            "column_map": {
+                f: None for f in ("date", "amount", "debit", "credit", "currency", "description", "time")
+            },
             "date_format": "%Y-%m-%d",
             "decimal_separator": ".",
             "sign_convention": "negative_expense",
@@ -155,26 +244,90 @@ def _get_sample_rows(file_bytes: bytes, filename: str, delimiter: str = ",", n: 
 
 
 def _format_profile_confirm_message(proposal: dict) -> str:
-    """Render the profile-confirmation message for the user."""
+    """
+    Render the profile-confirmation message in a structured layout:
+
+      New statement format detected. My reading:
+      ━━━━━━━━━━━━━━━━━━━━━━━
+      Required fields:
+        ✅ date      → 'Transaction date' (YYYY-MM-DD)
+        ✅ amount    → split: 'Debits' (expense) + 'Credits' (income)
+        ✅ currency  → 'Currency'
+
+      Optional fields:
+        ✅ description → 'Description'
+        ➖ time        → not found (OK — used only for same-day dedup)
+
+      Ignored columns: Account/Card Number, Balance, ...
+    """
     col_map = proposal.get("column_map") or {}
     date_fmt = proposal.get("date_format") or "?"
     decimal_sep = proposal.get("decimal_separator") or "."
     sign = proposal.get("sign_convention") or "?"
+    sep_word = "comma" if decimal_sep == "," else "dot"
 
-    lines = ["New statement format detected. My reading:"]
-    for field in ("date", "amount", "currency", "description", "time"):
-        col = col_map.get(field)
-        if not col:
-            lines.append(f"• {field} → (not mapped)")
-            continue
-        detail = ""
-        if field == "date":
-            detail = f" ({date_fmt})"
-        elif field == "amount":
-            sep_word = "comma" if decimal_sep == "," else "dot"
+    lines = ["New statement format detected. My reading:", "━━━━━━━━━━━━━━━━━━━━━━━"]
+
+    # ── Required fields ───────────────────────────────────────────────────────
+    lines.append("Required fields:")
+
+    date_col = col_map.get("date")
+    if date_col:
+        lines.append(f"  ✅ date      → '{date_col}' ({date_fmt})")
+    else:
+        lines.append("  ❌ date      → not mapped (required)")
+
+    if sign == sp.SIGN_DEBIT_CREDIT_SPLIT:
+        debit_col = col_map.get("debit")
+        credit_col = col_map.get("credit")
+        if debit_col and credit_col:
+            lines.append(
+                f"  ✅ amount    → split: '{debit_col}' (expense) + '{credit_col}' (income)"
+            )
+        elif debit_col:
+            lines.append(f"  ❌ amount    → debit '{debit_col}' mapped — credit column missing (required)")
+        elif credit_col:
+            lines.append(f"  ❌ amount    → credit '{credit_col}' mapped — debit column missing (required)")
+        else:
+            lines.append("  ❌ amount    → not mapped (required)")
+    else:
+        amount_col = col_map.get("amount")
+        if amount_col:
             sign_word = "negative = expense" if sign == "negative_expense" else sign
-            detail = f" ({sep_word} decimal, {sign_word})"
-        lines.append(f"• column '{col}' → {field}{detail}")
+            lines.append(f"  ✅ amount    → '{amount_col}' ({sep_word} decimal, {sign_word})")
+        else:
+            lines.append("  ❌ amount    → not mapped (required)")
+
+    currency_col = col_map.get("currency")
+    if currency_col:
+        lines.append(f"  ✅ currency  → '{currency_col}'")
+    else:
+        lines.append("  ❌ currency  → not mapped (required)")
+
+    # ── Optional fields ───────────────────────────────────────────────────────
+    lines.append("")
+    lines.append("Optional fields:")
+
+    desc_col = col_map.get("description")
+    if desc_col:
+        lines.append(f"  ✅ description → '{desc_col}'")
+    else:
+        lines.append("  ➖ description → not found (OK — used for merchant memory)")
+
+    time_col = col_map.get("time")
+    if time_col:
+        lines.append(f"  ✅ time        → '{time_col}'")
+    else:
+        lines.append("  ➖ time        → not found (OK — used only for same-day dedup)")
+
+    # ── Ignored columns ───────────────────────────────────────────────────────
+    mapped_cols = {v for v in col_map.values() if v}
+    headers = proposal.get("fingerprint") or []
+    ignored = [h for h in headers if h and h not in mapped_cols]
+    if ignored:
+        ignored_str = ", ".join(ignored)
+        lines.append("")
+        lines.append(f"Ignored columns: {ignored_str}")
 
     return "\n".join(lines)
 
@@ -196,9 +349,21 @@ def _column_pick_keyboard(headers: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+_FIELD_LABELS = {
+    "date": "date",
+    "amount": "amount (single column)",
+    "debit": "debit — expense column (split mode)",
+    "credit": "credit — income column (split mode)",
+    "currency": "currency",
+    "description": "description",
+    "time": "time",
+    "skip": "skip (ignore this column)",
+}
+
+
 def _field_pick_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(f, callback_data=f"fix_field:{f}")]
+        [InlineKeyboardButton(_FIELD_LABELS.get(f, f), callback_data=f"fix_field:{f}")]
         for f in _MAPPABLE_FIELDS
     ]
     return InlineKeyboardMarkup(buttons)
@@ -309,8 +474,15 @@ async def bulk_profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "profile_ok":
         proposal = ctx.user_data.get("_stmt_proposal") or {}
-        file_bytes = ctx.user_data.get("_stmt_file_bytes") or b""
-        filename = ctx.user_data.get("_stmt_filename") or "file.csv"
+        errors = sp.validate_profile_mapping(proposal)
+        if errors:
+            error_lines = "\n".join(f"  ❌ {e}" for e in errors)
+            await query.edit_message_text(
+                _format_profile_confirm_message(proposal)
+                + f"\n\n⚠️ Cannot save yet:\n{error_lines}\n\nPlease fix the mapping first.",
+                reply_markup=_profile_confirm_keyboard(),
+            )
+            return BULK_PROFILE_CONFIRM
         await query.edit_message_text(
             _format_profile_confirm_message(proposal) + "\n\nName this format? (e.g. MyBankA)"
         )
@@ -338,14 +510,22 @@ async def bulk_profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         col = ctx.user_data.get("_stmt_fix_col") or ""
         proposal = ctx.user_data.get("_stmt_proposal") or {}
         col_map = proposal.setdefault("column_map", {})
-        # Clear old mapping for this field, then set new one.
+        # Clear old mapping for this column across all fields.
         for k in list(col_map.keys()):
             if col_map[k] == col:
                 col_map[k] = None
         if field != "skip":
             col_map[field] = col
+            # Enforce mutual exclusivity: amount vs debit/credit.
+            if field == "amount":
+                col_map.pop("debit", None)
+                col_map.pop("credit", None)
+                if proposal.get("sign_convention") == sp.SIGN_DEBIT_CREDIT_SPLIT:
+                    proposal["sign_convention"] = "negative_expense"
+            elif field in ("debit", "credit"):
+                col_map.pop("amount", None)
+                proposal["sign_convention"] = sp.SIGN_DEBIT_CREDIT_SPLIT
         ctx.user_data["_stmt_proposal"] = proposal
-        headers = ctx.user_data.get("_stmt_headers") or []
         await query.edit_message_text(
             _format_profile_confirm_message(proposal),
             reply_markup=_profile_confirm_keyboard(),
@@ -367,6 +547,19 @@ async def bulk_profile_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     proposal = ctx.user_data.get("_stmt_proposal") or {}
     file_bytes = ctx.user_data.get("_stmt_file_bytes") or b""
     filename = ctx.user_data.get("_stmt_filename") or "file.csv"
+
+    # Final validation — catches edge cases (e.g. user edited mapping then named).
+    errors = sp.validate_profile_mapping(proposal)
+    if errors:
+        error_lines = "\n".join(f"  ❌ {e}" for e in errors)
+        await update.message.reply_text(
+            f"⚠️ Cannot save — mapping is incomplete:\n{error_lines}"
+        )
+        await update.message.reply_text(
+            _format_profile_confirm_message(proposal),
+            reply_markup=_profile_confirm_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
 
     profile = {**proposal, "name": name}
     # Determine delimiter for CSV: carry from provisional profile or sniff again.
@@ -1115,6 +1308,37 @@ async def bulk_timeout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @auth_write
 async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    # Handle /bulk profile [list|delete <name>] — owner-only profile management.
+    args = ctx.args or []
+    if args and args[0].lower() == "profile":
+        subcommand = args[1].lower() if len(args) > 1 else "list"
+        if subcommand == "list" or len(args) < 2:
+            return await _cmd_bulk_profile_list(update, ctx)
+        elif subcommand == "delete":
+            name = " ".join(args[2:]).strip()
+            if not name:
+                await update.message.reply_text(
+                    "Usage: /bulk profile delete <name>\n"
+                    "Use /bulk profile list to see all saved profiles."
+                )
+                return ConversationHandler.END
+            deleted = sp.delete_profile(name, settings.STATEMENT_PROFILES_DIR)
+            if deleted:
+                await update.message.reply_text(f"✅ Profile '{name}' deleted.")
+            else:
+                await update.message.reply_text(
+                    f"No profile named '{name}' found. "
+                    f"Use /bulk profile list to see all saved profiles."
+                )
+            return ConversationHandler.END
+        else:
+            await update.message.reply_text(
+                "Usage:\n"
+                "  /bulk profile list — list all saved profiles\n"
+                "  /bulk profile delete <name> — delete a profile"
+            )
+            return ConversationHandler.END
+
     # Resume an unfinished draft directly — no need to re-upload anything.
     draft = _load_user_draft(update.effective_user.id)
     if isinstance(draft, list) and draft:

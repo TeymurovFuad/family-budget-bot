@@ -60,7 +60,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/setbudget — set the monthly budget limit for a category (owner only)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
-        "/help — this list\n",
+        "/help — this list\n\n"
+        "*Owner only*\n"
+        "/bulk profile list — list all saved bank-statement profiles\n"
+        "/bulk profile delete <name> — delete a saved profile by name\n",
         parse_mode="Markdown",
     )
 

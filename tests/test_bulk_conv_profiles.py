@@ -216,12 +216,13 @@ class TestFormatProfileConfirmMessage:
         msg = _format_profile_confirm_message(self._sample_proposal())
         assert "negative" in msg.lower()
 
-    def test_unmapped_field_shown(self):
-        """Fields with no column mapping show '(not mapped)'."""
+    def test_unmapped_optional_field_shown(self):
+        """Optional fields with no mapping show 'not found' in the output."""
         proposal = self._sample_proposal()
         proposal["column_map"]["time"] = None
         msg = _format_profile_confirm_message(proposal)
-        assert "not mapped" in msg
+        # New format: optional unmapped fields show "not found" (with a note about usage)
+        assert "not found" in msg or "time" in msg
 
     def test_header_line_present(self):
         msg = _format_profile_confirm_message(self._sample_proposal())

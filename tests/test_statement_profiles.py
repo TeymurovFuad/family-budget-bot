@@ -610,3 +610,332 @@ class TestProfileRoundtrip:
         sp.save_profile(p2, tmp_path)
         profiles = sp.load_profiles(tmp_path)
         assert len(profiles) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# debit_credit_split sign convention
+# ─────────────────────────────────────────────────────────────────────────────
+
+SPLIT_PROFILE = {
+    "name": "SplitBank",
+    "delimiter": ",",
+    "encoding": "utf-8",
+    "header_row": 0,
+    "fingerprint": ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+    "column_map": {
+        "date": "TxnDate",
+        "debit": "Debits",
+        "credit": "Credits",
+        "currency": "CCY",
+        "description": "Memo",
+        "time": None,
+    },
+    "date_format": "%Y-%m-%d",
+    "decimal_separator": ".",
+    "sign_convention": sp.SIGN_DEBIT_CREDIT_SPLIT,
+}
+
+
+class TestDebitCreditSplit:
+    def _make_split_csv(self, rows: list[list]) -> bytes:
+        return _make_csv_bytes(
+            ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+            rows,
+            delimiter=",",
+        )
+
+    def test_debit_row_becomes_expense(self):
+        csv_bytes = self._make_split_csv([
+            ["2026-05-01", "45.99", "", "PLN", "Grocery store"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 1
+        assert result[0]["type"] == "Expense"
+        assert result[0]["value"] == pytest.approx(45.99)
+        assert result[0]["description"] == "Grocery store"
+
+    def test_credit_row_becomes_income(self):
+        csv_bytes = self._make_split_csv([
+            ["2026-05-02", "", "1500.00", "EUR", "Salary"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 1
+        assert result[0]["type"] == "Income"
+        assert result[0]["value"] == pytest.approx(1500.00)
+
+    def test_both_zero_row_skipped(self):
+        """Row with both debit and credit empty/zero is skipped (balance line)."""
+        csv_bytes = self._make_split_csv([
+            ["2026-05-03", "", "", "PLN", "Balance brought forward"],
+            ["2026-05-04", "10.00", "", "PLN", "Coffee"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 1
+        assert result[0]["description"] == "Coffee"
+
+    def test_both_zero_explicit_zeros_skipped(self):
+        """Explicit '0' / '0.00' in both columns → skip."""
+        csv_bytes = self._make_split_csv([
+            ["2026-05-05", "0.00", "0.00", "PLN", "Fee waiver"],
+            ["2026-05-06", "5.00", "0", "PLN", "Bus"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 1
+        assert result[0]["description"] == "Bus"
+
+    def test_both_nonzero_prefers_debit(self):
+        """Unusual case: both columns non-zero — debit wins, type is Expense."""
+        csv_bytes = self._make_split_csv([
+            ["2026-05-07", "20.00", "5.00", "PLN", "Weird row"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 1
+        assert result[0]["type"] == "Expense"
+        assert result[0]["value"] == pytest.approx(20.00)
+
+    def test_multiple_rows_mixed(self):
+        """Expense + income rows both parsed correctly in one file."""
+        csv_bytes = self._make_split_csv([
+            ["2026-05-01", "45.99", "", "PLN", "Grocery"],
+            ["2026-05-02", "", "1500.00", "EUR", "Salary"],
+            ["2026-05-03", "", "", "PLN", "Balance"],
+            ["2026-05-04", "9.99", "", "PLN", "Coffee"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        assert len(result) == 3
+        types = [r["type"] for r in result]
+        assert types == ["Expense", "Income", "Expense"]
+
+    def test_split_profile_xlsx(self):
+        """XLSX file with split columns parsed correctly."""
+        profile = {**SPLIT_PROFILE, "decimal_separator": "."}
+        xlsx_bytes = _make_xlsx_bytes(
+            ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+            [
+                ["2026-06-01", 30.0, None, "PLN", "Lunch"],
+                ["2026-06-02", None, 200.0, "PLN", "Refund"],
+            ],
+        )
+        result = sp.parse_statement(xlsx_bytes, "statement.xlsx", profile)
+        assert len(result) == 2
+        assert result[0]["type"] == "Expense"
+        assert result[0]["value"] == pytest.approx(30.0)
+        assert result[1]["type"] == "Income"
+        assert result[1]["value"] == pytest.approx(200.0)
+
+    def test_amount_always_positive(self):
+        """Amount is stored positive regardless of column (sign lives in type)."""
+        csv_bytes = self._make_split_csv([
+            ["2026-05-01", "100.00", "", "PLN", "Payment"],
+            ["2026-05-02", "", "50.00", "PLN", "Refund"],
+        ])
+        result = sp.parse_statement(csv_bytes, "statement.csv", SPLIT_PROFILE)
+        for row in result:
+            assert row["value"] > 0
+
+    def test_comma_decimal_in_split_columns(self):
+        """Split-column amounts with comma decimal separator parse correctly."""
+        profile = {**SPLIT_PROFILE, "decimal_separator": ","}
+        csv_bytes = _make_csv_bytes(
+            ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+            [
+                ["2026-05-01", "1.234,56", "", "PLN", "Big buy"],
+                ["2026-05-02", "", "500,00", "EUR", "Payment in"],
+            ],
+            delimiter=",",
+        )
+        # Note: comma-decimal and comma-delimiter can conflict; we use semicolon
+        # for this test to avoid CSV parsing ambiguity.
+        profile2 = {**profile, "delimiter": ";"}
+        csv2 = _make_csv_bytes(
+            ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+            [
+                ["2026-05-01", "1.234,56", "", "PLN", "Big buy"],
+                ["2026-05-02", "", "500,00", "EUR", "Pay in"],
+            ],
+            delimiter=";",
+        )
+        result = sp.parse_statement(csv2, "statement.csv", profile2)
+        assert len(result) == 2
+        assert result[0]["value"] == pytest.approx(1234.56)
+        assert result[1]["value"] == pytest.approx(500.00)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# validate_profile_mapping
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestValidateProfileMapping:
+    def _make_profile(self, col_map: dict, sign: str = "negative_expense") -> dict:
+        return {"column_map": col_map, "sign_convention": sign}
+
+    def test_valid_single_amount(self):
+        p = self._make_profile({"date": "Date", "amount": "Amt", "currency": "CCY"})
+        assert sp.validate_profile_mapping(p) == []
+
+    def test_valid_split(self):
+        p = self._make_profile(
+            {"date": "Date", "debit": "Dr", "credit": "Cr", "currency": "CCY"},
+            sign=sp.SIGN_DEBIT_CREDIT_SPLIT,
+        )
+        assert sp.validate_profile_mapping(p) == []
+
+    def test_missing_date(self):
+        p = self._make_profile({"amount": "Amt", "currency": "CCY"})
+        errors = sp.validate_profile_mapping(p)
+        assert any("date" in e for e in errors)
+
+    def test_missing_currency(self):
+        p = self._make_profile({"date": "Date", "amount": "Amt"})
+        errors = sp.validate_profile_mapping(p)
+        assert any("currency" in e for e in errors)
+
+    def test_missing_amount(self):
+        p = self._make_profile({"date": "Date", "currency": "CCY"})
+        errors = sp.validate_profile_mapping(p)
+        assert any("amount" in e for e in errors)
+
+    def test_debit_without_credit(self):
+        p = self._make_profile(
+            {"date": "Date", "debit": "Dr", "currency": "CCY"},
+            sign=sp.SIGN_DEBIT_CREDIT_SPLIT,
+        )
+        errors = sp.validate_profile_mapping(p)
+        assert any("credit" in e for e in errors)
+
+    def test_credit_without_debit(self):
+        p = self._make_profile(
+            {"date": "Date", "credit": "Cr", "currency": "CCY"},
+            sign=sp.SIGN_DEBIT_CREDIT_SPLIT,
+        )
+        errors = sp.validate_profile_mapping(p)
+        assert any("debit" in e for e in errors)
+
+    def test_amount_and_debit_conflict(self):
+        p = self._make_profile({"date": "Date", "amount": "Amt", "debit": "Dr", "currency": "CCY"})
+        errors = sp.validate_profile_mapping(p)
+        assert any("both" in e or "amount and debit" in e for e in errors)
+
+    def test_fully_empty_col_map(self):
+        p = self._make_profile({})
+        errors = sp.validate_profile_mapping(p)
+        assert len(errors) >= 3  # date, currency, amount all missing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# delete_profile / list_profiles
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestDeleteAndListProfiles:
+    def test_delete_existing_profile(self, tmp_path):
+        sp.save_profile(BANKA_PROFILE, tmp_path)
+        deleted = sp.delete_profile("BankA", tmp_path)
+        assert deleted is True
+        assert list(tmp_path.glob("BankA.json")) == []
+
+    def test_delete_nonexistent_profile_returns_false(self, tmp_path):
+        assert sp.delete_profile("DoesNotExist", tmp_path) is False
+
+    def test_delete_nonexistent_dir_returns_false(self, tmp_path):
+        assert sp.delete_profile("BankA", tmp_path / "missing") is False
+
+    def test_delete_by_name_field_not_filename(self, tmp_path):
+        """delete_profile matches on the 'name' JSON field, not the filename."""
+        profile = {**BANKA_PROFILE, "name": "My Bank A"}
+        sp.save_profile(profile, tmp_path)
+        deleted = sp.delete_profile("My Bank A", tmp_path)
+        assert deleted is True
+
+    def test_list_profiles_sorted_by_name(self, tmp_path):
+        for name in ("Zeta", "Alpha", "Gamma"):
+            sp.save_profile({**BANKA_PROFILE, "name": name}, tmp_path)
+        profiles = sp.list_profiles(tmp_path)
+        names = [p["name"] for p in profiles]
+        assert names == sorted(names, key=str.lower)
+
+    def test_list_profiles_empty_dir(self, tmp_path):
+        assert sp.list_profiles(tmp_path) == []
+
+    def test_list_profiles_nonexistent_dir(self, tmp_path):
+        assert sp.list_profiles(tmp_path / "missing") == []
+
+    def test_list_after_delete(self, tmp_path):
+        sp.save_profile(BANKA_PROFILE, tmp_path)
+        p2 = {**BANKA_PROFILE, "name": "BankB", "fingerprint": ["A", "B"]}
+        sp.save_profile(p2, tmp_path)
+        assert len(sp.list_profiles(tmp_path)) == 2
+        sp.delete_profile("BankA", tmp_path)
+        remaining = sp.list_profiles(tmp_path)
+        assert len(remaining) == 1
+        assert remaining[0]["name"] == "BankB"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# mask_sample_rows — debit/credit
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestMaskSampleRowsSplitColumns:
+    def test_debit_and_credit_col_names_masked(self):
+        """If proposal maps debit/credit column names, those values are masked."""
+        proposal = {"debit": "Debits", "credit": "Credits"}
+        rows = [["2026-01-01", "Debits", "Credits", "PLN", "Shop"]]
+        masked = sp.mask_sample_rows(rows, proposal)
+        # "Debits" and "Credits" match masked_col_names — masked.
+        assert masked[0][1] == "***"
+        assert masked[0][2] == "***"
+
+    def test_amount_regex_masks_numeric_cells(self):
+        """Numeric-looking cells in debit/credit columns are masked via regex."""
+        rows = [["2026-01-01", "45.99", "0.00", "PLN", "Grocery"]]
+        masked = sp.mask_sample_rows(rows, {})
+        assert masked[0][1] == "***"
+        assert masked[0][2] == "***"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AI proposal — debit/credit split response
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestProposeMappingSplit:
+    def test_propose_mapping_split_columns(self):
+        """AI proposes debit+credit split; response is accepted."""
+        ai_response = {
+            "column_map": {
+                "date": "TxnDate",
+                "amount": None,
+                "debit": "Debits",
+                "credit": "Credits",
+                "currency": "CCY",
+                "description": "Memo",
+                "time": None,
+            },
+            "date_format": "%Y-%m-%d",
+            "decimal_separator": ".",
+            "sign_convention": sp.SIGN_DEBIT_CREDIT_SPLIT,
+        }
+        client = MagicMock()
+        client.chat.return_value = json.dumps(ai_response)
+
+        result = sp.propose_mapping(
+            ["TxnDate", "Debits", "Credits", "CCY", "Memo"],
+            [["2026-05-01", "45.99", "", "PLN", "Grocery"]],
+            client,
+        )
+
+        assert result["sign_convention"] == sp.SIGN_DEBIT_CREDIT_SPLIT
+        assert result["column_map"]["debit"] == "Debits"
+        assert result["column_map"]["credit"] == "Credits"
+        assert result["column_map"]["amount"] is None
+
+    def test_prompt_mentions_split_columns(self):
+        """The generated prompt instructs the AI about debit/credit split."""
+        from statement_profiles import _build_mapping_prompt, SIGN_DEBIT_CREDIT_SPLIT
+
+        prompt = _build_mapping_prompt(["Date", "Debits", "Credits"], [])
+        assert SIGN_DEBIT_CREDIT_SPLIT in prompt
+        assert "debit" in prompt.lower()
+        assert "credit" in prompt.lower()
