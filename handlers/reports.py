@@ -74,6 +74,15 @@ async def _send_cycle_summary(update, ccy: str, df, rates,
 @auth
 @log_call()
 async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📊 */summary* — Monthly summary\n\n"
+            "Shows this month's income, expenses, savings, and net at a glance\\.\n"
+            "Includes savings rate and projected month\\-end spend at today's pace\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     year, month = current_year_and_month()
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
@@ -118,6 +127,14 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_week(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📅 */week* — Last 7 days\n\n"
+            "Shows total spending broken down by category over the last 7 days\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     from datetime import timedelta
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
@@ -149,6 +166,16 @@ async def cmd_week(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "💰 */budget* — Budget vs actual\n\n"
+            "Compares your monthly budget limits against actual spend per category\\.\n"
+            "🟢 within budget  🔴 over budget\\.\n"
+            "Set limits with /setbudget \\(owner only\\)\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     year, month = current_year_and_month()
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
@@ -206,6 +233,14 @@ async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "🏆 */top* — Top 5 expenses\n\n"
+            "Shows the 5 biggest expenses this month, sorted by amount\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     year, month = current_year_and_month()
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
@@ -240,6 +275,14 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📈 */savings* — Savings rate trend\n\n"
+            "Shows a chart of your savings rate for the last 6 months vs your target\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     try:
         df = load_data()
     except FileNotFoundError as e:
@@ -280,6 +323,16 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📑 */report* — Full monthly report\n\n"
+            "Income, expenses \\(fixed vs variable\\), savings, net, and savings rate\\.\n"
+            "Breaks down spend by category with month\\-over\\-month deltas\\.\n"
+            "Over\\-budget categories are flagged 🔴\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     year, month = current_year_and_month()
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
@@ -370,6 +423,15 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @auth
 @log_call()
 async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "💱 */rates* — Exchange rates\n\n"
+            "Shows exchange rates stored in your Excel \\(PLN per 1 unit\\)\\.\n"
+            "Use `/rates refresh` to fetch live rates from frankfurter\\.dev and update Excel\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     rates = load_rates()
 
     if ctx.args and ctx.args[0].lower() == "refresh":
@@ -463,6 +525,15 @@ def _build_savings_chart(months: list, rates: list) -> io.BytesIO:
 @auth
 @log_call()
 async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📊 */chart* — Spending chart\n\n"
+            "Shows a horizontal bar chart of this month's expenses by category\\.\n"
+            "Bars are colour\\-coded: 🟢 under 80%  🟡 80\\-100%  🔴 over budget\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
@@ -512,6 +583,15 @@ async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @log_call()
 async def cmd_range(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Show an inline keyboard with preset date ranges for a filtered report."""
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📅 */range* — Range report\n\n"
+            "Pick a preset period \\(this month, last month, last 3 or 6 months, this year\\) or enter a custom date range\\.\n"
+            "Shows income, expenses, savings, net, and top categories for the chosen period\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("This month",    callback_data="range:this_month"),

@@ -559,6 +559,9 @@ async def bulk_profile_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return BULK_PROFILE_CONFIRM
 
     profile = {**proposal, "name": name}
+    # Fingerprint must always be present so load_profiles() can key on it.
+    if not profile.get("fingerprint"):
+        profile["fingerprint"] = ctx.user_data.get("_stmt_headers") or []
     # Determine delimiter for CSV: carry from provisional profile or sniff again.
     if not profile.get("delimiter"):
         ext = Path(filename).suffix.lower()
@@ -1305,8 +1308,19 @@ async def bulk_timeout(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @auth_write
 async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    # Handle /bulk profile [list|delete <name>] — owner-only profile management.
+    # Handle /bulk help — show focused usage text without starting the flow.
     args = ctx.args or []
+    if args and args[0].lower() == "help":
+        await update.message.reply_text(
+            "📎 */bulk* — Bulk import\n\n"
+            "Upload a CSV, XLSX, TXT file or a photo\\. The AI maps columns and shows you the parsed rows\\.\n"
+            "To fix a row, reply: `2 category=Transport`\\. Reply `save` to import or `cancel` to discard\\.\n"
+            "Bank statement profiles from previous uploads are matched automatically\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
+    # Handle /bulk profile [list|delete <name>] — owner-only profile management.
     if args and args[0].lower() == "profile":
         subcommand = args[1].lower() if len(args) > 1 else "list"
         if subcommand == "list":
@@ -1410,7 +1424,7 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     if proposal:
                         # Merge provisional settings (delimiter etc.) into the AI proposal.
                         if provisional:
-                            for k in ("delimiter", "encoding", "header_row"):
+                            for k in ("delimiter", "encoding", "header_row", "fingerprint"):
                                 if k not in proposal:
                                     proposal[k] = provisional.get(k)
                         ctx.user_data["_stmt_proposal"] = proposal

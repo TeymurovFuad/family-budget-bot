@@ -26,6 +26,14 @@ EDIT_FIELD_MAP = {
 @log_call()
 @auth_write
 async def cmd_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "✏️ */edit* — Edit a transaction\n\n"
+            "Shows the last 10 transactions\\. Pick one by number, then choose a field to change: Amount, Currency, Category, Description, Date, or Person\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
     try:
         txns = get_recent_transactions(get_excel_path_for_reading(), n=10)
     except Exception as e:

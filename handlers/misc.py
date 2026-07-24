@@ -36,42 +36,51 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ccy = get_display_currency(update.effective_user.id)
     await update.message.reply_text(
-        f"📋 *Commands* (showing in {ccy})\n\n"
+        f"📋 *Commands* \\(showing in {ccy}\\)\n\n"
         "*Add transactions*\n"
         "/add — log one transaction step by step\n"
         "/bulk — import many transactions from photo, file or text; review the parsed rows, reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
-        "Or just type naturally: \"groceries 89 PLN\" to quick-add.\n\n"
+        "Or just type naturally: \"groceries 89 PLN\" to quick\\-add\\.\n\n"
         "*Reports*\n"
         "/summary — this month at a glance: income, expenses, savings\n"
         "/week — last 7 days of spending by category\n"
         "/budget — budget vs actual for every category\n"
         "/top — top 5 biggest expenses this month\n"
-        "/report — full monthly report with month-over-month deltas\n"
+        "/report — full monthly report with month\\-over\\-month deltas\n"
         "/chart — spending by category as a chart\n"
         "/range — report for a custom date range\n"
         "/savings — savings rate for the last 6 months vs target\n"
-        "/rates — exchange rates (/rates refresh for live)\n\n"
+        "/rates — exchange rates \\(/rates refresh for live\\)\n\n"
         "*Manage*\n"
         "/edit — edit a field on one of the last 10 transactions\n"
         "/delete — remove one of the last 5 transactions\n"
         "/export — download your Excel workbook\n\n"
         "*Settings*\n"
         "/setcurrency — change the display currency\n"
-        "/setbudget — set the monthly budget limit for a category (owner only)\n"
-        "/cycle — show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a new one (owner only, needs BUDGET_CYCLE=1)\n"
+        "/setbudget — set the monthly budget limit for a category \\(owner only\\)\n"
+        "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(owner only, needs BUDGET\\_CYCLE=1\\)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
         "/help — this list\n\n"
         "*Owner only*\n"
-        "/bulk profile list — list all saved bank-statement profiles\n"
+        "/bulk profile list — list all saved bank\\-statement profiles\n"
         "/bulk profile delete <name> — delete a saved profile by name\n",
-        parse_mode="Markdown",
+        parse_mode="MarkdownV2",
     )
 
 
 @auth_write
 @log_call()
 async def cmd_setcurrency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "💱 */setcurrency* — Change display currency\n\n"
+            "Use `/setcurrency USD` to set directly, or just `/setcurrency` to pick from a keyboard\\.\n"
+            "The setting is per\\-user and affects all reports\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
     rates     = load_rates()
     available = sorted(rates.keys())
     current   = get_display_currency(update.effective_user.id)
@@ -108,6 +117,15 @@ async def cmd_setcurrency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 @log_call()
 async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Send the current live Excel workbook back to the requesting user."""
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📥 */export* — Download your workbook\n\n"
+            "Sends the live Excel file as a Telegram document\\.\n"
+            "Useful for local backups or manual inspection\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
     try:
         excel_path = get_excel_path_for_reading()
         if not excel_path.exists():
@@ -163,6 +181,15 @@ def _build_setbudget_keyboard() -> InlineKeyboardMarkup:
 @auth_write
 @log_call()
 async def cmd_setbudget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "💰 */setbudget* — Set category budget \\(owner only\\)\n\n"
+            "Pick a category from the list, then send the new monthly limit in PLN\\.\n"
+            "Limits show in /budget and flag overspending in /report\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
     await update.message.reply_text(
         "💰 *Set a category budget*\n\nPick a category to update (or /cancel):",
         parse_mode="Markdown",
