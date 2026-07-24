@@ -226,7 +226,13 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
             _esc(f"✅ Confirmed {n} {'boundary' if n == 1 else 'boundaries'}."),
             parse_mode="MarkdownV2",
         )
-        await _advance_detect_queue(query.message, ctx)
+        if not ctx.user_data.get("detect_queue"):
+            ctx.user_data.pop("detect_queue", None)
+            await query.message.reply_text(
+                "✅ Backfill complete\\! All boundaries have been reviewed\\.",
+                parse_mode="MarkdownV2",
+            )
+        # else: ambiguous queue is already in progress — it will send completion itself
         return
 
     if data.startswith("detect:pick:"):

@@ -883,6 +883,24 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
 - [ ] **Test: zero-amount row classification** — `"0.00"` passes the empty-check and under `negative_expense` becomes Income type with value 0 (possibly a fee-waiver or balance row). Test and document the intended behavior.
 - [ ] **Test fixture: shallow copy of `BANKA_PROFILE` fixture** — `test_multiple_profiles_loaded` does `{**BANKA_PROFILE, ...}` which is a shallow copy; `column_map` is the same object as `BANKA_PROFILE["column_map"]`. Any future test mutating `p2["column_map"]` in-place would corrupt the shared fixture. Use `copy.deepcopy(BANKA_PROFILE)` in the fixture or a factory function.
 
+## Follow-up: /cycle detect review notes (PR #32, 2026-07-24)
+
+- [ ] **`awaiting_detect_date` leaks across unrelated messages** — clicking "Custom date"
+      sets `ctx.user_data["awaiting_detect_date"]`; if the user ignores the prompt and
+      types anything else, `handle_detect_text` (group=2) fires and returns
+      "❌ Use YYYY-MM-DD." with no escape path. Fix: add a "Cancel" inline button to the
+      custom-date edit message and/or clear `awaiting_detect_date` inside the
+      `detect:pick`, `detect:none`, and `detect:confirm_all` callback branches.
+      (`handlers/cycle.py`)
+- [ ] **`handle_detect_text` has no `@auth_write`** — write path (`async_record_cycle_start`)
+      runs without re-checking auth. Low practical risk (flow can only start via `/cycle detect`
+      which is auth-gated), but inconsistent with all other write handlers.
+      (`handlers/cycle.py:263`)
+- [ ] **Empty-fingerprint fallback in bulk_conv is silent** — the `or []` guard on
+      `profile["fingerprint"]` is unreachable in the normal path, but if it fires the
+      profile saves with an empty fingerprint and will never match on re-upload. Add a
+      `log.warning` at that branch. (`handlers/bulk_conv.py` near `bulk_profile_name`)
+
 ## Follow-up: profile review notes (PR #27, 2026-07-23)
 
 Non-blocking findings from the PR #27 review (debit/credit split columns + profile deletion):
