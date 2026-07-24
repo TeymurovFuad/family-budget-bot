@@ -210,7 +210,7 @@ def test_detect_contains_match_on_bank_transfer_titles():
 
 
 def test_detect_extra_keywords_from_settings(monkeypatch):
-    monkeypatch.setattr(settings, "SALARY_KEYWORDS", ["wynagrodzenie"])
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wynagrodzenie"])
     df = _detect_df()
     df["Description"] = ["Wynagrodzenie", "x", "y", ""]
     results = cycles.detect_cycle_candidates(df, existing_cycles=[])
@@ -219,7 +219,7 @@ def test_detect_extra_keywords_from_settings(monkeypatch):
 
 def test_salary_mask_empty_keyword_matches_nothing(monkeypatch):
     monkeypatch.setattr(settings, "SALARY_CATEGORY", "")
-    monkeypatch.setattr(settings, "SALARY_KEYWORDS", [])
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", [])
     assert not cycles.salary_mask(_detect_df()).any()
 
 

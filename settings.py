@@ -68,8 +68,8 @@ SALARY_CATEGORY = os.getenv("SALARY_CATEGORY", "Salary")
 # Extra words that mark a transaction as salary in Category or Description,
 # comma-separated (e.g. "wynagrodzenie,payroll"). SALARY_CATEGORY is always
 # included — this list only adds to it.
-SALARY_KEYWORDS = [
-    w.strip() for w in os.getenv("SALARY_KEYWORDS", "").split(",") if w.strip()
+CYCLE_DETECT_KEYWORDS = [
+    w.strip() for w in os.getenv("CYCLE_DETECT_KEYWORDS", "").split(",") if w.strip()
 ]
 try:
     CYCLE_REPROMPT_MIN_AGE_DAYS = int(os.getenv("CYCLE_REPROMPT_MIN_AGE_DAYS", "20"))

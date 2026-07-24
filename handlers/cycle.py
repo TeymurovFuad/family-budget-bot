@@ -14,7 +14,7 @@ from log_decorators import log_call
 from cycles import (
     async_record_cycle_start, current_cycle_start, cycle_label,
     detect_cycle_candidates, load_cycles, record_cycle_starts_batch,
-    salary_keywords, should_prompt_new_cycle,
+    cycle_detect_keywords, should_prompt_new_cycle,
 )
 
 _CYCLE_USAGE = (
@@ -35,7 +35,7 @@ _CYCLE_USAGE = (
     "*How detection matches a salary:* an Income transaction whose "
     "Category equals the salary category, or whose Description contains "
     "any search word (default: salary; extend permanently via "
-    "`SALARY_KEYWORDS` in .env, or per-scan with `/cycle detect <word>`).\n\n"
+    "`CYCLE_DETECT_KEYWORDS` in .env, or per-scan with `/cycle detect <word>`).\n\n"
     "*Reports:* with cycles enabled, /summary and /budget cover the "
     "current cycle (last boundary → today) instead of the calendar month."
 )
@@ -125,7 +125,7 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     extra_keywords = list((ctx.args or [])[1:])
-    keywords = salary_keywords(extra_keywords)
+    keywords = cycle_detect_keywords(extra_keywords)
     await update.message.reply_text(
         f"🔍 Scanning transaction history — matching: {_esc(', '.join(keywords))}\\.\\.\\.",
         parse_mode="MarkdownV2",
@@ -300,7 +300,7 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
         return
     if transaction.transaction_type != "Income":
         return
-    keywords = salary_keywords()
+    keywords = cycle_detect_keywords()
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
     in_category = category in keywords

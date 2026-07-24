@@ -146,10 +146,10 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
-def salary_keywords(extra: list[str] | None = None) -> list[str]:
-    """SALARY_CATEGORY plus SALARY_KEYWORDS plus any ad-hoc extras, lowercased,
+def cycle_detect_keywords(extra: list[str] | None = None) -> list[str]:
+    """SALARY_CATEGORY plus CYCLE_DETECT_KEYWORDS plus any ad-hoc extras, lowercased,
     deduplicated, blanks dropped."""
-    words = [settings.SALARY_CATEGORY, *settings.SALARY_KEYWORDS, *(extra or [])]
+    words = [settings.SALARY_CATEGORY, *settings.CYCLE_DETECT_KEYWORDS, *(extra or [])]
     seen: list[str] = []
     for w in words:
         w = str(w or "").strip().lower()
@@ -165,7 +165,7 @@ def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd
     because bulk-imported salary rows carry the bank's transfer title (e.g.
     'WYNAGRODZENIE ZA LIPIEC') with an empty category.
     """
-    keywords = salary_keywords(extra_keywords)
+    keywords = cycle_detect_keywords(extra_keywords)
     if not keywords:
         return pd.Series(False, index=df.index)
     matches = df["Category"].astype(str).str.strip().str.lower().isin(keywords)
