@@ -8,6 +8,7 @@ the flag; these helpers just read/write the ledger.
 """
 
 import asyncio
+import re
 from datetime import date
 
 import pandas as pd
@@ -145,23 +146,39 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
-def salary_mask(df: pd.DataFrame) -> pd.Series:
+def salary_keywords(extra: list[str] | None = None) -> list[str]:
+    """SALARY_CATEGORY plus SALARY_KEYWORDS plus any ad-hoc extras, lowercased,
+    deduplicated, blanks dropped."""
+    words = [settings.SALARY_CATEGORY, *settings.SALARY_KEYWORDS, *(extra or [])]
+    seen: list[str] = []
+    for w in words:
+        w = str(w or "").strip().lower()
+        if w and w not in seen:
+            seen.append(w)
+    return seen
+
+
+def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd.Series:
     """
-    Boolean mask for salary rows: Income type AND the salary keyword in
-    Category OR Description. Description matters because bulk-imported and
-    hand-entered salary rows often carry 'Salary' as the description with an
-    empty category.
+    Boolean mask for salary rows: Income type AND a salary keyword in Category
+    (exact match) or Description (word-boundary contains). Description matters
+    because bulk-imported salary rows carry the bank's transfer title (e.g.
+    'WYNAGRODZENIE ZA LIPIEC') with an empty category.
     """
-    keyword = settings.SALARY_CATEGORY.strip().lower()
-    matches = df["Category"].astype(str).str.strip().str.lower() == keyword
+    keywords = salary_keywords(extra_keywords)
+    if not keywords:
+        return pd.Series(False, index=df.index)
+    matches = df["Category"].astype(str).str.strip().str.lower().isin(keywords)
     if "Description" in df.columns:
-        matches |= df["Description"].astype(str).str.strip().str.lower() == keyword
+        pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
+        matches |= df["Description"].astype(str).str.contains(pattern, case=False, regex=True)
     return (df["Type"] == "Income") & matches
 
 
 def detect_cycle_candidates(
     df: pd.DataFrame,
     existing_cycles: list[tuple[date, str]] | None = None,
+    extra_keywords: list[str] | None = None,
 ) -> list[dict]:
     """
     Scan transaction history for salary arrivals not yet recorded as cycle
@@ -182,7 +199,7 @@ def detect_cycle_candidates(
     salary_rows = df[
         df["_date"].notna()
         & df["IsDone"].astype(bool)
-        & salary_mask(df)
+        & salary_mask(df, extra_keywords)
         & (df["_date"] <= date.today())
     ].copy()
 

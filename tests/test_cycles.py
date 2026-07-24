@@ -190,8 +190,44 @@ def test_detect_skips_already_recorded_dates():
 
 def test_detect_matches_salary_in_category_without_description_column():
     df = _cycle_df()
+    assert "Description" not in df.columns  # pins the guard this test covers
     results = cycles.detect_cycle_candidates(df, existing_cycles=[])
     assert [r["date"] for r in results] == [date(2026, 6, 25)]
+
+
+def test_detect_contains_match_on_bank_transfer_titles():
+    df = _detect_df()
+    df["Description"] = [
+        "WYNAGRODZENIE ZA LIPIEC ACME SP Z OO",
+        "SALARY JUL 2024",
+        "salary",
+        "",
+    ]
+    results = cycles.detect_cycle_candidates(
+        df, existing_cycles=[], extra_keywords=["wynagrodzenie"]
+    )
+    assert [r["date"] for r in results] == [date(2024, 7, 1), date(2024, 8, 1)]
+
+
+def test_detect_extra_keywords_from_settings(monkeypatch):
+    monkeypatch.setattr(settings, "SALARY_KEYWORDS", ["wynagrodzenie"])
+    df = _detect_df()
+    df["Description"] = ["Wynagrodzenie", "x", "y", ""]
+    results = cycles.detect_cycle_candidates(df, existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2024, 7, 1)]
+
+
+def test_salary_mask_empty_keyword_matches_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "SALARY_CATEGORY", "")
+    monkeypatch.setattr(settings, "SALARY_KEYWORDS", [])
+    assert not cycles.salary_mask(_detect_df()).any()
+
+
+def test_salary_keyword_not_matched_as_substring():
+    df = _detect_df()
+    df["Description"] = ["salaryman payment", "x", "y", ""]
+    df["Category"] = ["", "", "", "Groceries"]
+    assert not cycles.salary_mask(df).any()
 
 
 # ── /cycle command ─────────────────────────────────────────────────────────────

@@ -14,15 +14,30 @@ from log_decorators import log_call
 from cycles import (
     async_record_cycle_start, current_cycle_start, cycle_label,
     detect_cycle_candidates, load_cycles, record_cycle_starts_batch,
-    should_prompt_new_cycle,
+    salary_keywords, should_prompt_new_cycle,
 )
 
 _CYCLE_USAGE = (
-    "Usage:\n"
-    "`/cycle` — show the current budget cycle\n"
-    "`/cycle started` — start a new cycle from today\n"
-    "`/cycle started YYYY-MM-DD` — start a new cycle from that date\n"
-    "`/cycle detect` — scan transaction history and backfill cycle boundaries"
+    "💰 *Budget cycles* — track spending per salary period instead of "
+    "calendar months. A cycle starts when your salary arrives and ends "
+    "when the next one does.\n\n"
+    "*Commands:*\n"
+    "`/cycle` — show the current cycle: label, start date, day count\n"
+    "`/cycle started` — record a new cycle starting today\n"
+    "`/cycle started YYYY-MM-DD` — record a new cycle from that date "
+    "(e.g. `/cycle started 2026-07-01`)\n"
+    "`/cycle detect` — scan the whole transaction history for salary "
+    "arrivals and backfill missing cycle boundaries; you review and "
+    "confirm every date before anything is written\n"
+    "`/cycle detect <word> ...` — add extra search words for the scan, "
+    "e.g. `/cycle detect wynagrodzenie premia` if your bank titles the "
+    "salary transfer in another language\n\n"
+    "*How detection matches a salary:* an Income transaction whose "
+    "Category equals the salary category, or whose Description contains "
+    "any search word (default: salary; extend permanently via "
+    "`SALARY_KEYWORDS` in .env, or per-scan with `/cycle detect <word>`).\n\n"
+    "*Reports:* with cycles enabled, /summary and /budget cover the "
+    "current cycle (last boundary → today) instead of the calendar month."
 )
 
 
@@ -109,15 +124,24 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    await update.message.reply_text("🔍 Scanning transaction history\\.\\.\\.", parse_mode="MarkdownV2")
+    extra_keywords = list((ctx.args or [])[1:])
+    keywords = salary_keywords(extra_keywords)
+    await update.message.reply_text(
+        f"🔍 Scanning transaction history — matching: {_esc(', '.join(keywords))}\\.\\.\\.",
+        parse_mode="MarkdownV2",
+    )
 
     loop = asyncio.get_running_loop()
     df, cycles = await loop.run_in_executor(None, lambda: (load_data(), load_cycles()))
-    candidates = await loop.run_in_executor(None, lambda: detect_cycle_candidates(df, cycles))
+    candidates = await loop.run_in_executor(
+        None, lambda: detect_cycle_candidates(df, cycles, extra_keywords)
+    )
 
     if not candidates:
         await update.message.reply_text(
-            "✅ Nothing to backfill — all salary payments are already recorded\\.",
+            "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
+            "If a salary is missing, add its transfer title as a search word: "
+            "`/cycle detect wynagrodzenie`\\.",
             parse_mode="MarkdownV2",
         )
         return
@@ -276,9 +300,13 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
         return
     if transaction.transaction_type != "Income":
         return
-    keyword = settings.SALARY_CATEGORY.strip().lower()
-    in_category = (transaction.category or "").strip().lower() == keyword
-    in_description = (getattr(transaction, "description", "") or "").strip().lower() == keyword
+    keywords = salary_keywords()
+    category = str(transaction.category or "").strip().lower()
+    description = str(getattr(transaction, "description", "") or "").lower()
+    in_category = category in keywords
+    in_description = any(
+        re.search(r"\b" + re.escape(k) + r"\b", description) for k in keywords
+    )
     if not in_category and not in_description:
         return
     today = datetime.now(TIMEZONE).date()
