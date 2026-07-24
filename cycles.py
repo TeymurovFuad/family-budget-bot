@@ -145,6 +145,164 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
+def detect_cycle_candidates(
+    df: pd.DataFrame,
+    existing_cycles: list[tuple[date, str]] | None = None,
+) -> list[dict]:
+    """
+    Scan transaction history for salary arrivals and return month-buckets that
+    have no recorded cycle boundary yet.
+
+    Each bucket: {month_key, month_label, window_start, window_end, unambiguous, candidates}
+    where each candidate is {date, amount, description}.
+    """
+    if existing_cycles is None:
+        existing_cycles = load_cycles()
+    existing_starts = {c[0] for c in existing_cycles}
+
+    df = df.copy()
+    df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+
+    valid = df[df["_date"].notna() & df["IsDone"].astype(bool)]
+
+    if valid.empty:
+        return []
+
+    today = date.today()
+    min_date = valid["_date"].min()
+    max_date = valid["_date"].max()
+
+    results: list[dict] = []
+    year = min_date.year
+    month = min_date.month
+    max_year = max_date.year
+    max_month = max_date.month
+
+    while (year, month) <= (max_year, max_month):
+        window_start = date(year, month, 20)
+        if month < 12:
+            window_end = date(year, month + 1, 5)
+        else:
+            window_end = date(year + 1, 1, 5)
+
+        if window_start > today:
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+            continue
+
+        already_recorded = any(window_start <= s <= window_end for s in existing_starts)
+        if already_recorded:
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+            continue
+
+        in_window = valid[
+            (valid["_date"] >= window_start) & (valid["_date"] <= window_end)
+        ]
+        income_in_window = in_window[in_window["Type"] == "Income"]
+
+        if income_in_window.empty:
+            if month == 12:
+                year, month = year + 1, 1
+            else:
+                month += 1
+            continue
+
+        salary_rows = in_window[
+            (in_window["Type"] == "Income")
+            & (
+                in_window["Category"].astype(str).str.strip().str.lower()
+                == settings.SALARY_CATEGORY.strip().lower()
+            )
+        ]
+
+        month_key = f"{year:04d}-{month:02d}"
+
+        if len(salary_rows) == 1:
+            row = salary_rows.iloc[0]
+            unambiguous = True
+            candidates = [
+                {
+                    "date": row["_date"],
+                    "amount": round(float(row["_pln"]), 2),
+                    "description": str(row.get("Description", "")),
+                }
+            ]
+        else:
+            unambiguous = False
+            top3 = income_in_window.nlargest(3, "_pln")
+            candidates = [
+                {
+                    "date": r["_date"],
+                    "amount": round(float(r["_pln"]), 2),
+                    "description": str(r.get("Description", "")),
+                }
+                for _, r in top3.iterrows()
+            ]
+
+        results.append(
+            {
+                "month_key": month_key,
+                "month_label": cycle_label(window_start),
+                "window_start": window_start,
+                "window_end": window_end,
+                "unambiguous": unambiguous,
+                "candidates": candidates,
+            }
+        )
+
+        if month == 12:
+            year, month = year + 1, 1
+        else:
+            month += 1
+
+    results.sort(key=lambda x: x["month_key"])
+    return results
+
+
+def record_cycle_starts_batch(starts: list[date]) -> int:
+    """
+    Open the workbook ONCE and write all boundary rows. Returns the count
+    actually written (skips dates that are already present).
+    """
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = ensure_cycles_sheet(wb)
+        idx = col_indices(ws, CyclesSchema)
+        start_col = idx["start_date"]
+        label_col = idx["label"]
+
+        existing: set[date] = set()
+        next_row = 2
+        for row in range(2, ws.max_row + 1):
+            existing_date = _to_date(ws.cell(row, start_col).value)
+            if existing_date is None:
+                continue
+            existing.add(existing_date)
+            next_row = row + 1
+
+        count = 0
+        for start in starts:
+            if start in existing:
+                continue
+            ws.cell(next_row, start_col, start)
+            ws.cell(next_row, label_col, cycle_label(start))
+            existing.add(start)
+            next_row += 1
+            count += 1
+            log.info("Batch-recorded cycle boundary %s (%s)", start, cycle_label(start))
+
+        if count:
+            atomic_save(wb, excel_path)
+        return count
+
+
 def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
     """
     Aggregate MasterData over [start, end] (inclusive; end is today for the
