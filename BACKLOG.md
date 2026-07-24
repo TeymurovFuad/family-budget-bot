@@ -10,19 +10,22 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-23 — PRs #23, #24, #27 merged, docs PR opened)*
+> *(Last updated: 2026-07-24 — PRs through #30 merged: budget cycles core consolidated)*
 
 ### PR state at last update
-- **All PRs #1–#27 merged**, including bank-statement profiles (PR #18),
-  auto-update Telegram notification (PR #19), orchestrator-memory update
-  (PR #21), bank-statement profiles docs (PR #22), budget cycles Phase 1
-  (PR #23: `BUDGET_CYCLE` flag, `CyclesSchema`, `/cycle started`, salary
-  prompt, cycle-aware `/summary`), cycles docs (PR #24), and debit/credit
-  split columns + profile deletion (PR #27).
-- **Next open work**: budget cycles Phase 2 (`/summary` picker UX is next up,
-  plus Cycle Dashboard sheet and `/cycles detect` backfill). See "budget
-  cycles — agreed design" and "/summary picker UX — agreed design" sections
-  below.
+- **All PRs #1–#30 merged.** PR #30 (budget cycles core) was consolidated with
+  the parallel Phase-1 implementation from PR #23: kept the PR #30
+  implementation (dedicated `cycles.py`, inline-button salary prompt,
+  cycle-scoped `/summary` + `/budget`, bare `/cycle` status, duplicate-boundary
+  no-ops, template Cycles sheet) and adopted #23's `StartDate` on-disk header —
+  no workbook migration needed.
+- **17 unchecked findings** are queued in the "budget cycles review notes
+  (pre-PR verify, 2026-07-24)" and "PR #30 review notes (2026-07-24)" sections
+  below — triage them into the follow-up cycle PRs.
+- **Next open work**: `/summary` picker UX PR first (see "Next up"), then
+  Cycle Dashboard sheet + sync check, then `/cycles detect` backfill. Designs
+  in "budget cycles — agreed design" and "/summary picker UX — agreed design"
+  sections below.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -40,25 +43,32 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **Budget cycles + `/summary` picker UX** — Phase 1 merged in PR #23
-     (`BUDGET_CYCLE` flag, `CyclesSchema`, `/cycle started`, salary prompt,
-     cycle-aware `/summary`). Phase 2 — Cycle Dashboard sheet, `/cycles detect`
-     backfill, and `/summary` picker button UX — still pending. Designs in
-     "budget cycles — agreed design" and "/summary picker UX — agreed design"
-     sections below.
-  2. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
+  1. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
+     the calendar view is currently unreachable from bare `/summary` (flag-on
+     removes it entirely until the picker ships). Design in "/summary picker
+     UX — agreed design" below.
+  2. **Cycle Dashboard sheet + sync check** — see "budget cycles — agreed
+     design"; must handle ledger rows that may be out of chronological order
+     (see PR #30 review notes).
+  3. **`/cycles detect` historical backfill** — same section.
+  4. **Cleanup note**: file_storage.py carries two dead imports
+     (`CyclesSchema`, `header_of` usage from the removed #23 cycle helpers)
+     left over from the PR #30 consolidation — fold into the next cleanup.
+  5. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
      and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
      items in "dedup review notes (PR #16, 2026-07-23)"); PR #18 review
      backlog items ("bank-statement profiles review notes (PR #18)" below);
      UX group (person attribution — check overlap with dedup v2 grammar
      before implementing); token-economy and infra/performance groups.
-  3. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
+  6. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
      match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
+- PR #30 (budget cycles core) squash-merged 2026-07-24 after a rebase that
+  consolidated it with the parallel PR #23 Phase-1 implementation. 17
+  unchecked review findings queued in the two cycles review-notes sections.
 - PRs #23, #24, #27 merged 2026-07-23: budget cycles Phase 1, cycles docs,
-  and debit/credit split columns + profile deletion. Phase 2 (`/summary`
-  picker UX) is next up.
+  and debit/credit split columns + profile deletion.
 - Budget cycles Phase 1 (PR #23) merged 2026-07-23. DOCUMENTATION.md, README,
   and BACKLOG updated in the follow-up docs PR. Phase 2 items (Cycle Dashboard,
   `/cycles detect`, `/summary` picker UX) remain pending — see "budget cycles —
