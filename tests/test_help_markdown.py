@@ -24,7 +24,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config
-from handlers.misc import cmd_help
+import handlers.misc
+from handlers.misc import cmd_help, cmd_start
 
 # Telegram MarkdownV2 reserved characters that must be escaped in plain text.
 # '*' and '_' are excluded here because the help text legitimately uses them
@@ -76,8 +77,28 @@ async def test_help_text_is_valid_markdown_v2(monkeypatch):
     problems = _find_unescaped_reserved(text)
     assert not problems, "MarkdownV2 violations in /help:\n" + "\n".join(problems)
 
-    # Bold/italic markers and code fences must be balanced.
-    without_escapes = re.sub(r"\\.", "", text)
+    # Bold/italic markers and code fences must be balanced. Backticks are
+    # counted on the raw (escape-stripped) text; * and _ only outside code
+    # spans, where they are literal characters.
+    without_escapes = re.sub(r"\\.", "", text, flags=re.S)
+    assert "\\" not in without_escapes, "stray lone backslash"
     assert without_escapes.count("`") % 2 == 0, "unbalanced backticks"
-    assert without_escapes.count("*") % 2 == 0, "unbalanced asterisks"
-    assert re.sub(r"`[^`]*`", "", without_escapes).count("_") % 2 == 0, "unbalanced underscores"
+    outside_code = re.sub(r"`[^`]*`", "", without_escapes)
+    assert outside_code.count("*") % 2 == 0, "unbalanced asterisks"
+    assert outside_code.count("_") % 2 == 0, "unbalanced underscores"
+
+
+@pytest.mark.asyncio
+async def test_start_escapes_hostile_first_name(monkeypatch):
+    monkeypatch.setattr(config, "ALLOWED_USERS", [111])
+    monkeypatch.setattr(handlers.misc, "get_display_currency", lambda uid: "EUR")
+    update = make_update()
+    update.effective_user.first_name = "Mr. Dot-Dash_Underscore!"
+
+    await cmd_start(update, make_ctx())
+
+    update.message.reply_text.assert_awaited_once()
+    text = update.message.reply_text.call_args[0][0]
+    assert update.message.reply_text.call_args[1].get("parse_mode") == "MarkdownV2"
+    problems = _find_unescaped_reserved(text)
+    assert not problems, "MarkdownV2 violations in /start:\n" + "\n".join(problems)

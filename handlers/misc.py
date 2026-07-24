@@ -6,6 +6,7 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update,
     ReplyKeyboardMarkup, ReplyKeyboardRemove,
 )
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, get_display_currency, set_display_currency, log
@@ -20,7 +21,7 @@ from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT
 @auth
 @log_call()
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    name = update.effective_user.first_name
+    name = escape_markdown(update.effective_user.first_name or "there", version=2)
     ccy  = get_display_currency(update.effective_user.id)
     await update.message.reply_text(
         f"👋 Hi *{name}*\\! I'm your *Budget Bot*\\.\n\n"
