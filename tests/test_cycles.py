@@ -157,6 +157,43 @@ def test_cycle_totals_negative_unaccounted_means_over_reported():
     assert totals["unaccounted"] < 0
 
 
+# ── detect_cycle_candidates ────────────────────────────────────────────────────
+
+def _detect_df():
+    """Rows shaped like real bulk-imported salary data: category empty,
+    'Salary' in Description."""
+    return pd.DataFrame({
+        "Date":        ["2024-07-01", "2024-08-01", "2024-08-01", "2024-07-01"],
+        "Type":        ["Income",     "Income",     "Income",     "Expense"],
+        "Category":    ["",           "",           "",           "Groceries"],
+        "Description": ["Salary",     "Salary",     "Salary",     ""],
+        "_base":        [12027.0,      11871.0,      11856.0,      2000.0],
+        "IsDone":      [True,         True,         True,         True],
+    })
+
+
+def test_detect_matches_salary_in_description():
+    results = cycles.detect_cycle_candidates(_detect_df(), existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2024, 7, 1), date(2024, 8, 1)]
+    assert results[0]["unambiguous"] is True
+    assert results[0]["amounts"] == [12027.0]
+    assert results[1]["unambiguous"] is False
+    assert results[1]["amounts"] == [11871.0, 11856.0]
+
+
+def test_detect_skips_already_recorded_dates():
+    results = cycles.detect_cycle_candidates(
+        _detect_df(), existing_cycles=[(date(2024, 7, 1), "Jul 2024")]
+    )
+    assert [r["date"] for r in results] == [date(2024, 8, 1)]
+
+
+def test_detect_matches_salary_in_category_without_description_column():
+    df = _cycle_df()
+    results = cycles.detect_cycle_candidates(df, existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2026, 6, 25)]
+
+
 # ── /cycle command ─────────────────────────────────────────────────────────────
 
 async def test_cmd_cycle_flag_off_is_inert(excel_path, monkeypatch):

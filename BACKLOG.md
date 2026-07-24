@@ -40,7 +40,21 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
+  1. **Formulas must survive data growth PR** — agreed 2026-07-25, TOP priority:
+     the user is about to re-import 1400+ historical rows and both failure
+     modes bite immediately. One PR, two fixes:
+     (a) Monthly Summary gets rows for every Year/Month present in MasterData —
+         either bot-appended on save or converted to open-ended dynamic
+         formulas needing no per-month rows (preferred; decide at
+         implementation). See "Monthly Summary sheet is never updated" bug.
+     (b) Kill every fixed row bound in written formulas — `$100`-style VLOOKUP
+         ranges in Value (base), `lists_currency_range` cap, Dashboard SUMIFS
+         bounds. Open-ended ranges or named ranges derived from actual data.
+         Absorbs the "lists_currency_range caps at row 100" item below.
+  2. **Statement-import correctness pair** (before the user re-imports):
+     decimal-separator fix flow + AI categorization for statement rows — see
+     "Bugs (confirmed live, 2026-07-25)".
+  3. **`/summary` picker UX PR** — with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
      UX — agreed design" below.
@@ -103,6 +117,98 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       was anchored at the 20th, missing salaries paid on day 1. Fixed:
       `window_start` now set to the 1st of the target month.
       (`cycles.py` `detect_cycle_candidates`)
+
+## Bugs (confirmed live, 2026-07-25)
+
+- [x] **/cycle detect finds nothing when 'Salary' is in Description, not
+      Category** — real MasterData salary rows carry empty Category and
+      "Salary" in Description; the PR #35 detect filtered on Category only and
+      reported "nothing to backfill" against 1400+ imported rows. Fixed:
+      shared `cycles.salary_mask()` matches the salary keyword in Category OR
+      Description; applied in `detect_cycle_candidates`, `cycle_totals`
+      (unaccounted math), and the live salary prompt
+      (`maybe_prompt_cycle_start`).
+
+- [ ] **Statement profile saved with wrong decimal separator corrupts every
+      amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for
+      a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400
+      rows imported with 100× inflated values. Three compounding gaps:
+      (a) profile list (`/bulk profile`) doesn't show the separator;
+      (b) debit/credit-split proposal message omits the separator entirely;
+      (c) "Fix a column" can only remap columns — separator, date format, and
+      sign convention cannot be corrected in the confirm flow.
+      Also add a sanity check: sample amount values like `79.99` (2 digits
+      after ".") contradict comma-decimal — validate proposal against samples
+      before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
+
+- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
+      returns no category; `_normalize_parsed_rows` defaults empties to
+      "Other"; merchant memory only helps for known merchants (empty on first
+      import). The AI-categorization step for unknown merchants (BACKLOG
+      "known format" design: "AI only for unknown merchants") was never wired
+      into the statement path. 1400 rows imported as Other.
+      (`handlers/bulk_conv.py` `_finish_profile_parse`)
+
+- [x] **Deployed bot stops replying to commands (file uploads still work)** —
+      root cause found in VM logs: /help replied with MarkdownV2 containing an
+      unescaped `=` (`BUDGET_CYCLE=1` — the `_` was escaped, the `=` was not);
+      Telegram rejected with BadRequest and the user saw nothing. Second
+      occurrence of this bug class (PR #32 fixed one instance and shipped this
+      one in the same file). Fixed in the help-markdown PR: offending strings
+      moved into code spans; new `tests/test_help_markdown.py` validates the
+      full /help text offline so any unescaped reserved char fails CI.
+      Follow-up: register a PTB error handler (`Application.add_error_handler`)
+      so send-failures reply with a fallback plain-text message instead of
+      silence — "No error handlers are registered" appears in the same log.
+
+- [ ] **Monthly Summary sheet is never updated by the bot** — nothing in
+      runtime code writes to Monthly Summary; its per-month formula rows are
+      created once by `scripts/rebuild_excel.py`. Any transaction saved for a
+      month that has no pre-built row (bulk-imported history, or simply a new
+      month starting) appears nowhere in the sheet. Confirmed live 2026-07-25:
+      1400 imported rows spanning 2024 left Monthly Summary empty.
+      Options: (a) bot appends a formula row for unseen Year/Month on save;
+      (b) rebuild-script-style sync check like the planned Cycle Dashboard
+      sync; (c) convert the sheet to dynamic formulas (SUMPRODUCT over open
+      ranges) that need no per-month rows. Decide with the schema-simplification
+      PR ("Derive Year/Month from Date by formula" — same territory).
+
+## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
+
+- [ ] **Description match is an unconditional OR** — an Income row with
+      Category "Freelance" and Description "Salary" counts as salary,
+      inflating unaccounted math. Safer: fall back to Description only when
+      Category is empty/blank. Same in `maybe_prompt_cycle_start`.
+      (`cycles.py` `salary_mask`)
+- [ ] **Empty `SALARY_CATEGORY` degenerates** — a blank keyword matches every
+      Income row with a blank Category or Description. Add
+      `if not keyword: return all-False`. (`cycles.py` `salary_mask`)
+- [ ] **Exact-match on Description brittle for statement imports** — bank
+      salary rows often read "SALARY JUL 2024" / "ACME PAYROLL"; the exact
+      `== "salary"` match misses them — the same failure mode PR #36 fixed.
+      Check what the user's bank statement actually titles the salary transfer
+      before the re-import; if longer than the bare word, switch to a
+      word-boundary contains match. (`cycles.py` `salary_mask`)
+- [ ] **Test durability** — `test_detect_matches_salary_in_category_without_
+      description_column` relies on `_cycle_df()` incidentally lacking a
+      Description column; pin with `assert "Description" not in df.columns`.
+      (`tests/test_cycles.py`)
+
+## Follow-up: markdown-validator review notes (PR #37, 2026-07-25)
+
+- [ ] **Escape-stripping order vs backslashes inside code spans** — the
+      validator strips `\X` pairs before locating code spans; a legal
+      `` \` `` inside a code span would mis-pair the remaining backticks.
+      Not hit by current text. (`tests/test_help_markdown.py`)
+- [ ] **Extend the markdown validator to every static MarkdownV2 reply** —
+      /help and /start are covered; `cmd_setcurrency`'s unknown-currency
+      reply and all `<cmd> help` subcommand texts are not. Extract
+      `_find_unescaped_reserved` into a shared test helper and parametrize.
+      (`tests/test_help_markdown.py`, `handlers/*.py`)
+- [ ] **Register a PTB error handler** — "No error handlers are registered"
+      in the VM log; a global `Application.add_error_handler` that logs and
+      replies with a plain-text fallback would have surfaced the /help
+      failure to the user on day one instead of silence. (`bot.py`)
 
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
