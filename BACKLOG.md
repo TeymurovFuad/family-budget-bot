@@ -788,6 +788,38 @@ wording need a second pass — deferred to avoid scope creep in PR #32.
       any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
       UTC or a generic "your local time" phrase.
 
+### Additional PLN hardcodings found in scan (2026-07-24)
+
+### IMPROVEMENT — `goal_pln` field and "Goal (PLN)" column header in ListsSchema
+- `excel_schema.py:236`: `goal_pln: Any = col("Goal (PLN)")` — the Pydantic field name
+  and the Excel column header both embed "PLN". Any non-PLN user sees a "Goal (PLN)" column
+  header in their spreadsheet and the schema attribute name is misleading.
+- Expected: rename column header to "Goal" (or "Goal (base)") and field to `goal_base`;
+  migration script or `ensure_lists_sheet` rename on first open so existing workbooks
+  are upgraded transparently.
+
+### IMPROVEMENT — `/cycle detect` inline-button labels hardcode PLN
+- `handlers/cycle.py:144`: unambiguous-month summary line renders
+  `{amount:,.0f} PLN` verbatim.
+- `handlers/cycle.py:178`: per-candidate inline-button label renders
+  `{date} — {amount:,.0f} PLN` verbatim.
+- Expected: replace the bare "PLN" with the configured display currency
+  (`get_display_currency()`) so detect labels match all other bot amount strings.
+
+### IMPROVEMENT — AI parser prompt hardcodes Polish "zł/zl = PLN" shorthand
+- `ai_parser.py:280`: the bulk-parse system prompt includes `"zł/zl = PLN"` as a
+  currency alias hint. This is Poland-specific; a non-PLN user will never type "zł"
+  and the hint adds noise that could mislead the model into defaulting to PLN.
+- Expected: omit the alias entirely, or make it conditional on PLN appearing in
+  `lists["currencies"]`.
+
+### IMPROVEMENT — Template script resets Dashboard Currency filter to PLN
+- `scripts/make_template.py:95`: `ws.cell(2, c + 1, "PLN")` hard-resets the
+  Dashboard Currency dropdown cell to "PLN" when generating or resetting the template.
+  A non-PLN user who regenerates the template loses their currency filter setting.
+- Expected: read the first entry from the Lists currencies range and use that as the
+  reset value, or leave the cell blank (showing all currencies).
+
 ## Follow-up PR: cycle-aware report gaps (found 2026-07-24)
 
 When `BUDGET_CYCLE=1`, the following commands are still calendar-scoped while `/summary`
