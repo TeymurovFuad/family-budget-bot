@@ -112,91 +112,79 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("🔍 Scanning transaction history\\.\\.\\.", parse_mode="MarkdownV2")
 
     loop = asyncio.get_running_loop()
-    df, cycles = await loop.run_in_executor(
-        None, lambda: (load_data(), load_cycles())
-    )
-    candidates = await loop.run_in_executor(
-        None, lambda: detect_cycle_candidates(df, cycles)
-    )
+    df, cycles = await loop.run_in_executor(None, lambda: (load_data(), load_cycles()))
+    candidates = await loop.run_in_executor(None, lambda: detect_cycle_candidates(df, cycles))
 
     if not candidates:
         await update.message.reply_text(
-            "✅ Nothing to backfill — all months are already recorded\\.",
+            "✅ Nothing to backfill — all salary payments are already recorded\\.",
             parse_mode="MarkdownV2",
         )
         return
 
-    unambiguous = [c for c in candidates if c["unambiguous"]]
-    ambiguous = [c for c in candidates if not c["unambiguous"]]
+    ctx.user_data["detect_candidates"] = [
+        {"date_str": c["date"].isoformat(), "amounts": c["amounts"], "unambiguous": c["unambiguous"]}
+        for c in candidates
+    ]
 
-    if unambiguous:
-        ctx.user_data["detect_unambiguous"] = [
-            {
-                "date_str": c["candidates"][0]["date"].isoformat(),
-                "month_label": c["month_label"],
-                "amount": c["candidates"][0]["amount"],
-            }
-            for c in unambiguous
-        ]
-        lines = [
-            f"• {_esc(u['month_label'])} — "
-            f"{_esc(u['candidates'][0]['date'].strftime('%d %b'))}, "
-            f"{u['candidates'][0]['amount']:,.0f} PLN"
-            for u in unambiguous
-        ]
-        note = "\n\n_No months need manual review\\._" if not ambiguous else ""
-        text = "*✅ Auto\\-detected salary arrivals*\n\n" + "\n".join(lines) + note
-        keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ Confirm all", callback_data="detect:confirm_all")]]
-        )
-        await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    n = len(candidates)
+    lines = []
+    for c in candidates:
+        amounts_str = " \\+ ".join(_esc(f"{a:,.0f}") for a in c["amounts"])
+        flag = " ⚠️" if not c["unambiguous"] else ""
+        lines.append(f"• {_esc(c['date'].isoformat())} — {amounts_str}{flag}")
 
-    ctx.user_data["detect_queue"] = ambiguous
-
-    if ambiguous:
-        await _send_detect_prompt(update, ctx)
+    text = (
+        f"🔍 Found *{_esc(str(n))}* unrecorded {'salary' if n == 1 else 'salaries'}\\.\n\n"
+        + "\n".join(lines)
+    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Confirm all", callback_data="detect:confirm_all")],
+        [InlineKeyboardButton("🔍 Review one by one", callback_data="detect:review")],
+        [InlineKeyboardButton("🛑 Cancel", callback_data="detect:cancel")],
+    ])
+    await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
-async def _send_detect_prompt(update_or_msg, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send an inline-button prompt for the first ambiguous month in the queue."""
+async def _send_detect_prompt(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a Yes/Skip/Stop prompt for the next candidate in the review queue."""
     queue = ctx.user_data.get("detect_queue", [])
     if not queue:
         return
     entry = queue[0]
+    total = ctx.user_data.get("detect_total", len(queue))
+    idx = total - len(queue) + 1
 
-    month_label = _esc(entry["month_label"])
-    window_start = _esc(str(entry["window_start"]))
-    window_end = _esc(str(entry["window_end"]))
-    text = (
-        f"📅 *{month_label}* — Which income was your salary?\n"
-        f"Payday window: {window_start} → {window_end}"
-    )
-
-    buttons: list[list[InlineKeyboardButton]] = []
-    for cand in entry["candidates"]:
-        d = cand["date"]
-        label = f"{d.isoformat()} — {cand['amount']:,.0f} PLN"
-        buttons.append([InlineKeyboardButton(label, callback_data=f"detect:pick:{d.isoformat()}")])
-    buttons.append(
-        [InlineKeyboardButton("No cycle this month", callback_data=f"detect:none:{entry['month_key']}")]
-    )
-    buttons.append(
-        [InlineKeyboardButton("Custom date", callback_data=f"detect:custom:{entry['month_key']}")]
-    )
-    keyboard = InlineKeyboardMarkup(buttons)
-
-    if isinstance(update_or_msg, Update):
-        await update_or_msg.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    d = _esc(entry["date_str"])
+    if entry["unambiguous"]:
+        amounts_str = _esc(f"{entry['amounts'][0]:,.0f}")
+        text = f"💰 *{idx} of {total}* — {d}\nSalary · {amounts_str}\n\nDoes this start a new budget cycle?"
     else:
-        await update_or_msg.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        amounts_str = " \\+ ".join(_esc(f"{a:,.0f}") for a in entry["amounts"])
+        text = (
+            f"💰 *{idx} of {total}* — {d}\n"
+            f"{len(entry['amounts'])} salary payments: {amounts_str}\n\n"
+            "Does this date start a new budget cycle?"
+        )
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes",  callback_data=f"detect:pick:{entry['date_str']}"),
+        InlineKeyboardButton("⏭ Skip", callback_data=f"detect:skip:{entry['date_str']}"),
+        InlineKeyboardButton("🛑 Stop", callback_data="detect:stop"),
+    ]])
+    await message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
 async def _advance_detect_queue(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """After answering a month, send the next prompt or declare completion."""
-    if ctx.user_data.get("detect_queue"):
+    """Pop the front of the review queue and send the next prompt or completion."""
+    queue = ctx.user_data.get("detect_queue", [])
+    if queue:
+        queue.pop(0)
+    if queue:
         await _send_detect_prompt(message, ctx)
     else:
         ctx.user_data.pop("detect_queue", None)
+        ctx.user_data.pop("detect_total", None)
         await message.reply_text(
             "✅ Backfill complete\\! All boundaries have been reviewed\\.",
             parse_mode="MarkdownV2",
@@ -212,86 +200,70 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
     data = query.data
 
     if data == "detect:confirm_all":
-        unambiguous = ctx.user_data.get("detect_unambiguous") or []
+        candidates = ctx.user_data.get("detect_candidates") or []
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
+        n = await loop.run_in_executor(
             None,
             lambda: record_cycle_starts_batch(
-                [date.fromisoformat(u["date_str"]) for u in unambiguous]
+                [date.fromisoformat(c["date_str"]) for c in candidates]
             ),
         )
-        ctx.user_data.pop("detect_unambiguous", None)
-        n = len(unambiguous)
+        ctx.user_data.pop("detect_candidates", None)
         await query.edit_message_text(
             _esc(f"✅ Confirmed {n} {'boundary' if n == 1 else 'boundaries'}."),
             parse_mode="MarkdownV2",
         )
-        if not ctx.user_data.get("detect_queue"):
-            ctx.user_data.pop("detect_queue", None)
-            await query.message.reply_text(
-                "✅ Backfill complete\\! All boundaries have been reviewed\\.",
-                parse_mode="MarkdownV2",
-            )
-        # else: ambiguous queue is already in progress — it will send completion itself
+        await query.message.reply_text(
+            "✅ Backfill complete\\! All boundaries have been recorded\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    if data == "detect:review":
+        candidates = ctx.user_data.pop("detect_candidates", None) or []
+        ctx.user_data["detect_queue"] = list(candidates)
+        ctx.user_data["detect_total"] = len(candidates)
+        await query.edit_message_reply_markup(reply_markup=None)
+        await _send_detect_prompt(query.message, ctx)
+        return
+
+    if data == "detect:cancel":
+        ctx.user_data.pop("detect_candidates", None)
+        await query.edit_message_text("🛑 Cancelled\\.", parse_mode="MarkdownV2")
         return
 
     if data.startswith("detect:pick:"):
         date_str = data[len("detect:pick:"):]
         start = date.fromisoformat(date_str)
         await async_record_cycle_start(start)
-        if ctx.user_data.get("detect_queue"):
-            ctx.user_data["detect_queue"].pop(0)
         await query.edit_message_text(
-            f"✅ Recorded {_esc(cycle_label(start))} from {_esc(date_str)}\\.",
+            f"✅ Recorded — cycle started {_esc(date_str)}\\.",
             parse_mode="MarkdownV2",
         )
         await _advance_detect_queue(query.message, ctx)
         return
 
-    if data.startswith("detect:none:"):
-        if ctx.user_data.get("detect_queue"):
-            ctx.user_data["detect_queue"].pop(0)
-        await query.edit_message_text("👍 No cycle for this month\\.", parse_mode="MarkdownV2")
+    if data.startswith("detect:skip:"):
+        date_str = data[len("detect:skip:"):]
+        await query.edit_message_text(
+            f"⏭ Skipped — {_esc(date_str)} stays in the previous cycle as regular income\\.",
+            parse_mode="MarkdownV2",
+        )
         await _advance_detect_queue(query.message, ctx)
         return
 
-    if data.startswith("detect:custom:"):
-        month_key = data[len("detect:custom:"):]
-        ctx.user_data["awaiting_detect_date"] = month_key
+    if data == "detect:stop":
+        recorded = ctx.user_data.get("detect_total", 0) - len(ctx.user_data.get("detect_queue", []))
+        ctx.user_data.pop("detect_queue", None)
+        ctx.user_data.pop("detect_total", None)
+        ctx.user_data.pop("detect_candidates", None)
         await query.edit_message_text(
-            "📅 Send the date as `YYYY\\-MM\\-DD`:", parse_mode="MarkdownV2"
+            _esc(f"🛑 Stopped. Recorded {recorded} {'boundary' if recorded == 1 else 'boundaries'} so far."),
+            parse_mode="MarkdownV2",
         )
         return
 
     log.warning("Unknown detect callback: %s", data)
-
-
-async def handle_detect_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle a free-text date reply for /cycle detect custom date flow."""
-    month_key = ctx.user_data.get("awaiting_detect_date")
-    if not month_key:
-        return
-
-    text = update.message.text.strip()
-    try:
-        start = date.fromisoformat(text)
-    except ValueError:
-        await update.message.reply_text("❌ Use `YYYY\\-MM\\-DD`\\.", parse_mode="MarkdownV2")
-        return
-
-    if start > date.today():
-        await update.message.reply_text("❌ Cannot be in the future\\.", parse_mode="MarkdownV2")
-        return
-
-    await async_record_cycle_start(start)
-    if ctx.user_data.get("detect_queue"):
-        ctx.user_data["detect_queue"].pop(0)
-    ctx.user_data.pop("awaiting_detect_date", None)
-    await update.message.reply_text(
-        f"✅ Recorded {_esc(cycle_label(start))} from {_esc(text)}\\.",
-        parse_mode="MarkdownV2",
-    )
-    await _advance_detect_queue(update.message, ctx)
 
 
 async def maybe_prompt_cycle_start(update: Update, transaction) -> None:

@@ -150,11 +150,13 @@ def detect_cycle_candidates(
     existing_cycles: list[tuple[date, str]] | None = None,
 ) -> list[dict]:
     """
-    Scan transaction history for salary arrivals and return month-buckets that
-    have no recorded cycle boundary yet.
+    Scan transaction history for salary arrivals not yet recorded as cycle
+    boundaries. Returns one entry per unique salary date, oldest first.
 
-    Each bucket: {month_key, month_label, window_start, window_end, unambiguous, candidates}
-    where each candidate is {date, amount, description}.
+    Each entry: {date, amounts, unambiguous}
+      - date: the transaction date (the cycle boundary if confirmed)
+      - amounts: list of salary amounts on that date (usually one)
+      - unambiguous: True when exactly one salary row on that date
     """
     if existing_cycles is None:
         existing_cycles = load_cycles()
@@ -163,104 +165,34 @@ def detect_cycle_candidates(
     df = df.copy()
     df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
-    valid = df[df["_date"].notna() & df["IsDone"].astype(bool)]
+    salary_cat = settings.SALARY_CATEGORY.strip().lower()
+    salary_rows = df[
+        df["_date"].notna()
+        & df["IsDone"].astype(bool)
+        & (df["Type"] == "Income")
+        & (df["Category"].astype(str).str.strip().str.lower() == salary_cat)
+        & (df["_date"] <= date.today())
+    ].copy()
 
-    if valid.empty:
+    if salary_rows.empty:
         return []
 
-    today = date.today()
-    min_date = valid["_date"].min()
-    max_date = valid["_date"].max()
-
     results: list[dict] = []
-    year = min_date.year
-    month = min_date.month
-    max_year = max_date.year
-    max_month = max_date.month
-
-    while (year, month) <= (max_year, max_month):
-        window_start = date(year, month, 20)
-        if month < 12:
-            window_end = date(year, month + 1, 5)
-        else:
-            window_end = date(year + 1, 1, 5)
-
-        if window_start > today:
-            if month == 12:
-                year, month = year + 1, 1
-            else:
-                month += 1
+    for salary_date, group in salary_rows.groupby("_date"):
+        if salary_date in existing_starts:
             continue
-
-        already_recorded = any(window_start <= s <= window_end for s in existing_starts)
-        if already_recorded:
-            if month == 12:
-                year, month = year + 1, 1
-            else:
-                month += 1
-            continue
-
-        in_window = valid[
-            (valid["_date"] >= window_start) & (valid["_date"] <= window_end)
-        ]
-        income_in_window = in_window[in_window["Type"] == "Income"]
-
-        if income_in_window.empty:
-            if month == 12:
-                year, month = year + 1, 1
-            else:
-                month += 1
-            continue
-
-        salary_rows = in_window[
-            (in_window["Type"] == "Income")
-            & (
-                in_window["Category"].astype(str).str.strip().str.lower()
-                == settings.SALARY_CATEGORY.strip().lower()
-            )
-        ]
-
-        month_key = f"{year:04d}-{month:02d}"
-
-        if len(salary_rows) == 1:
-            row = salary_rows.iloc[0]
-            unambiguous = True
-            candidates = [
-                {
-                    "date": row["_date"],
-                    "amount": round(float(row["_base"]), 2),
-                    "description": str(row.get("Description", "")),
-                }
-            ]
-        else:
-            unambiguous = False
-            top3 = income_in_window.nlargest(3, "_base")
-            candidates = [
-                {
-                    "date": r["_date"],
-                    "amount": round(float(r["_base"]), 2),
-                    "description": str(r.get("Description", "")),
-                }
-                for _, r in top3.iterrows()
-            ]
-
+        amounts = sorted(
+            [round(float(r["_base"]), 2) for _, r in group.iterrows()],
+            reverse=True,
+        )
         results.append(
             {
-                "month_key": month_key,
-                "month_label": cycle_label(window_start),
-                "window_start": window_start,
-                "window_end": window_end,
-                "unambiguous": unambiguous,
-                "candidates": candidates,
+                "date": salary_date,
+                "amounts": amounts,
+                "unambiguous": len(amounts) == 1,
             }
         )
 
-        if month == 12:
-            year, month = year + 1, 1
-        else:
-            month += 1
-
-    results.sort(key=lambda x: x["month_key"])
     return results
 
 

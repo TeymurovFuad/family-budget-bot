@@ -99,22 +99,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       type=Expense / category=Savings mismatch and promote type.
       Workaround: use /add and manually pick Type=Savings step by step.
 
-- [ ] **/cycle detect shows wrong salary candidates for Jul 2024** — bot
-      prompted "📅 Jul 2024 — Which income was your salary?" and offered:
-        2024-08-01 - 11,871 PLN
-        2024-08-01 - 11,856 PLN
-      with payday window 2024-07-20 → 2024-08-05.
-      Actual Jul 2024 salary: 12,027 PLN on 2024-07-01 — falls BEFORE the
-      window start (2024-07-20) and was therefore missed. The two candidates
-      shown are the August salaries (2024-08-01), both inside the Jul window
-      because the window extends to 2024-08-05; there are two because Aug has
-      two salary entries (11,871 + 11,856 PLN).
-      Root cause: the payday window for the first detected cycle is anchored
-      too late, excluding salaries paid at the very start of the month (day 1).
-      Fix: widen the window backward (e.g. anchor at the 1st of the target
-      month instead of the 20th) for the first cycle, or let the first-cycle
-      search use a broader range.
-      (`cycles.py` `detect_cycle_candidates` window logic)
+- [x] **/cycle detect shows wrong salary candidates for Jul 2024** — window
+      was anchored at the 20th, missing salaries paid on day 1. Fixed:
+      `window_start` now set to the 1st of the target month.
+      (`cycles.py` `detect_cycle_candidates`)
 
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
@@ -981,21 +969,36 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
 
 ## Follow-up: /cycle detect review notes (PR #32, 2026-07-24)
 
-- [ ] **`awaiting_detect_date` leaks across unrelated messages** — clicking "Custom date"
-      sets `ctx.user_data["awaiting_detect_date"]`; if the user ignores the prompt and
-      types anything else, `handle_detect_text` (group=2) fires and returns
-      "❌ Use YYYY-MM-DD." with no escape path. Fix: add a "Cancel" inline button to the
-      custom-date edit message and/or clear `awaiting_detect_date` inside the
-      `detect:pick`, `detect:none`, and `detect:confirm_all` callback branches.
-      (`handlers/cycle.py`)
-- [ ] **`handle_detect_text` has no `@auth_write`** — write path (`async_record_cycle_start`)
-      runs without re-checking auth. Low practical risk (flow can only start via `/cycle detect`
-      which is auth-gated), but inconsistent with all other write handlers.
-      (`handlers/cycle.py:263`)
+- [x] **`awaiting_detect_date` leaks / `handle_detect_text` has no `@auth_write`** —
+      both issues eliminated: custom-date text input removed entirely in the detect
+      redesign. The detect flow is now fully inline-button driven; no group-2 text
+      handler exists. (`handlers/cycle.py`)
 - [ ] **Empty-fingerprint fallback in bulk_conv is silent** — the `or []` guard on
       `profile["fingerprint"]` is unreachable in the normal path, but if it fires the
       profile saves with an empty fingerprint and will never match on re-upload. Add a
       `log.warning` at that branch. (`handlers/bulk_conv.py` near `bulk_profile_name`)
+
+## Follow-up: /cycle detect review notes (cycle-detect redesign, 2026-07-24)
+
+- [ ] **`detect:stop` reports "recorded" but counts reviewed** — the stop message
+      says "Recorded N boundaries so far" but N is computed as
+      `detect_total - len(detect_queue)`, which counts both confirmed and skipped
+      entries. If the user skipped any, the count overstates actual boundaries written.
+      Track confirmed count separately in `ctx.user_data["detect_confirmed"]` and
+      increment only on `detect:pick`. (`handlers/cycle.py` `handle_detect_callback`)
+- [ ] **"Two salary payments" hardcoded — breaks for 3+ salaries on same date** —
+      `_send_detect_prompt` renders `"Two salary payments: …"` unconditionally when
+      `not entry["unambiguous"]`. If three salary rows share a date the label is wrong.
+      Fix: `f"{len(entry['amounts'])} salary payments"`. (`handlers/cycle.py`)
+- [ ] **`detect_candidates` not cleared when entering review mode** — `detect:review`
+      sets `detect_queue = list(candidates)` but leaves `detect_candidates` in
+      `user_data`. A second `/cycle detect` mid-review overwrites `detect_candidates`
+      while `detect_queue` is still active, leaving inconsistent state. Pop
+      `detect_candidates` inside the `detect:review` branch. (`handlers/cycle.py`)
+- [ ] **No currency label on amounts in the detect summary list** — amounts render as
+      bare numbers (`12,027`) with no currency symbol. Append `get_display_currency()`
+      (or `settings.DISPLAY_CURRENCY`) alongside each amount line.
+      Part of the broader PLN/currency sweep. (`handlers/cycle.py` `_cmd_cycle_detect`)
 
 ## Follow-up: profile review notes (PR #27, 2026-07-23)
 
