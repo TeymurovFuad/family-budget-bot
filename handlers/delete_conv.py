@@ -13,6 +13,14 @@ from states import DELETE_PICK
 @log_call()
 @auth_write
 async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "🗑 */delete* — Delete a transaction\n\n"
+            "Shows the last 5 transactions\\. Pick one by number to remove it permanently\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
     try:
         recent = get_recent_transactions(get_excel_path_for_reading(), n=5)
     except FileNotFoundError as e:

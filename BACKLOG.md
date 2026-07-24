@@ -10,22 +10,22 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-24 — PRs through #30 merged: budget cycles core consolidated)*
+> *(Last updated: 2026-07-24 — PR #32 open: bank-statement fingerprint fix + /cycle detect + help subcommands)*
 
 ### PR state at last update
-- **All PRs #1–#30 merged.** PR #30 (budget cycles core) was consolidated with
-  the parallel Phase-1 implementation from PR #23: kept the PR #30
-  implementation (dedicated `cycles.py`, inline-button salary prompt,
-  cycle-scoped `/summary` + `/budget`, bare `/cycle` status, duplicate-boundary
-  no-ops, template Cycles sheet) and adopted #23's `StartDate` on-disk header —
-  no workbook migration needed.
+- **All PRs #1–#30 merged.**
+- **PR #32 open** (`fuadteymurov:claude/work` → `TeymurovFuad:master`, MERGEABLE):
+  - Bug fix: re-upload of a mapped bank statement no longer triggers re-mapping (fingerprint was missing from saved profile JSON)
+  - Bug fix: `/help` MarkdownV2 fix (was silently failing)
+  - Feature: `/cycle detect` — historical backfill scan; `detect_cycle_candidates()` + `record_cycle_starts_batch()` in `cycles.py`; full inline-button UX in `handlers/cycle.py`
+  - Feature: all 16 commands accept `<cmd> help` subcommand
+  - Polish: help text examples changed from PLN to EUR
 - **17 unchecked findings** are queued in the "budget cycles review notes
   (pre-PR verify, 2026-07-24)" and "PR #30 review notes (2026-07-24)" sections
   below — triage them into the follow-up cycle PRs.
-- **Next open work**: `/summary` picker UX PR first (see "Next up"), then
-  Cycle Dashboard sheet + sync check, then `/cycles detect` backfill. Designs
-  in "budget cycles — agreed design" and "/summary picker UX — agreed design"
-  sections below.
+- **Next open work**: `/summary` picker UX PR (see "Next up"), then
+  Cycle Dashboard sheet + sync check. Designs in "budget cycles — agreed design"
+  and "/summary picker UX — agreed design" sections below.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -43,24 +43,31 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
+  1. **Merge PR #32** — MERGEABLE, owner must squash-merge.
+  2. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
      UX — agreed design" below.
-  2. **Cycle Dashboard sheet + sync check** — see "budget cycles — agreed
+  3. **Cycle Dashboard sheet + sync check** — see "budget cycles — agreed
      design"; must handle ledger rows that may be out of chronological order
      (see PR #30 review notes).
-  3. **`/cycles detect` historical backfill** — same section.
-  4. **Cleanup note**: file_storage.py carries two dead imports
+  4. **E2E test coverage PR** — no end-to-end flow tests exist for any command.
+     Gap confirmed 2026-07-24. Separate PR after #32 merges. Cover golden path
+     + key edge cases for: /add, /bulk (file + text), /edit, /delete, /summary,
+     /report, /cycle, /cycle detect, and all help subcommands.
+  5. **Cycle-aware `/report` and `/top`** — both are still calendar-scoped when
+     `BUDGET_CYCLE=1`; they should use `_current_cycle_bounds()` like `/summary`
+     and `/budget` do. Found 2026-07-24. See "cycle-aware report gaps" below.
+  6. **Cleanup note**: file_storage.py carries two dead imports
      (`CyclesSchema`, `header_of` usage from the removed #23 cycle helpers)
      left over from the PR #30 consolidation — fold into the next cleanup.
-  5. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
+  7. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
      and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
      items in "dedup review notes (PR #16, 2026-07-23)"); PR #18 review
      backlog items ("bank-statement profiles review notes (PR #18)" below);
      UX group (person attribution — check overlap with dedup v2 grammar
      before implementing); token-economy and infra/performance groups.
-  6. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
+  8. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
      match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
@@ -687,12 +694,11 @@ unaccounted tracking — the old manual dashboard metric).
       *(done: `excel_schema.CyclesSchema` + `cycles.ensure_cycles_sheet`; sheet added
       to `data/Expenses_Template.xlsx`, to the fallback workbook builder, to
       `_repair_template_workbook`, and auto-created on first `record_cycle_start`.)*
-- [ ] **Historical backfill: `/cycles detect`** — one-pass scan of the whole history:
-      every Income row with category Salary (fallback: largest recurring end-of-month
-      income for rows imported before categories were clean). Unambiguous months are
-      listed in one summary message and confirmed with a single `Confirm all` button.
-      Ambiguous months (no candidate, or several) are walked one at a time with inline
-      buttons — no positional reply grammar anywhere in this flow.
+- [x] **Historical backfill: `/cycle detect`** — one-pass scan of the whole history:
+      every Income row with category Salary. Unambiguous months listed with a single
+      "Confirm all" button; ambiguous months walked one at a time with inline pickers
+      and a "Custom date" fallback. *(done PR #32: `detect_cycle_candidates()` +
+      `record_cycle_starts_batch()` in `cycles.py`; full UX in `handlers/cycle.py`.)*
 - [ ] **Lazy backfill on report** — cycle report requested for a period with missing
       boundaries → run the same detection scoped to that period and ask before
       rendering. Same engine, two triggers (explicit command + lazy on demand).
@@ -728,6 +734,57 @@ unaccounted tracking — the old manual dashboard metric).
       Live: a Salary-row save triggers the new-cycle prompt only if the current cycle
       is older than ~20 days (configurable); younger → income inside the cycle,
       silently counted, no re-prompt.
+
+## Follow-up PR: currency and timezone neutrality sweep (found 2026-07-24)
+
+Help text examples updated to EUR in PR #32 (groceries example, setbudget limit prompt,
+rates help). Remaining PLN references in business logic strings and any timezone-specific
+wording need a second pass — deferred to avoid scope creep in PR #32.
+
+- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
+      note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
+      setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm
+      messages. `handlers/add_conv.py`: PLN equivalent note shown during /add.
+      `handlers/reports.py`: rates display lines (`PLN per 1 unit`, `{r:.4f} PLN`).
+      Decide per-string: use display currency where possible; keep PLN where it is the
+      factually correct base-currency label.
+- [ ] **Timezone wording sweep** — `handlers/add_conv.py:183`: "(UTC) aren't allowed"
+      is already UTC; verify no other handler surfaces a timezone name to the user. If
+      any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
+      UTC or a generic "your local time" phrase.
+
+## Follow-up PR: cycle-aware report gaps (found 2026-07-24)
+
+When `BUDGET_CYCLE=1`, the following commands are still calendar-scoped while `/summary`
+and `/budget` are already cycle-scoped — giving contradictory numbers in the same session.
+All three need the same `_current_cycle_bounds()` branch that `/summary` and `/budget` use.
+
+- [ ] **`/report` still calendar-based** — `cmd_report` (handlers/reports.py:~325) uses
+      `current_year_and_month()` with no cycle branch. Month-over-month delta block also
+      uses calendar arithmetic. Accidental omission.
+- [ ] **`/top` still calendar-based** — `cmd_top` (handlers/reports.py:~235) filters on
+      `df["Year"] == year` and `df["Month"] == month`. Accidental omission.
+- [ ] **`/savings` 6-month trend is calendar-based** — `cmd_savings` (handlers/reports.py:~277)
+      iterates over calendar months. A full cycle-aware redesign (last N cycles instead of
+      last N calendar months) is non-trivial and lower priority than report/top, but the
+      current-month bar mismatches the cycle-scoped `/summary` rate.
+- [ ] **`check_budget_alert` still calendar-scoped** — already tracked in "PR #30 review
+      notes" above (line starting "check_budget_alert still calendar-scoped"). Contradictory
+      percentages after every save when the flag is on.
+
+## Follow-up PR: E2E test coverage (gap found 2026-07-24)
+
+No end-to-end flow tests exist. Unit tests cover individual functions; no test exercises
+a full command from Telegram update → Excel write → reply. Confirmed gap 2026-07-24.
+
+- [ ] **Golden-path E2E tests** — one test per major command exercising the real handler
+      and asserting the bot reply and Excel mutation. Priority commands: `/add`,
+      `/bulk` (file attachment + text paste), `/edit`, `/delete`, `/summary`,
+      `/report`, `/cycle`, `/cycle detect`, and at least one `<cmd> help` subcommand.
+- [ ] **Edge-case E2E** — `/bulk` with an unrecognised statement format triggers the
+      profile flow; re-upload of a mapped statement matches silently; `/cycle detect`
+      with a mix of unambiguous and ambiguous months walks the full confirm+pick flow.
+- [ ] **Regression guard** — run E2E suite in CI on every PR (currently only unit tests run).
 
 ## Follow-up PR: /summary picker UX — agreed design (brainstorm 2026-07-22)
 
@@ -825,6 +882,24 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
 - [ ] **Test: unknown encoding in profile → `LookupError` fallback** — `parse_statement` catches `LookupError` when `profile["encoding"]` specifies an unknown codec and falls back to `utf-8, errors="replace"`. The fallback is untested and silent; add a test and consider surfacing a warning to the user.
 - [ ] **Test: zero-amount row classification** — `"0.00"` passes the empty-check and under `negative_expense` becomes Income type with value 0 (possibly a fee-waiver or balance row). Test and document the intended behavior.
 - [ ] **Test fixture: shallow copy of `BANKA_PROFILE` fixture** — `test_multiple_profiles_loaded` does `{**BANKA_PROFILE, ...}` which is a shallow copy; `column_map` is the same object as `BANKA_PROFILE["column_map"]`. Any future test mutating `p2["column_map"]` in-place would corrupt the shared fixture. Use `copy.deepcopy(BANKA_PROFILE)` in the fixture or a factory function.
+
+## Follow-up: /cycle detect review notes (PR #32, 2026-07-24)
+
+- [ ] **`awaiting_detect_date` leaks across unrelated messages** — clicking "Custom date"
+      sets `ctx.user_data["awaiting_detect_date"]`; if the user ignores the prompt and
+      types anything else, `handle_detect_text` (group=2) fires and returns
+      "❌ Use YYYY-MM-DD." with no escape path. Fix: add a "Cancel" inline button to the
+      custom-date edit message and/or clear `awaiting_detect_date` inside the
+      `detect:pick`, `detect:none`, and `detect:confirm_all` callback branches.
+      (`handlers/cycle.py`)
+- [ ] **`handle_detect_text` has no `@auth_write`** — write path (`async_record_cycle_start`)
+      runs without re-checking auth. Low practical risk (flow can only start via `/cycle detect`
+      which is auth-gated), but inconsistent with all other write handlers.
+      (`handlers/cycle.py:263`)
+- [ ] **Empty-fingerprint fallback in bulk_conv is silent** — the `or []` guard on
+      `profile["fingerprint"]` is unreachable in the normal path, but if it fires the
+      profile saves with an empty fingerprint and will never match on re-upload. Add a
+      `log.warning` at that branch. (`handlers/bulk_conv.py` near `bulk_profile_name`)
 
 ## Follow-up: profile review notes (PR #27, 2026-07-23)
 

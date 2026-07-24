@@ -49,7 +49,7 @@ from handlers.bulk_conv import (
     bulk_profile_callback, bulk_profile_name,
     bulk_profile_list_callback,
 )
-from handlers.cycle import cmd_cycle, handle_cycle_callback
+from handlers.cycle import cmd_cycle, handle_cycle_callback, handle_detect_callback, handle_detect_text
 from handlers.delete_conv import cmd_delete, delete_pick
 from handlers.edit_conv import (
     cmd_edit, edit_pick, edit_field, edit_value, edit_confirm,
@@ -152,11 +152,20 @@ def build_application() -> Application:
     # ── budget-cycle boundary confirmation callback ───────────────────────────
     app.add_handler(CallbackQueryHandler(handle_cycle_callback, pattern="^cycle:"))
 
+    # ── cycle detect inline callbacks ─────────────────────────────────────────
+    app.add_handler(CallbackQueryHandler(handle_detect_callback, pattern="^detect:"))
+
     # ── custom range text input ───────────────────────────────────────────────
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_range_text,
     ), group=1)
+
+    # ── cycle detect custom-date text input ───────────────────────────────────
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND,
+        handle_detect_text,
+    ), group=2)
 
     # ── /setcurrency conversation ─────────────────────────────────────────────
     app.add_handler(ConversationHandler(

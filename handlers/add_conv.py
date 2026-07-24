@@ -21,6 +21,15 @@ from states import (
 
 @auth_write
 async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "➕ */add* — Add a transaction\n\n"
+            "Guided 9\\-step flow: amount → currency → type → category → person → date → description → recurring → confirm\\.\n"
+            "You can /cancel at any step\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
     uid   = update.effective_user.id
     rates = load_rates()
     ctx.user_data["state"] = AddTransactionState(
