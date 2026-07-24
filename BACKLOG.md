@@ -99,15 +99,6 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       type=Expense / category=Savings mismatch and promote type.
       Workaround: use /add and manually pick Type=Savings step by step.
 
-- [ ] **/add date step rejects natural language ("yesterday")** — user typed
-      "Yesterday" in the /add date step; bot replied: ❌ Use YYYY-MM-DD format
-      or 'today'. The keyword "today" is accepted but "yesterday", "last
-      Monday", etc. are not.
-      Expected: at minimum accept "yesterday" as a valid relative-date
-      shorthand (maps to `date.today() - timedelta(days=1)`); consider
-      "last Monday" etc. as a follow-up stretch goal.
-      (`handlers/add_conv.py` date-parsing step)
-
 - [ ] **/cycle detect shows wrong salary candidates for Jul 2024** — bot
       prompted "📅 Jul 2024 — Which income was your salary?" and offered:
         2024-08-01 - 11,871 PLN
