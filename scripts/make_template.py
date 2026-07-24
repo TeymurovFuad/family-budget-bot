@@ -147,6 +147,15 @@ def main(source: Path, dest: Path) -> None:
     if "Dashboard" in wb.sheetnames:
         scrub_dashboard(wb["Dashboard"])
 
+    from cycles import CYCLES_SHEET_NAME, ensure_cycles_sheet
+    if CYCLES_SHEET_NAME in wb.sheetnames:
+        ws = wb[CYCLES_SHEET_NAME]
+        _clear_rows(ws, 2)
+        print("  Cycles: ledger rows cleared.")
+    else:
+        ensure_cycles_sheet(wb)
+        print("  Cycles: sheet created (empty ledger).")
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     wb.save(dest)
     print(f"\n✅  Template saved: {dest}")

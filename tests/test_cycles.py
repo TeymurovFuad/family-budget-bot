@@ -1,520 +1,365 @@
 """
-test_cycles.py — tests for budget-cycle Phase 1 features.
+tests/test_cycles.py — budget-cycles core: settings flag, Cycles sheet ledger,
+/cycle handler, salary-triggered prompt, and cycle-scoped /summary.
 
-Covers:
-  1. _parse_cycle_date — various input forms
-  2. _cycle_label / _fmt_date formatting helpers
-  3. is_salary_income — type + category guard
-  4. CyclesSchema header declarations
-  5. get_last_cycle_boundary — mock workbook reads
-  6. append_cycle_boundary — creates sheet, appends rows
-  7. _build_cycle_block — summary block generation (BUDGET_CYCLE=1)
-  8. _build_cycle_block silent when BUDGET_CYCLE=0 or no boundary
-  9. maybe_prompt_cycle — three guard paths
+No AI calls anywhere in this feature — nothing to mock on that front.
 """
 
-import datetime
 import os
 import sys
+from datetime import date, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
+import pandas as pd
 import pytest
 
-# ── project root on path ──────────────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# ── ensure BUDGET_CYCLE env var is set before importing settings ──────────────
+os.environ.setdefault("STORAGE_BACKEND", "local")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
 os.environ.setdefault("ALLOWED_TELEGRAM_IDS", "123")
-os.environ.setdefault("STORAGE_BACKEND", "local")
 
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# ── helpers under test ────────────────────────────────────────────────────────
-
-from handlers.cycle import (
-    _parse_cycle_date,
-    _cycle_label,
-    _fmt_date,
-    is_salary_income,
+import settings
+import cycles
+from cycles import (
+    CYCLES_SHEET_NAME, cycle_label, cycle_totals, current_cycle_start,
+    ensure_cycles_sheet, load_cycles, record_cycle_start, should_prompt_new_cycle,
 )
+from excel_schema import CyclesSchema, header_of
+from handlers.cycle import cmd_cycle, handle_cycle_callback, maybe_prompt_cycle_start
 
 
-class TestParseCycleDate:
+def make_update(text="", user_id=123):
+    upd = MagicMock()
+    upd.effective_user.id = user_id
+    upd.message.text = text
+    upd.message.reply_text = AsyncMock()
+    return upd
 
-    def test_today(self, monkeypatch):
-        fixed = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: fixed)
-        result = _parse_cycle_date("today")
-        assert result == datetime.date(2026, 7, 23)
 
-    def test_iso_date(self):
-        assert _parse_cycle_date("2026-07-23") == datetime.date(2026, 7, 23)
+def make_callback_update(data, user_id=123):
+    upd = MagicMock()
+    upd.effective_user.id = user_id
+    upd.message = None
+    upd.callback_query.data = data
+    upd.callback_query.from_user.id = user_id
+    upd.callback_query.answer = AsyncMock()
+    upd.callback_query.message.reply_text = AsyncMock()
+    return upd
 
-    def test_short_form_day_month(self, monkeypatch):
-        fixed = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: fixed)
-        assert _parse_cycle_date("23 jul") == datetime.date(2026, 7, 23)
 
-    def test_short_form_full_month_name(self, monkeypatch):
-        fixed = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: fixed)
-        assert _parse_cycle_date("5 August") == datetime.date(2026, 8, 5)
+def make_ctx(args=None):
+    ctx = MagicMock()
+    ctx.args = args or []
+    ctx.user_data = {}
+    return ctx
 
-    def test_invalid_returns_none(self):
-        assert _parse_cycle_date("not a date") is None
-        assert _parse_cycle_date("") is None
-        assert _parse_cycle_date("32 jan") is None
 
+def make_transaction(txn_type="Income", category="Salary", txn_date=None):
+    t = MagicMock()
+    t.transaction_type = txn_type
+    t.category = category
+    t.date = txn_date or date(2026, 7, 23)
+    return t
 
-class TestCycleLabel:
 
-    def test_label_format(self):
-        d = datetime.date(2026, 8, 1)
-        assert _cycle_label(d) == "Aug 2026"
+# ── settings flag ──────────────────────────────────────────────────────────────
 
-    def test_fmt_date(self):
-        d = datetime.date(2026, 7, 23)
-        assert _fmt_date(d) == "23 Jul 2026"
+def test_budget_cycle_flag_off_by_default():
+    assert settings.BUDGET_CYCLE is False
+    assert settings.CYCLE_REPROMPT_MIN_AGE_DAYS == 20
+    assert settings.SALARY_CATEGORY == "Salary"
 
-    def test_single_digit_day(self):
-        d = datetime.date(2026, 8, 5)
-        assert _fmt_date(d) == "5 Aug 2026"
 
+# ── ledger ─────────────────────────────────────────────────────────────────────
 
-class TestIsSalaryIncome:
+def test_cycle_label_always_carries_year():
+    assert cycle_label(date(2026, 8, 25)) == "Aug 2026"
+    assert cycle_label(date(2025, 1, 2)) == "Jan 2025"
 
-    def test_income_salary(self):
-        assert is_salary_income("Income", "Salary") is True
 
-    def test_income_salary_case_insensitive(self):
-        assert is_salary_income("Income", "salary") is True
-        assert is_salary_income("Income", "SALARY") is True
+def test_ensure_cycles_sheet_creates_headers():
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = ensure_cycles_sheet(wb)
+    assert CYCLES_SHEET_NAME in wb.sheetnames
+    assert ws.cell(1, 1).value == header_of(CyclesSchema, "start_date")
+    assert ws.cell(1, 2).value == header_of(CyclesSchema, "label")
+    assert ensure_cycles_sheet(wb) is ws
 
-    def test_expense_salary_is_false(self):
-        assert is_salary_income("Expense", "Salary") is False
 
-    def test_income_other_category(self):
-        assert is_salary_income("Income", "Freelance") is False
-        assert is_salary_income("Income", "Rental") is False
+def test_record_and_load_cycles(excel_path):
+    assert load_cycles() == []
+    assert record_cycle_start(date(2026, 6, 25)) is True
+    assert record_cycle_start(date(2026, 7, 23)) is True
+    got = load_cycles()
+    assert got == [(date(2026, 6, 25), "Jun 2026"), (date(2026, 7, 23), "Jul 2026")]
 
-    def test_savings_salary(self):
-        assert is_salary_income("Savings", "Salary") is False
 
+def test_record_duplicate_boundary_is_noop(excel_path):
+    assert record_cycle_start(date(2026, 7, 23)) is True
+    assert record_cycle_start(date(2026, 7, 23)) is False
+    assert len(load_cycles()) == 1
 
-class TestCyclesSchema:
 
-    def test_schema_has_start_date(self):
-        from excel_schema import CyclesSchema
-        from dataclasses import fields
-        names = {f.name for f in fields(CyclesSchema)}
-        assert "start_date" in names
+def test_current_cycle_start_picks_latest_past_boundary():
+    ledger = [(date(2026, 5, 24), "May 2026"), (date(2026, 6, 25), "Jun 2026")]
+    assert current_cycle_start(date(2026, 7, 1), ledger) == (date(2026, 6, 25), "Jun 2026")
+    assert current_cycle_start(date(2026, 6, 1), ledger) == (date(2026, 5, 24), "May 2026")
+    assert current_cycle_start(date(2026, 5, 1), ledger) is None
+    assert current_cycle_start(date(2026, 7, 1), []) is None
 
-    def test_schema_has_label(self):
-        from excel_schema import CyclesSchema
-        from dataclasses import fields
-        names = {f.name for f in fields(CyclesSchema)}
-        assert "label" in names
 
-    def test_header_values(self):
-        from excel_schema import CyclesSchema, header_of
-        assert header_of(CyclesSchema, "start_date") == "StartDate"
-        assert header_of(CyclesSchema, "label") == "Label"
+def test_should_prompt_new_cycle_age_gate(excel_path):
+    today = date(2026, 7, 23)
+    assert should_prompt_new_cycle(today) is True  # no ledger yet
+    record_cycle_start(today - timedelta(days=5))
+    assert should_prompt_new_cycle(today) is False  # too young
+    record_cycle_start(today - timedelta(days=settings.CYCLE_REPROMPT_MIN_AGE_DAYS))
+    # latest boundary is the 5-day-old one, still too young
+    assert should_prompt_new_cycle(today) is False
 
 
-class TestGetLastCycleBoundary:
+def test_should_prompt_new_cycle_old_cycle(excel_path):
+    today = date(2026, 7, 23)
+    record_cycle_start(today - timedelta(days=25))
+    assert should_prompt_new_cycle(today) is True
 
-    def test_returns_none_when_sheet_absent(self, excel_path):
-        from file_storage import get_last_cycle_boundary
-        result = get_last_cycle_boundary(excel_path)
-        assert result is None
 
-    def test_returns_none_when_no_data_rows(self, excel_path):
-        from openpyxl import load_workbook
-        from file_storage import get_last_cycle_boundary, atomic_save
-        from excel_schema import CyclesSchema, header_of
+# ── unaccounted math ───────────────────────────────────────────────────────────
 
-        wb = load_workbook(excel_path)
-        ws = wb.create_sheet("Cycles")
-        ws.cell(1, 1, header_of(CyclesSchema, "start_date"))
-        ws.cell(1, 2, header_of(CyclesSchema, "label"))
-        atomic_save(wb, excel_path)
-
-        assert get_last_cycle_boundary(excel_path) is None
-
-    def test_returns_last_row(self, excel_path):
-        from openpyxl import load_workbook
-        from file_storage import get_last_cycle_boundary, atomic_save
-        from excel_schema import CyclesSchema, header_of
-
-        d1 = datetime.date(2026, 6, 1)
-        d2 = datetime.date(2026, 7, 15)
-
-        wb = load_workbook(excel_path)
-        ws = wb.create_sheet("Cycles")
-        ws.cell(1, 1, header_of(CyclesSchema, "start_date"))
-        ws.cell(1, 2, header_of(CyclesSchema, "label"))
-        ws.cell(2, 1, datetime.datetime(d1.year, d1.month, d1.day))
-        ws.cell(2, 2, "Jun 2026")
-        ws.cell(3, 1, datetime.datetime(d2.year, d2.month, d2.day))
-        ws.cell(3, 2, "Jul 2026")
-        atomic_save(wb, excel_path)
-
-        result = get_last_cycle_boundary(excel_path)
-        assert result is not None
-        last_date, last_label = result
-        assert last_date == d2
-        assert last_label == "Jul 2026"
-
-
-class TestAppendCycleBoundary:
-
-    def test_creates_sheet_and_appends(self, excel_path):
-        from file_storage import append_cycle_boundary, get_last_cycle_boundary
-        from openpyxl import load_workbook
-
-        d = datetime.date(2026, 8, 1)
-        append_cycle_boundary(d, "Aug 2026")
-
-        wb = load_workbook(excel_path, data_only=True)
-        assert "Cycles" in wb.sheetnames
-        ws = wb["Cycles"]
-        assert ws.max_row == 2  # header + one data row
-
-        result = get_last_cycle_boundary(excel_path)
-        assert result is not None
-        assert result[0] == d
-        assert result[1] == "Aug 2026"
-
-    def test_appends_multiple_rows(self, excel_path):
-        from file_storage import append_cycle_boundary, get_last_cycle_boundary
-
-        d1 = datetime.date(2026, 6, 1)
-        d2 = datetime.date(2026, 7, 15)
-        append_cycle_boundary(d1, "Jun 2026")
-        append_cycle_boundary(d2, "Jul 2026")
-
-        result = get_last_cycle_boundary(excel_path)
-        assert result is not None
-        assert result[0] == d2
-
-
-class TestBuildCycleBlock:
-
-    def test_returns_empty_when_flag_off(self, excel_path, monkeypatch):
-        import settings
-        import handlers.reports as hr
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
-        import pandas as pd
-        df = pd.DataFrame(columns=["Date", "Type", "Category", "_pln", "IsDone"])
-        assert hr._build_cycle_block(df) == ""
-
-    def test_returns_empty_when_no_boundary(self, excel_path, monkeypatch):
-        import settings
-        import handlers.reports as hr
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        monkeypatch.setattr(hr, "get_last_cycle_boundary", lambda _: None)
-        import pandas as pd
-        df = pd.DataFrame(columns=["Date", "Type", "Category", "_pln", "IsDone"])
-        assert hr._build_cycle_block(df) == ""
-
-    def test_cycle_block_content(self, excel_path, monkeypatch):
-        import settings
-        import handlers.reports as hr
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-
-        boundary_date = datetime.date(2026, 7, 1)
-        monkeypatch.setattr(hr, "get_last_cycle_boundary",
-                            lambda _: (boundary_date, "Jul 2026"))
-        monkeypatch.setattr(hr, "load_budgets_from_excel",
-                            lambda _: {"Groceries": 1000.0, "Transport": 500.0})
-
-        import pandas as pd
-        df = pd.DataFrame([
-            {"Date": pd.Timestamp("2026-07-10"), "Type": "Expense",
-             "Category": "Groceries", "_pln": 300.0, "IsDone": True},
-            {"Date": pd.Timestamp("2026-07-10"), "Type": "Income",
-             "Category": "Salary", "_pln": 5000.0, "IsDone": True},
-            {"Date": pd.Timestamp("2026-07-10"), "Type": "Savings",
-             "Category": "Bank Deposit", "_pln": 500.0, "IsDone": True},
-            # row before cycle start — must be excluded
-            {"Date": pd.Timestamp("2026-06-25"), "Type": "Expense",
-             "Category": "Groceries", "_pln": 200.0, "IsDone": True},
-        ])
-
-        block = hr._build_cycle_block(df)
-
-        assert "Jul 2026" in block
-        assert "5,000" in block   # salary
-        assert "300" in block     # expenses
-        assert "500" in block     # savings
-        assert "1,500" in block   # total budget (1000+500)
-        # unaccounted = 5000 - 300 - 500 = 4200 → positive → ✅
-        assert "✅" in block
-        assert "4,200" in block
-
-    def test_negative_unaccounted_shows_red(self, excel_path, monkeypatch):
-        import settings
-        import handlers.reports as hr
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-
-        boundary_date = datetime.date(2026, 7, 1)
-        monkeypatch.setattr(hr, "get_last_cycle_boundary",
-                            lambda _: (boundary_date, "Jul 2026"))
-        monkeypatch.setattr(hr, "load_budgets_from_excel", lambda _: {})
-
-        import pandas as pd
-        df = pd.DataFrame([
-            {"Date": pd.Timestamp("2026-07-10"), "Type": "Expense",
-             "Category": "Groceries", "_pln": 8000.0, "IsDone": True},
-            {"Date": pd.Timestamp("2026-07-10"), "Type": "Income",
-             "Category": "Salary", "_pln": 5000.0, "IsDone": True},
-        ])
-
-        block = hr._build_cycle_block(df)
-        # unaccounted = 5000 - 8000 - 0 = -3000 → ❌
-        assert "❌" in block
-
-
-class TestMaybePromptCycle:
-    """Tests for the maybe_prompt_cycle guard paths."""
-
-    def _make_update(self):
-        """Return a minimal Update mock with an async reply_text."""
-        update = MagicMock()
-        update.message.reply_text = AsyncMock()
-        return update
-
-    def _make_ctx(self):
-        ctx = MagicMock()
-        ctx.user_data = {}
-        return ctx
-
-    async def test_flag_off_returns_immediately(self, monkeypatch):
-        """BUDGET_CYCLE=False → function returns without sending any message."""
-        import settings
-        from handlers.cycle import maybe_prompt_cycle
-
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
-
-        update = self._make_update()
-        ctx = self._make_ctx()
-        txn_date = datetime.date(2026, 7, 23)
-
-        await maybe_prompt_cycle(update, ctx, txn_date)
-
-        update.message.reply_text.assert_not_called()
-
-    async def test_recent_boundary_returns_without_prompt(self, monkeypatch):
-        """BUDGET_CYCLE=True, last boundary 5 days ago → no message sent."""
-        import settings
-        from handlers.cycle import maybe_prompt_cycle
-
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-
-        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
-
-        last_boundary_date = datetime.date(2026, 7, 18)  # 5 days ago
-
-        with patch("file_storage.get_excel_path_for_reading", return_value="/fake/path"), \
-             patch("file_storage.get_last_cycle_boundary", return_value=(last_boundary_date, "Jul 2026")):
-            update = self._make_update()
-            ctx = self._make_ctx()
-            txn_date = datetime.date(2026, 7, 23)
-
-            await maybe_prompt_cycle(update, ctx, txn_date)
-
-        update.message.reply_text.assert_not_called()
-
-    async def test_old_boundary_fires_prompt(self, monkeypatch):
-        """BUDGET_CYCLE=True, last boundary 25 days ago → salary prompt sent."""
-        import settings
-        from handlers.cycle import maybe_prompt_cycle
-
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-
-        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
-
-        last_boundary_date = datetime.date(2026, 6, 28)  # 25 days ago
-
-        with patch("file_storage.get_excel_path_for_reading", return_value="/fake/path"), \
-             patch("file_storage.get_last_cycle_boundary", return_value=(last_boundary_date, "Jun 2026")):
-            update = self._make_update()
-            ctx = self._make_ctx()
-            txn_date = datetime.date(2026, 7, 23)
-
-            await maybe_prompt_cycle(update, ctx, txn_date)
-
-        update.message.reply_text.assert_called_once()
-        call_args = update.message.reply_text.call_args[0][0]
-        assert "23 Jul 2026" in call_args
-
-
-class TestHandleCyclePromptResponse:
-    """Tests for handle_cycle_prompt_response."""
-
-    def _make_update(self, text="yes"):
-        update = MagicMock()
-        update.message.text = text
-        update.message.reply_text = AsyncMock()
-        return update
-
-    def _make_ctx(self, pending=None, include_key=True):
-        ctx = MagicMock()
-        ctx.user_data = {}
-        if include_key:
-            ctx.user_data["cycle_prompt_pending"] = pending or {"date": datetime.date(2026, 7, 23)}
-        return ctx
-
-    async def test_no_key_returns_silently(self):
-        """When cycle_prompt_pending absent, handler returns without error."""
-        from handlers.cycle import handle_cycle_prompt_response
-        ctx = self._make_ctx(include_key=False)
-        update = self._make_update("yes")
-        await handle_cycle_prompt_response(update, ctx)
-        update.message.reply_text.assert_not_called()
-
-    async def test_no_reply_skips_cycle(self):
-        """text == no -> keyboard removed, no cycle recorded."""
-        from handlers.cycle import handle_cycle_prompt_response
-        with patch("file_storage.append_cycle_boundary") as mock_acb:
-            ctx = self._make_ctx()
-            update = self._make_update("no")
-            await handle_cycle_prompt_response(update, ctx)
-        mock_acb.assert_not_called()
-        update.message.reply_text.assert_called_once()
-        assert "cycle_prompt_pending" not in ctx.user_data
-
-    async def test_yes_calls_append_with_txn_date(self):
-        """text == yes -> append_cycle_boundary called with txn_date."""
-        from handlers.cycle import handle_cycle_prompt_response
-        txn_date = datetime.date(2026, 7, 23)
-        with patch("file_storage.append_cycle_boundary") as mock_acb:
-            ctx = self._make_ctx({"date": txn_date})
-            update = self._make_update("yes")
-            await handle_cycle_prompt_response(update, ctx)
-        mock_acb.assert_called_once_with(txn_date, "Jul 2026")
-        update.message.reply_text.assert_called_once()
-        assert "cycle_prompt_pending" not in ctx.user_data
-
-    async def test_custom_valid_date_calls_append(self):
-        """Custom valid date -> parsed and append_cycle_boundary called."""
-        from handlers.cycle import handle_cycle_prompt_response
-        txn_date = datetime.date(2026, 7, 23)
-        with patch("file_storage.append_cycle_boundary") as mock_acb, \
-             patch("handlers.cycle.now_utc",
-                   return_value=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)):
-            ctx = self._make_ctx({"date": txn_date})
-            update = self._make_update("5 Aug")
-            await handle_cycle_prompt_response(update, ctx)
-        expected_date = datetime.date(2026, 8, 5)
-        mock_acb.assert_called_once_with(expected_date, "Aug 2026")
-
-    async def test_invalid_date_restores_pending_and_sends_error(self):
-        """Invalid date -> pending restored, error sent."""
-        from handlers.cycle import handle_cycle_prompt_response
-        txn_date = datetime.date(2026, 7, 23)
-        pending = {"date": txn_date}
-        with patch("file_storage.append_cycle_boundary") as mock_acb:
-            ctx = self._make_ctx(pending.copy())
-            update = self._make_update("not-a-date-at-all")
-            await handle_cycle_prompt_response(update, ctx)
-        mock_acb.assert_not_called()
-        assert "cycle_prompt_pending" in ctx.user_data
-        assert ctx.user_data["cycle_prompt_pending"]["date"] == txn_date
-        update.message.reply_text.assert_called_once()
-        call_text = update.message.reply_text.call_args[0][0]
-        assert "Could not parse" in call_text
-
-
-class TestCmdCycle:
-    """Tests for the /cycle command handler."""
-
-    # Matches ALLOWED_TELEGRAM_IDS[0] set by conftest (primary/write user).
-    _PRIMARY_UID = 123
-
-    def _make_update(self):
-        update = MagicMock()
-        update.effective_user.id = self._PRIMARY_UID
-        update.message.reply_text = AsyncMock()
-        return update
-
-    def _make_ctx(self, args=None):
-        ctx = MagicMock()
-        ctx.args = args or []
-        return ctx
-
-    async def test_budget_cycle_off_returns_silently(self, monkeypatch):
-        """BUDGET_CYCLE=False -> returns immediately, no reply."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
-        update = self._make_update()
-        ctx = self._make_ctx(["started"])
-        await cmd_cycle(update, ctx)
-        update.message.reply_text.assert_not_called()
-
-    async def test_no_args_sends_usage(self, monkeypatch):
-        """No arguments -> usage message sent."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        update = self._make_update()
-        ctx = self._make_ctx([])
-        await cmd_cycle(update, ctx)
-        update.message.reply_text.assert_called_once()
-        assert "Usage" in update.message.reply_text.call_args[0][0]
-
-    async def test_wrong_subcommand_sends_usage(self, monkeypatch):
-        """Wrong subcommand -> usage message."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        update = self._make_update()
-        ctx = self._make_ctx(["begin"])
-        await cmd_cycle(update, ctx)
-        update.message.reply_text.assert_called_once()
-        assert "Usage" in update.message.reply_text.call_args[0][0]
-
-    async def test_started_no_date_defaults_to_today(self, monkeypatch):
-        """/cycle started no date -> today, calls append_cycle_boundary."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
-        with patch("file_storage.append_cycle_boundary") as mock_acb:
-            update = self._make_update()
-            ctx = self._make_ctx(["started"])
-            await cmd_cycle(update, ctx)
-        mock_acb.assert_called_once_with(datetime.date(2026, 7, 23), "Jul 2026")
-        update.message.reply_text.assert_called_once()
-        assert "2026" in update.message.reply_text.call_args[0][0]
-
-    async def test_started_invalid_date_sends_error(self, monkeypatch):
-        """/cycle started invalid-date -> error reply."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        update = self._make_update()
-        ctx = self._make_ctx(["started", "not-a-date"])
-        await cmd_cycle(update, ctx)
-        update.message.reply_text.assert_called_once()
-        assert "Could not parse" in update.message.reply_text.call_args[0][0]
-
-    async def test_append_raises_sends_error(self, monkeypatch):
-        """append_cycle_boundary raises -> error reply sent."""
-        import settings
-        from handlers.cycle import cmd_cycle
-        monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        today = datetime.datetime(2026, 7, 23, tzinfo=datetime.timezone.utc)
-        monkeypatch.setattr("handlers.cycle.now_utc", lambda: today)
-        with patch("file_storage.append_cycle_boundary", side_effect=RuntimeError("disk full")):
-            update = self._make_update()
-            ctx = self._make_ctx(["started"])
-            await cmd_cycle(update, ctx)
-        update.message.reply_text.assert_called_once()
-        call_text = update.message.reply_text.call_args[0][0]
-        assert "Could not save cycle" in call_text or "disk full" in call_text
+def _cycle_df():
+    return pd.DataFrame({
+        "Date":     ["2026-06-25", "2026-06-26", "2026-07-01", "2026-07-02", "2026-06-01"],
+        "Type":     ["Income",     "Income",     "Expense",    "Savings",    "Expense"],
+        "Category": ["Salary",     "Freelance",  "Groceries",  "Bank Deposit", "Groceries"],
+        "_pln":     [6000.0,       900.0,        1500.0,       1000.0,       999.0],
+        "IsDone":   [True,         True,         True,         True,         True],
+    })
+
+
+def test_cycle_totals_unaccounted_uses_salary_only():
+    totals = cycle_totals(_cycle_df(), date(2026, 6, 25), date(2026, 7, 23))
+    assert totals["income"] == 6900.0
+    assert totals["salary"] == 6000.0
+    assert totals["expense"] == 1500.0  # 999 row is before the cycle start
+    assert totals["savings"] == 1000.0
+    assert totals["unaccounted"] == 6000.0 - 1500.0 - 1000.0
+
+
+def test_cycle_totals_negative_unaccounted_means_over_reported():
+    df = _cycle_df()
+    df.loc[df["Category"] == "Groceries", "_pln"] = 7000.0
+    totals = cycle_totals(df, date(2026, 6, 25), date(2026, 7, 23))
+    assert totals["unaccounted"] < 0
+
+
+# ── /cycle command ─────────────────────────────────────────────────────────────
+
+async def test_cmd_cycle_flag_off_is_inert(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["started"]))
+    assert "disabled" in upd.message.reply_text.call_args[0][0]
+    assert load_cycles() == []
+
+
+async def test_cmd_cycle_started_with_date(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["started", "2026-07-01"]))
+    assert load_cycles() == [(date(2026, 7, 1), "Jul 2026")]
+    assert "✅" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_cmd_cycle_started_defaults_to_today(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["started"]))
+    ledger = load_cycles()
+    assert len(ledger) == 1
+
+
+async def test_cmd_cycle_rejects_bad_and_future_dates(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["started", "not-a-date"]))
+    assert "Could not parse" in upd.message.reply_text.call_args[0][0]
+    await cmd_cycle(upd, make_ctx(["started", "2099-01-01"]))
+    assert "future" in upd.message.reply_text.call_args[0][0]
+    assert load_cycles() == []
+
+
+async def test_cmd_cycle_bare_shows_status(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx())
+    assert "No budget cycle recorded" in upd.message.reply_text.call_args[0][0]
+    record_cycle_start(date(2026, 7, 1))
+    await cmd_cycle(upd, make_ctx())
+    assert "Jul 2026" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_cmd_cycle_duplicate_reports_noop(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 7, 1))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["started", "2026-07-01"]))
+    assert "already recorded" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_cmd_cycle_owner_only(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update(user_id=999)
+    await cmd_cycle(upd, make_ctx(["started"]))
+    assert "not authorized" in upd.message.reply_text.call_args[0][0]
+    assert load_cycles() == []
+
+
+# ── salary-triggered prompt ────────────────────────────────────────────────────
+
+async def test_maybe_prompt_flag_off_no_prompt(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
+    upd = make_update()
+    await maybe_prompt_cycle_start(upd, make_transaction())
+    upd.message.reply_text.assert_not_called()
+
+
+async def test_maybe_prompt_salary_income_prompts_with_wording(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await maybe_prompt_cycle_start(upd, make_transaction(txn_date=date(2026, 7, 23)))
+    text = upd.message.reply_text.call_args[0][0]
+    assert text.startswith("💰 Salary received. Start the new budget cycle from 23 Jul?")
+    assert "(yes / no / different date)" in text
+    markup = upd.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["cycle:yes:2026-07-23", "cycle:no", "cycle:diff"]
+
+
+async def test_maybe_prompt_ignores_non_salary(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await maybe_prompt_cycle_start(upd, make_transaction(txn_type="Expense"))
+    await maybe_prompt_cycle_start(upd, make_transaction(category="Freelance"))
+    upd.message.reply_text.assert_not_called()
+
+
+async def test_maybe_prompt_young_cycle_stays_silent(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    from datetime import datetime
+    from config import TIMEZONE
+    today = datetime.now(TIMEZONE).date()
+    record_cycle_start(today - timedelta(days=3))
+    upd = make_update()
+    await maybe_prompt_cycle_start(upd, make_transaction(txn_date=today))
+    upd.message.reply_text.assert_not_called()
+
+
+# ── prompt callback ────────────────────────────────────────────────────────────
+
+async def test_cycle_callback_yes_records_boundary(excel_path):
+    upd = make_callback_update("cycle:yes:2026-07-23")
+    await handle_cycle_callback(upd, make_ctx())
+    assert load_cycles() == [(date(2026, 7, 23), "Jul 2026")]
+    assert "Jul 2026" in upd.callback_query.message.reply_text.call_args[0][0]
+
+
+async def test_cycle_callback_no_keeps_current_cycle(excel_path):
+    upd = make_callback_update("cycle:no")
+    await handle_cycle_callback(upd, make_ctx())
+    assert load_cycles() == []
+    assert "current cycle continues" in upd.callback_query.message.reply_text.call_args[0][0]
+
+
+async def test_cycle_callback_diff_points_at_command(excel_path):
+    upd = make_callback_update("cycle:diff")
+    await handle_cycle_callback(upd, make_ctx())
+    assert load_cycles() == []
+    assert "/cycle started" in upd.callback_query.message.reply_text.call_args[0][0]
+
+
+async def test_cycle_callback_owner_only(excel_path):
+    upd = make_callback_update("cycle:yes:2026-07-23", user_id=999)
+    await handle_cycle_callback(upd, make_ctx())
+    assert load_cycles() == []
+
+
+# ── cycle-scoped reports ───────────────────────────────────────────────────────
+
+def _patch_report_data(monkeypatch, df):
+    import handlers.reports as reports
+    monkeypatch.setattr(reports, "load_data", lambda: df)
+    monkeypatch.setattr(reports, "load_rates", lambda: {"PLN": 1.0})
+    monkeypatch.setattr(reports, "load_budgets", lambda: {"Groceries": 2000.0})
+    monkeypatch.setattr(
+        reports, "load_reference_data",
+        lambda: {"categories": ["Groceries", "Salary"]},
+    )
+
+
+async def test_summary_cycle_scoped_with_unaccounted(excel_path, monkeypatch):
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    df = _cycle_df()
+    df["Year"] = 2026
+    df["Month"] = "Jul"
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    await cmd_summary(upd, make_ctx())
+    text = upd.message.reply_text.call_args[0][0]
+    assert "Cycle Jun 2026" in text
+    assert "Unaccounted" in text
+    assert "Salary received" in text
+    assert "Projected month-end" not in text
+
+
+async def test_summary_falls_back_to_calendar_without_boundary(excel_path, monkeypatch):
+    from data import current_year_and_month
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    year, month = current_year_and_month()
+    df = _cycle_df()
+    df["Year"] = year
+    df["Month"] = month
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    await cmd_summary(upd, make_ctx())
+    text = upd.message.reply_text.call_args[0][0]
+    assert f"{month} {year} — Summary" in text
+    assert "Unaccounted" not in text
+
+
+async def test_summary_flag_off_is_calendar(excel_path, monkeypatch):
+    from data import current_year_and_month
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
+    record_cycle_start(date(2026, 6, 25))
+    year, month = current_year_and_month()
+    df = _cycle_df()
+    df["Year"] = year
+    df["Month"] = month
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    await cmd_summary(upd, make_ctx())
+    assert f"{month} {year} — Summary" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_budget_bars_cycle_scoped(excel_path, monkeypatch):
+    from handlers.reports import cmd_budget
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    df = _cycle_df()
+    df["Year"] = 2026
+    df["Month"] = "Jul"
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    await cmd_budget(upd, make_ctx())
+    text = upd.message.reply_text.call_args[0][0]
+    assert "Cycle Jun 2026" in text
+    # 999 PLN pre-cycle expense excluded: only the 1 500 in-cycle row counts
+    assert "1,500" in text.replace(" ", ",")

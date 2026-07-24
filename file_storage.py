@@ -250,6 +250,11 @@ def _repair_template_workbook(path: Path) -> None:
                     ws.cell(row, persons_col).value = None
                     changed = True
 
+    from cycles import CYCLES_SHEET_NAME, ensure_cycles_sheet
+    if CYCLES_SHEET_NAME not in wb.sheetnames:
+        ensure_cycles_sheet(wb)
+        changed = True
+
     if changed:
         wb.save(path)
 
@@ -401,6 +406,9 @@ def create_blank_excel(path: Path) -> None:
         ws_li.cell(i, 9, rate)   # Rate to PLN
 
     ws_db = wb.create_sheet("Dashboard")
+
+    from cycles import ensure_cycles_sheet
+    ensure_cycles_sheet(wb)
 
     try:
         from openpyxl.worksheet.datavalidation import DataValidation as _DV
@@ -777,64 +785,3 @@ def update_transaction_field(row_idx: int, field: str, value, expected: dict | N
         atomic_save(wb, excel_path)
         log.info("Updated MasterData row %d column '%s'", row_idx, field)
 
-
-# ── Cycles sheet ─────────────────────────────────────────────────────────────
-
-def _ensure_cycles_sheet(wb):
-    """Return the Cycles sheet, creating it with headers if absent."""
-    if "Cycles" not in wb.sheetnames:
-        ws = wb.create_sheet("Cycles")
-        ws.cell(1, 1, header_of(CyclesSchema, "start_date"))
-        ws.cell(1, 2, header_of(CyclesSchema, "label"))
-    return wb["Cycles"]
-
-
-def get_last_cycle_boundary(excel_path) -> tuple | None:
-    """
-    Return (StartDate, Label) of the most recent row in the Cycles sheet, or None.
-    Returns None when the sheet is absent or contains no data rows.
-    """
-    from openpyxl import load_workbook
-
-    try:
-        wb = load_workbook(excel_path, data_only=True)
-        if "Cycles" not in wb.sheetnames:
-            return None
-        ws = wb["Cycles"]
-        idx = col_indices(ws, CyclesSchema)
-        date_col  = idx.get("start_date")
-        label_col = idx.get("label")
-        if date_col is None:
-            return None
-        last = None
-        for row in range(2, ws.max_row + 1):
-            raw = ws.cell(row, date_col).value
-            if raw is None:
-                continue
-            d = raw.date() if hasattr(raw, "date") else raw
-            lbl = ws.cell(row, label_col).value if label_col else str(d)
-            last = (d, str(lbl or d))
-        return last
-    except Exception:
-        log.exception("Could not read Cycles sheet")
-        return None
-
-
-def append_cycle_boundary(cycle_date, label: str) -> None:
-    """Append a new row to the Cycles sheet. Creates the sheet if absent."""
-    from openpyxl import load_workbook
-
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = _ensure_cycles_sheet(wb)
-        idx = col_indices(ws, CyclesSchema)
-        date_col  = idx.get("start_date", 1)
-        label_col = idx.get("label", 2)
-        next_row = 2
-        for row in range(2, ws.max_row + 1):
-            if ws.cell(row, date_col).value is not None:
-                next_row = row + 1
-        ws.cell(next_row, date_col, cycle_date)
-        ws.cell(next_row, label_col, label)
-        atomic_save(wb, excel_path)
-        log.info("Appended cycle boundary %s ('%s') to Cycles sheet", cycle_date, label)
