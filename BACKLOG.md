@@ -788,6 +788,13 @@ wording need a second pass — deferred to avoid scope creep in PR #32.
       any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
       UTC or a generic "your local time" phrase.
 
+- [ ] **Default-currency fallback hardcodes PLN** — `data.py` (`fillna("PLN")`),
+      `models.py` / `states.py` transaction defaults, `scheduled_report.py` fallback,
+      `excel_schema.py` writer default (`row.get("currency", "PLN")`). For a public repo
+      the fallback must come from the `DISPLAY_CURRENCY` setting (already prompted in
+      `setup_bot.py`), not a hardcoded currency — swapping PLN for EUR/USD would repeat
+      the same mistake. One source of truth: `settings.DISPLAY_CURRENCY`.
+
 ### Additional PLN hardcodings found in scan (2026-07-24)
 
 ### IMPROVEMENT — `goal_pln` field and "Goal (PLN)" column header in ListsSchema
