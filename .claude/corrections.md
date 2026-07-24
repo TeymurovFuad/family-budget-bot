@@ -48,3 +48,14 @@ Correction: Before switching to a memory branch, always commit or stash claude/w
 Action:     Treated all Copilot PR review comments as items that must be fixed.
 Correction: Copilot findings are suggestions, not obligations. Evaluate each against design intent and documented tests; if a fix could break functionality or contradicts a deliberate design decision, defer it to backlog with reasoning instead of applying it.
 ---
+
+
+<!-- 2026-07-25 ORCHESTRATOR [USER] -->
+Action:     Started work on shared `claude/work` branch instead of creating an isolated per-session worktree.
+Correction: Each session must create a task-named worktree (`git worktree add ../budget-bot-<task> -b fix/<task> origin/master`) before touching any file. `claude/work` is retired.
+---
+
+<!-- 2026-07-25 ORCHESTRATOR [USER] -->
+Action:     After code review, reported findings in conversation only — did not add them to BACKLOG.md. User had to ask explicitly.
+Correction: After every review, non-blocking findings must be written to BACKLOG.md immediately in the same worktree, then committed, without waiting for the user to ask.
+---
