@@ -86,6 +86,45 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 - Security/PII audit 2026-07-22: clean. One low-priority nit: `deploy/budget-bot.service`
   hardcodes `User=ubuntu` — reveals VM OS-user convention, no IP/credentials.
 
+## Bugs (confirmed live, 2026-07-24)
+
+- [ ] **Quick-add doesn't recognise Savings as transaction type** — user typed
+      "2380 added to savings 23 July 2026"; bot replied: ❌ Unknown category
+      'Savings'. Use one of: Groceries, Housing, …
+      Root cause: the AI parser maps "savings" / "saved" to the Category field
+      instead of the Type field. "Savings" is a valid TxnType (Lists sheet B
+      column), not a category.
+      Expected: parser sets type="Savings", category="" (let user pick or
+      default to "Other"); the shared validator should also catch a
+      type=Expense / category=Savings mismatch and promote type.
+      Workaround: use /add and manually pick Type=Savings step by step.
+
+- [ ] **/add date step rejects natural language ("yesterday")** — user typed
+      "Yesterday" in the /add date step; bot replied: ❌ Use YYYY-MM-DD format
+      or 'today'. The keyword "today" is accepted but "yesterday", "last
+      Monday", etc. are not.
+      Expected: at minimum accept "yesterday" as a valid relative-date
+      shorthand (maps to `date.today() - timedelta(days=1)`); consider
+      "last Monday" etc. as a follow-up stretch goal.
+      (`handlers/add_conv.py` date-parsing step)
+
+- [ ] **/cycle detect shows wrong salary candidates for Jul 2024** — bot
+      prompted "📅 Jul 2024 — Which income was your salary?" and offered:
+        2024-08-01 - 11,871 PLN
+        2024-08-01 - 11,856 PLN
+      with payday window 2024-07-20 → 2024-08-05.
+      Actual Jul 2024 salary: 12,027 PLN on 2024-07-01 — falls BEFORE the
+      window start (2024-07-20) and was therefore missed. The two candidates
+      shown are the August salaries (2024-08-01), both inside the Jul window
+      because the window extends to 2024-08-05; there are two because Aug has
+      two salary entries (11,871 + 11,856 PLN).
+      Root cause: the payday window for the first detected cycle is anchored
+      too late, excluding salaries paid at the very start of the month (day 1).
+      Fix: widen the window backward (e.g. anchor at the 1st of the target
+      month instead of the 20th) for the first cycle, or let the first-cycle
+      search use a broader range.
+      (`cycles.py` `detect_cycle_candidates` window logic)
+
 ## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
 
 - [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
