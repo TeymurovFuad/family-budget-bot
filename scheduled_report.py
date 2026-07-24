@@ -64,20 +64,20 @@ def load_budget_amounts() -> dict[str, float]:
 def load_transaction_data() -> pd.DataFrame:
     excel_path = get_excel_path_for_reading()
     df = pd.read_excel(excel_path, sheet_name="MasterData")
-    pln_column = "Value (base)" if "Value (base)" in df.columns else "Value"
-    df["amount_pln"] = pd.to_numeric(df[pln_column], errors="coerce")
+    base_column = "Value (base)" if "Value (base)" in df.columns else "Value"
+    df["amount_base"] = pd.to_numeric(df[base_column], errors="coerce")
     df["Value"]      = pd.to_numeric(df["Value"], errors="coerce")
     df["Year"]       = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")
     df["IsDone"]     = df["IsDone"].fillna(True).astype(bool)
     df["Currency"]   = df["Currency"].fillna("PLN")
-    missing = df["amount_pln"].isna() & df["Value"].notna()
+    missing = df["amount_base"].isna() & df["Value"].notna()
     if missing.any():
         rates = load_currency_rates()
-        df.loc[missing, "amount_pln"] = df.loc[missing].apply(
+        df.loc[missing, "amount_base"] = df.loc[missing].apply(
             lambda r: r["Value"] * rates.get(str(r.get("Currency", "PLN")).upper(), 1.0),
             axis=1,
         )
-    return df.dropna(subset=["amount_pln", "Type", "Year", "Month"])
+    return df.dropna(subset=["amount_base", "Type", "Year", "Month"])
 
 
 def load_currency_rates() -> dict[str, float]:
@@ -85,27 +85,27 @@ def load_currency_rates() -> dict[str, float]:
         excel_path = get_excel_path_for_reading()
         rates_df = pd.read_excel(excel_path, sheet_name="Lists", header=0)
         currency_cols = [c for c in rates_df.columns if "currency" in str(c).lower()]
-        rate_cols     = [c for c in rates_df.columns if "rate" in str(c).lower() and "pln" in str(c).lower()]
+        rate_cols     = [c for c in rates_df.columns if "rate" in str(c).lower() and ("pln" in str(c).lower() or "base" in str(c).lower())]
         if not currency_cols or not rate_cols:
             log.warning("Currency/Rate columns not found in Lists sheet")
             return {"PLN": 1.0}
         rates_df = rates_df[[currency_cols[0], rate_cols[0]]].copy()
-        rates_df.columns = ["currency_code", "rate_to_pln"]
-        rates_df = rates_df.dropna(subset=["currency_code", "rate_to_pln"])
+        rates_df.columns = ["currency_code", "rate_to_base"]
+        rates_df = rates_df.dropna(subset=["currency_code", "rate_to_base"])
         rates_df = rates_df[rates_df["currency_code"].astype(str).str.match(r"^[A-Z]{3}$")]
-        return dict(zip(rates_df["currency_code"], rates_df["rate_to_pln"].astype(float)))
+        return dict(zip(rates_df["currency_code"], rates_df["rate_to_base"].astype(float)))
     except Exception as error:
         log.warning("Could not load currency rates: %s — using PLN only", error)
         return {"PLN": 1.0}
 
 
-def convert_pln_to_display_currency(pln_amount: float, currency: str, rates: dict) -> float:
+def convert_base_to_display_currency(pln_amount: float, currency: str, rates: dict) -> float:
     rate = rates.get(currency.upper(), 1.0)
     return pln_amount / rate if rate else pln_amount
 
 
 def format_with_currency(pln_amount: float, currency: str, rates: dict) -> str:
-    converted = convert_pln_to_display_currency(pln_amount, currency, rates)
+    converted = convert_base_to_display_currency(pln_amount, currency, rates)
     return f"{converted:,.0f} {currency}"
 
 
@@ -134,11 +134,11 @@ def build_weekly_report(df: pd.DataFrame, rates: dict, currency: str = DISPLAY_C
     month    = _month_names()[today.month - 1]
 
     this_month = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-    income   = this_month[this_month["Type"] == "Income"]["amount_pln"].sum()
-    expenses = this_month[this_month["Type"] == "Expense"]["amount_pln"].sum()
-    savings  = this_month[this_month["Type"] == "Savings"]["amount_pln"].sum()
+    income   = this_month[this_month["Type"] == "Income"]["amount_base"].sum()
+    expenses = this_month[this_month["Type"] == "Expense"]["amount_base"].sum()
+    savings  = this_month[this_month["Type"] == "Savings"]["amount_base"].sum()
 
-    by_category    = this_month[this_month["Type"] == "Expense"].groupby("Category")["amount_pln"].sum()
+    by_category    = this_month[this_month["Type"] == "Expense"].groupby("Category")["amount_base"].sum()
     top_categories = by_category.sort_values(ascending=False).head(3)
 
     days_elapsed      = today.day
@@ -179,18 +179,18 @@ def build_monthly_summary(df: pd.DataFrame, rates: dict, currency: str = DISPLAY
     year, month = previous_month_year_and_name()
 
     closed_month = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-    income   = closed_month[closed_month["Type"] == "Income"]["amount_pln"].sum()
-    expenses = closed_month[closed_month["Type"] == "Expense"]["amount_pln"].sum()
-    savings  = closed_month[closed_month["Type"] == "Savings"]["amount_pln"].sum()
+    income   = closed_month[closed_month["Type"] == "Income"]["amount_base"].sum()
+    expenses = closed_month[closed_month["Type"] == "Expense"]["amount_base"].sum()
+    savings  = closed_month[closed_month["Type"] == "Savings"]["amount_base"].sum()
     net      = income - expenses - savings
     rate     = savings / income if income > 0 else 0
 
     recurring_expenses  = closed_month[
         (closed_month["Type"] == "Expense") & closed_month["IsRecurring"].fillna(False).astype(bool)
-    ]["amount_pln"].sum()
+    ]["amount_base"].sum()
     variable_expenses = expenses - recurring_expenses
 
-    by_category = closed_month[closed_month["Type"] == "Expense"].groupby("Category")["amount_pln"].sum()
+    by_category = closed_month[closed_month["Type"] == "Expense"].groupby("Category")["amount_base"].sum()
     budgets    = load_budget_amounts()
     over_budget = [
         f"{cat}"
@@ -217,15 +217,15 @@ def build_yearly_summary(df: pd.DataFrame, rates: dict, currency: str = DISPLAY_
     year     = now_utc().year - 1
 
     year_data = df[(df["Year"] == year) & df["IsDone"]]
-    income    = year_data[year_data["Type"] == "Income"]["amount_pln"].sum()
-    expenses  = year_data[year_data["Type"] == "Expense"]["amount_pln"].sum()
-    savings   = year_data[year_data["Type"] == "Savings"]["amount_pln"].sum()
+    income    = year_data[year_data["Type"] == "Income"]["amount_base"].sum()
+    expenses  = year_data[year_data["Type"] == "Expense"]["amount_base"].sum()
+    savings   = year_data[year_data["Type"] == "Savings"]["amount_base"].sum()
 
     monthly_rates = []
     for month in _month_names():
         month_data      = year_data[year_data["Month"] == month]
-        month_income    = month_data[month_data["Type"] == "Income"]["amount_pln"].sum()
-        month_savings   = month_data[month_data["Type"] == "Savings"]["amount_pln"].sum()
+        month_income    = month_data[month_data["Type"] == "Income"]["amount_base"].sum()
+        month_savings   = month_data[month_data["Type"] == "Savings"]["amount_base"].sum()
         if month_income > 0:
             monthly_rates.append((month, month_savings / month_income))
 
@@ -233,7 +233,7 @@ def build_yearly_summary(df: pd.DataFrame, rates: dict, currency: str = DISPLAY_
     worst_month = min(monthly_rates, key=lambda x: x[1]) if monthly_rates else ("—", 0)
     average_savings_rate = sum(r for _, r in monthly_rates) / len(monthly_rates) if monthly_rates else 0
 
-    by_category     = year_data[year_data["Type"] == "Expense"].groupby("Category")["amount_pln"].sum()
+    by_category     = year_data[year_data["Type"] == "Expense"].groupby("Category")["amount_base"].sum()
     top_3_categories = by_category.sort_values(ascending=False).head(3)
 
     lines = [

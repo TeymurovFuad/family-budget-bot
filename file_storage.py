@@ -375,11 +375,11 @@ def create_blank_excel(path: Path) -> None:
         (1, header_of(ListsSchema, "months")),
         (2, header_of(ListsSchema, "txn_types")),
         (3, header_of(ListsSchema, "categories")),
-        (4, header_of(ListsSchema, "budget_pln")),
+        (4, header_of(ListsSchema, "budget_base")),
         (5, header_of(ListsSchema, "persons")),
         (6, header_of(ListsSchema, "years")),
         (8, header_of(ListsSchema, "currency")),
-        (9, header_of(ListsSchema, "rate_to_pln")),
+        (9, header_of(ListsSchema, "rate_to_base")),
     ]
     for _c, _h in _li_headers:
         ws_li.cell(1, _c, _h)
@@ -403,7 +403,7 @@ def create_blank_excel(path: Path) -> None:
     for i, v in enumerate(years,      2): ws_li.cell(i, 6, v)
     for i, (code, rate) in enumerate(currencies, 2):
         ws_li.cell(i, 8, code)   # Currency
-        ws_li.cell(i, 9, rate)   # Rate to PLN
+        ws_li.cell(i, 9, rate)   # Rate to base
 
     ws_db = wb.create_sheet("Dashboard")
 
@@ -586,7 +586,7 @@ def load_lists(excel_path: Path) -> dict[str, list]:
 
         # Build category→budget mapping
         cat_c = idx.get("categories")
-        bud_c = idx.get("budget_pln")
+        bud_c = idx.get("budget_base")
         budgets: dict[str, float] = {}
         if cat_c and bud_c:
             for row in range(2, ws.max_row + 1):
@@ -629,7 +629,7 @@ def update_currency_rates_in_excel(new_rates: dict[str, float]) -> None:
 
         idx = col_indices(ws, ListsSchema)
         ccy_col  = idx.get("currency")
-        rate_col = idx.get("rate_to_pln")
+        rate_col = idx.get("rate_to_base")
 
         if ccy_col is None or rate_col is None:
             log.warning("Currency or Rate column not found in Lists sheet — rates not updated")
@@ -644,9 +644,9 @@ def update_currency_rates_in_excel(new_rates: dict[str, float]) -> None:
         log.info("Updated %d currency rates in Lists sheet", len(new_rates))
 
 
-def update_category_budget_in_excel(category: str, new_budget_pln: float) -> None:
+def update_category_budget_in_excel(category: str, new_budget_base: float) -> None:
     """
-    Write a new monthly budget limit (in PLN) for one category into the Lists
+    Write a new monthly budget limit (in base currency) for one category into the Lists
     sheet Budget (base) column. Only updates the row whose Categories cell
     already matches `category` — never adds or removes a category row.
     """
@@ -658,7 +658,7 @@ def update_category_budget_in_excel(category: str, new_budget_pln: float) -> Non
 
         idx      = col_indices(ws, ListsSchema)
         cat_col  = idx.get("categories")
-        bud_col  = idx.get("budget_pln")
+        bud_col  = idx.get("budget_base")
 
         if cat_col is None or bud_col is None:
             log.warning("Categories or Budget (base) column not found in Lists sheet — budget not updated")
@@ -667,14 +667,14 @@ def update_category_budget_in_excel(category: str, new_budget_pln: float) -> Non
         for row in range(2, ws.max_row + 1):
             cat = ws.cell(row, cat_col).value
             if cat and str(cat).strip() == category:
-                ws.cell(row, bud_col).value = round(new_budget_pln, 2)
+                ws.cell(row, bud_col).value = round(new_budget_base, 2)
                 break
         else:
             log.warning("Category '%s' not found in Lists sheet — budget not updated", category)
             return
 
         atomic_save(wb, excel_path)
-        log.info("Updated budget for category '%s' to %.2f PLN", category, new_budget_pln)
+        log.info("Updated budget for category '%s' to %.2f (base)", category, new_budget_base)
 
 
 # ── Transaction management ────────────────────────────────────────────────────

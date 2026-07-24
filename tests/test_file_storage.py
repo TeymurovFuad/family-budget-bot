@@ -77,7 +77,7 @@ class TestCreateBlankExcel:
     def test_lists_sheet_has_rate_header_in_col_i(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
-        assert ws.cell(1, 9).value == "Rate to PLN"
+        assert ws.cell(1, 9).value == "Rate to base"
 
     def test_lists_sheet_has_budget_header_in_col_d(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)

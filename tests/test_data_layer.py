@@ -224,7 +224,7 @@ class TestAddTransactionStateIsReadyToConfirm:
         )
         assert state.is_ready_to_confirm() is True
 
-    def test_currency_defaults_to_pln_in_to_transaction(self):
+    def test_currency_defaults_to_base_in_to_transaction(self):
         # currency=None → to_transaction uses "PLN"
         state = AddTransactionState(value=50.0, transaction_type="Income")
         txn = state.to_transaction()
@@ -287,7 +287,7 @@ class TestCreateBlankExcelColumnPositions:
         wb = openpyxl.load_workbook(excel_path)
         assert wb["MasterData"].cell(1, 11).value == "Currency"
 
-    def test_masterdata_value_pln_in_col_12(self, excel_path):
+    def test_masterdata_value_base_in_col_12(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         assert wb["MasterData"].cell(1, 12).value == "Value (base)"
 
@@ -325,7 +325,7 @@ class TestCreateBlankExcelColumnPositions:
 
     def test_lists_rate_header_in_col_i(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
-        assert wb["Lists"].cell(1, 9).value == "Rate to PLN"
+        assert wb["Lists"].cell(1, 9).value == "Rate to base"
 
     def test_lists_col_g_header_is_none(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
@@ -343,7 +343,7 @@ class TestCreateBlankExcelColumnPositions:
         values = [ws.cell(r, 3).value for r in range(2, ws.max_row + 1)]
         assert "Salary" in values
 
-    def test_lists_col_h_contains_pln(self, excel_path):
+    def test_lists_col_h_contains_base(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
         values = [ws.cell(r, 8).value for r in range(2, ws.max_row + 1)]
@@ -616,7 +616,7 @@ class TestDoAppendTransactionExhaustive:
             f"Date Modified must not be a formula, got: {val!r}"
         )
 
-    def test_value_pln_formula_starts_with_equals(self, excel_path):
+    def test_value_base_formula_starts_with_equals(self, excel_path):
         txn = Transaction(
             date=datetime.date(2024, 1, 1),
             value=50.0,
@@ -631,7 +631,7 @@ class TestDoAppendTransactionExhaustive:
         assert isinstance(formula, str)
         assert formula.startswith("=")
 
-    def test_value_pln_formula_references_currency_rate_range(self, excel_path):
+    def test_value_base_formula_references_currency_rate_range(self, excel_path):
         txn = Transaction(
             date=datetime.date(2024, 1, 1),
             value=50.0,
@@ -784,7 +784,7 @@ class TestReplayRecoveryQueue:
             f"replay_recovery_queue must write datetime, got {type(val)}: {val!r}"
         )
 
-    def test_replay_writes_formula_in_value_pln_column(
+    def test_replay_writes_formula_in_value_base_column(
         self, excel_path, tmp_path, monkeypatch
     ):
         queue_path = tmp_path / "recovery_queue.json"
@@ -855,9 +855,9 @@ class TestLoadData:
             _write_masterdata_row(ws, i, **row)
         wb.save(excel_path)
 
-    # Value(PLN) cache present → _pln equals cached value
+    # Value(PLN) cache present → _base equals cached value
 
-    def test_value_pln_cache_used_when_present(self, excel_path, monkeypatch):
+    def test_value_base_cache_used_when_present(self, excel_path, monkeypatch):
         import file_storage as fs
         monkeypatch.setattr(fs, "LOCAL_XLSX_PATH", excel_path)
         import data as data_mod
@@ -877,11 +877,11 @@ class TestLoadData:
 
         df = data_mod.load_data()
         assert len(df) == 1
-        assert df.iloc[0]["_pln"] == pytest.approx(428.0)
+        assert df.iloc[0]["_base"] == pytest.approx(428.0)
 
     # Value(PLN) = NaN → recomputed from Value * rate
 
-    def test_value_pln_recomputed_when_cache_missing(self, excel_path, monkeypatch):
+    def test_value_base_recomputed_when_cache_missing(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
 
@@ -907,11 +907,11 @@ class TestLoadData:
 
         df = data_mod.load_data()
         assert len(df) == 1
-        assert df.iloc[0]["_pln"] == pytest.approx(428.0)
+        assert df.iloc[0]["_base"] == pytest.approx(428.0)
 
-    # PLN currency with missing cache → _pln equals Value
+    # PLN currency with missing cache → _base equals Value
 
-    def test_pln_currency_missing_cache_uses_value(self, excel_path, monkeypatch):
+    def test_base_currency_missing_cache_uses_value(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
 
@@ -928,7 +928,7 @@ class TestLoadData:
 
         df = data_mod.load_data()
         assert len(df) == 1
-        assert df.iloc[0]["_pln"] == pytest.approx(250.0)
+        assert df.iloc[0]["_base"] == pytest.approx(250.0)
 
     # Unknown currency → rate defaults to 1.0
 
@@ -949,7 +949,7 @@ class TestLoadData:
 
         df = data_mod.load_data()
         assert len(df) == 1
-        assert df.iloc[0]["_pln"] == pytest.approx(123.0)  # 123 * 1.0
+        assert df.iloc[0]["_base"] == pytest.approx(123.0)  # 123 * 1.0
 
     # Type=None → row dropped
 
@@ -991,9 +991,9 @@ class TestLoadData:
         df = data_mod.load_data()
         assert len(df) == 0
 
-    # _pln NaN after recompute → row dropped
+    # _base NaN after recompute → row dropped
 
-    def test_row_dropped_when_pln_nan_after_recompute(self, excel_path, monkeypatch):
+    def test_row_dropped_when_base_nan_after_recompute(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
 
@@ -1035,7 +1035,7 @@ class TestLoadData:
 
     # Currency=None → defaults to PLN
 
-    def test_currency_none_defaults_to_pln(self, excel_path, monkeypatch):
+    def test_currency_none_defaults_to_base(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
 
@@ -1057,7 +1057,7 @@ class TestLoadData:
 
 class TestLoadRates:
 
-    def test_returns_pln_minimum(self, excel_path, monkeypatch):
+    def test_returns_base_minimum(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
 
@@ -1165,13 +1165,13 @@ class TestLoadReferenceData:
         ref = data_mod.load_reference_data()
         assert "currencies" in ref
 
-    def test_currencies_contains_pln(self, excel_path, monkeypatch):
+    def test_currencies_contains_base(self, excel_path, monkeypatch):
         import data as data_mod
         monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
         ref = data_mod.load_reference_data()
         assert "PLN" in ref["currencies"]
 
-    def test_currencies_falls_back_to_pln_list_when_rates_empty(
+    def test_currencies_falls_back_to_base_list_when_rates_empty(
         self, tmp_path, monkeypatch
     ):
         import data as data_mod
