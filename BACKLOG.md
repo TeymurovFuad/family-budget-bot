@@ -40,7 +40,21 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
+  1. **Formulas must survive data growth PR** — agreed 2026-07-25, TOP priority:
+     the user is about to re-import 1400+ historical rows and both failure
+     modes bite immediately. One PR, two fixes:
+     (a) Monthly Summary gets rows for every Year/Month present in MasterData —
+         either bot-appended on save or converted to open-ended dynamic
+         formulas needing no per-month rows (preferred; decide at
+         implementation). See "Monthly Summary sheet is never updated" bug.
+     (b) Kill every fixed row bound in written formulas — `$100`-style VLOOKUP
+         ranges in Value (base), `lists_currency_range` cap, Dashboard SUMIFS
+         bounds. Open-ended ranges or named ranges derived from actual data.
+         Absorbs the "lists_currency_range caps at row 100" item below.
+  2. **Statement-import correctness pair** (before the user re-imports):
+     decimal-separator fix flow + AI categorization for statement rows — see
+     "Bugs (confirmed live, 2026-07-25)".
+  3. **`/summary` picker UX PR** — with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
      UX — agreed design" below.
