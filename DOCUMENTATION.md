@@ -241,12 +241,15 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/setcurrency` | Pick display currency from a keyboard |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
 | `/export` | Download the live Excel workbook as a Telegram document |
-| `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a new cycle boundary — **owner only**, needs `BUDGET_CYCLE=1` |
+| `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a new cycle boundary; `/cycle detect` backfills historical boundaries — **owner only**, needs `BUDGET_CYCLE=1` |
 
 `/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, `/cycle`, and
 quick-add (typed transactions) are **owner-only** — only the first ID listed in
 `ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
 read/report commands.
+
+Every command accepts `help` as a subcommand (e.g. `/add help`, `/bulk help`,
+`/summary help`, `/cycle help`) and returns a one-screen usage card.
 
 All of these are also registered in Telegram's command menu (the `/` button) at
 startup via `set_my_commands` — no manual BotFather registration needed.
@@ -335,7 +338,9 @@ leave your machine — amounts and account numbers are replaced with `***`).
 It shows you the proposed mapping; you can fix any column with the inline
 buttons, then give the profile a name and save it. From then on, every
 statement with the same columns is recognized instantly — no AI call, no
-questions, the preview opens directly with a "📄 Parsed with profile ..." line.
+questions, no re-mapping — the preview opens directly with a
+"📄 Parsed with profile ..." line. Re-uploading the same file or a new export
+in the same format always matches the saved profile silently.
 Profiles are stored per user on the bot's disk (`data/statement_profiles/`),
 never in the repository, so no bank names or account details are shared.
 A `.txt` upload that looks column-structured (consistent delimiter) enters
@@ -397,6 +402,7 @@ identical to the default calendar mode.
 /cycle                        show the current cycle (label, start date, day count)
 /cycle started                start a new cycle from today
 /cycle started YYYY-MM-DD     start a new cycle from that date
+/cycle detect                 scan transaction history and backfill historical cycle boundaries
 ```
 
 `/cycle` is **owner-only** — only the first ID in `ALLOWED_TELEGRAM_IDS` can
@@ -432,6 +438,25 @@ silently counted as income for the current cycle without re-prompting.
 | **Different date** | Asks you to send `/cycle started YYYY-MM-DD` with the date you want |
 
 Only a button tap records anything — the bot never opens a cycle on its own.
+
+### Backfilling history with /cycle detect
+
+`/cycle detect` scans the full transaction history for Salary income rows and
+proposes cycle boundaries for every past month where a salary arrival can be
+identified. Requires `BUDGET_CYCLE=1`.
+
+The bot splits months into two groups:
+
+- **Unambiguous months** — exactly one Salary row falls inside the expected
+  payday window. All such months are listed together with a **Confirm all**
+  button. Tapping it records every boundary in one step.
+- **Ambiguous months** — zero or more than one Salary row in the window. The
+  bot walks through these one at a time with inline date pickers. A
+  **Custom date** option is always available if none of the suggested dates are
+  correct.
+
+Boundaries that already exist in the `Cycles` sheet are skipped — running
+`/cycle detect` more than once is safe.
 
 ### Cycle-scoped /summary and /budget
 

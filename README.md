@@ -25,6 +25,11 @@ See [DOCUMENTATION.md](DOCUMENTATION.md) for the full command list, including
 (owner-only — the first ID listed in `ALLOWED_TELEGRAM_IDS` is the primary
 user with write access; every other allowed ID is read-only).
 
+### Getting help in the bot
+
+Every command accepts `help` as a subcommand and returns a one-screen usage
+card — for example: `/add help`, `/bulk help`, `/summary help`, `/cycle help`.
+
 ### Bulk import
 
 `/bulk` — import many transactions at once from a photo, a CSV/XLSX bank
@@ -45,11 +50,13 @@ Set `BUDGET_CYCLE=1` to track your budget **salary-to-salary** instead of
 1st-to-1st. Cycle boundaries are recorded events, never date formulas: when you
 save a Salary income (and the current cycle is old enough, or none exists yet)
 the bot asks whether to start a new cycle — only your confirmation records it —
-and `/cycle started [YYYY-MM-DD]` records one manually any time. With the flag
-on, `/summary` and `/budget` cover the current cycle (last salary → today) and
-the summary shows an **unaccounted** metric: salary − tracked expenses − tracked
-savings. The ledger lives in a `Cycles` sheet in the workbook; with the flag off
-nothing changes.
+and `/cycle started [YYYY-MM-DD]` records one manually any time. Use
+`/cycle detect` to scan your full transaction history and backfill boundaries for
+past months in one step (unambiguous months confirm in bulk; ambiguous ones are
+walked one at a time with inline pickers). With the flag on, `/summary` and
+`/budget` cover the current cycle (last salary → today) and the summary shows an
+**unaccounted** metric: salary − tracked expenses − tracked savings. The ledger
+lives in a `Cycles` sheet in the workbook; with the flag off nothing changes.
 
 ---
 
