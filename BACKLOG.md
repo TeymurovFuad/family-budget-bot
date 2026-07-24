@@ -978,6 +978,28 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
       profile saves with an empty fingerprint and will never match on re-upload. Add a
       `log.warning` at that branch. (`handlers/bulk_conv.py` near `bulk_profile_name`)
 
+## Follow-up: /cycle detect review notes (cycle-detect redesign, 2026-07-24)
+
+- [ ] **`detect:stop` reports "recorded" but counts reviewed** — the stop message
+      says "Recorded N boundaries so far" but N is computed as
+      `detect_total - len(detect_queue)`, which counts both confirmed and skipped
+      entries. If the user skipped any, the count overstates actual boundaries written.
+      Track confirmed count separately in `ctx.user_data["detect_confirmed"]` and
+      increment only on `detect:pick`. (`handlers/cycle.py` `handle_detect_callback`)
+- [ ] **"Two salary payments" hardcoded — breaks for 3+ salaries on same date** —
+      `_send_detect_prompt` renders `"Two salary payments: …"` unconditionally when
+      `not entry["unambiguous"]`. If three salary rows share a date the label is wrong.
+      Fix: `f"{len(entry['amounts'])} salary payments"`. (`handlers/cycle.py`)
+- [ ] **`detect_candidates` not cleared when entering review mode** — `detect:review`
+      sets `detect_queue = list(candidates)` but leaves `detect_candidates` in
+      `user_data`. A second `/cycle detect` mid-review overwrites `detect_candidates`
+      while `detect_queue` is still active, leaving inconsistent state. Pop
+      `detect_candidates` inside the `detect:review` branch. (`handlers/cycle.py`)
+- [ ] **No currency label on amounts in the detect summary list** — amounts render as
+      bare numbers (`12,027`) with no currency symbol. Append `get_display_currency()`
+      (or `settings.DISPLAY_CURRENCY`) alongside each amount line.
+      Part of the broader PLN/currency sweep. (`handlers/cycle.py` `_cmd_cycle_detect`)
+
 ## Follow-up: profile review notes (PR #27, 2026-07-23)
 
 Non-blocking findings from the PR #27 review (debit/credit split columns + profile deletion):
