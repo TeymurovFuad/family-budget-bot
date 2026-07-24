@@ -735,17 +735,23 @@ unaccounted tracking — the old manual dashboard metric).
       is older than ~20 days (configurable); younger → income inside the cycle,
       silently counted, no re-prompt.
 
-## Follow-up PR: currency-agnostic help text (found 2026-07-24)
+## Follow-up PR: currency and timezone neutrality sweep (found 2026-07-24)
 
-Help strings hardcode "PLN" as the example currency even though the bot supports any
-display currency via `/setcurrency`. Affects discoverability for non-PLN users.
+Help text examples updated to EUR in PR #32 (groceries example, setbudget limit prompt,
+rates help). Remaining PLN references in business logic strings and any timezone-specific
+wording need a second pass — deferred to avoid scope creep in PR #32.
 
-- [ ] **Replace hardcoded PLN in help/example strings with a dynamic or generic label** —
-      `handlers/misc.py`: "groceries 89 PLN" example in `/help`, "monthly limit in PLN"
-      in `/setbudget help`. `handlers/reports.py`: "PLN per 1 unit" in `/rates help`.
-      Options: use `get_display_currency(uid)` so the example matches the user's setting,
-      or use a currency-neutral phrase ("in your base currency"). The rates help is
-      factually correct (rates ARE stored PLN-per-unit) so neutral wording is better there.
+- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
+      note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
+      setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm
+      messages. `handlers/add_conv.py`: PLN equivalent note shown during /add.
+      `handlers/reports.py`: rates display lines (`PLN per 1 unit`, `{r:.4f} PLN`).
+      Decide per-string: use display currency where possible; keep PLN where it is the
+      factually correct base-currency label.
+- [ ] **Timezone wording sweep** — `handlers/add_conv.py:183`: "(UTC) aren't allowed"
+      is already UTC; verify no other handler surfaces a timezone name to the user. If
+      any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
+      UTC or a generic "your local time" phrase.
 
 ## Follow-up PR: cycle-aware report gaps (found 2026-07-24)
 
