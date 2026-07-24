@@ -618,10 +618,10 @@ class TestAddConvDesc:
 
 
 class TestAddConvRecurring:
-    def _make_ctx(self, is_pln=True):
+    def _make_ctx(self, is_base=True):
         from models import AddTransactionState
         ctx = make_ctx()
-        ccy = "PLN" if is_pln else "USD"
+        ccy = "PLN" if is_base else "USD"
         ctx.user_data["state"] = AddTransactionState(
             display_currency="PLN", rates=SAMPLE_RATES,
             value=100.0, currency=ccy, transaction_type="Expense",
@@ -1398,7 +1398,7 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="50 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             result = await handle_quick_add(upd, ctx)
         assert result == states.QUICK_CONFIRM
 
@@ -1411,7 +1411,7 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="50 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             result = await handle_quick_add(upd, ctx)
         assert result == states.QUICK_CONFIRM
         assert ctx.user_data["quick_parsed"]["category"] == "Groceries"
@@ -1453,7 +1453,7 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="50 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             result = await handle_quick_add(upd, ctx)
         assert result == states.QUICK_CONFIRM
         assert ctx.user_data["quick_parsed"]["person"] == "Alice"
@@ -1493,7 +1493,7 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="50 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             await handle_quick_add(upd, ctx)
         expected = parsed.copy()
         expected["date"] = None
@@ -1516,7 +1516,7 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="50.00 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50.00 PLN"):
             await handle_quick_add(upd, ctx)
         sent = upd.message.reply_text.call_args.args[0]
         assert "Groceries" in sent
@@ -1920,7 +1920,7 @@ class TestDataValidationFollowUp:
              patch("handlers.quick_conv.parse_quick", return_value=parsed), \
              patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.format_pln_as_currency", return_value="2,000 PLN"):
+             patch("handlers.quick_conv.format_base_as_currency", return_value="2,000 PLN"):
             result = await handle_quick_add(upd, ctx)
         assert result == states.QUICK_CONFIRM
         assert ctx.user_data["quick_parsed"]["type"] == "Savings"

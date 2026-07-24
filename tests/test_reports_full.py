@@ -44,7 +44,7 @@ import formatters
 from formatters import (
     format_amount,
     convert,
-    format_pln_as_currency,
+    format_base_as_currency,
     budget_progress_bar,
     savings_emoji,
 )
@@ -83,7 +83,7 @@ def _make_df():
         "Date":     ["2025-06-01", "2025-06-05", "2025-06-10", "2025-06-12", "2025-06-14"],
         "Type":     ["Income",     "Expense",    "Expense",    "Savings",    "Expense"],
         "Category": ["Salary",     "Food",       "Transport",  "Investment", "Food"],
-        "_pln":     [5000.0,        200.0,         100.0,        500.0,        150.0],
+        "_base":     [5000.0,        200.0,         100.0,        500.0,        150.0],
         "IsDone":   [True,          True,          True,         True,         False],
     })
 
@@ -94,7 +94,7 @@ def _make_df():
 
 class TestFormatAmountFull:
 
-    def test_zero_pln(self):
+    def test_zero_base(self):
         assert format_amount(0, "PLN") == "0 PLN"
 
     def test_1234_5_eur_uses_comma_separator(self):
@@ -183,7 +183,7 @@ class TestConvertFull:
     # formatters.py does `from data import get_rate`, so we must patch the
     # name as it lives inside the formatters module, not in data.
 
-    def test_pln_rate_1_returns_same(self, monkeypatch):
+    def test_base_rate_1_returns_same(self, monkeypatch):
         monkeypatch.setattr(formatters, "get_rate", lambda ccy, rates: 1.0)
         assert convert(1000.0, "PLN", {}) == pytest.approx(1000.0)
 
@@ -198,14 +198,14 @@ class TestConvertFull:
 
 class TestFormatPlnAsCurrencyFull:
 
-    def test_pln_passthrough(self, monkeypatch):
+    def test_base_passthrough(self, monkeypatch):
         monkeypatch.setattr(formatters, "get_rate", lambda ccy, rates: 1.0)
-        assert format_pln_as_currency(1000.0, "PLN", {}) == "1,000 PLN"
+        assert format_base_as_currency(1000.0, "PLN", {}) == "1,000 PLN"
 
     def test_converts_then_formats(self, monkeypatch):
         monkeypatch.setattr(formatters, "get_rate", lambda ccy, rates: 4.0)
         # 800 PLN / 4 = 200 EUR
-        assert format_pln_as_currency(800.0, "EUR", {"EUR": 4.0}) == "200 EUR"
+        assert format_base_as_currency(800.0, "EUR", {"EUR": 4.0}) == "200 EUR"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -288,7 +288,7 @@ def pln_rates(monkeypatch):
 class TestBuildRangeReportSums:
     """
     DataFrame:
-        Date        Type      Category    _pln    IsDone
+        Date        Type      Category    _base    IsDone
         2025-06-01  Income    Salary      5000    True
         2025-06-05  Expense   Food        200     True
         2025-06-10  Expense   Transport   100     True
@@ -362,7 +362,7 @@ class TestBuildRangeReportSums:
 
     def test_empty_dataframe_no_exception(self, monkeypatch):
         monkeypatch.setattr(formatters, "get_rate", lambda ccy, rates: 1.0)
-        empty_df = pd.DataFrame(columns=["Date", "Type", "Category", "_pln", "IsDone"])
+        empty_df = pd.DataFrame(columns=["Date", "Type", "Category", "_base", "IsDone"])
         text = _build_range_report(
             empty_df, {"PLN": 1.0}, {}, "PLN", self.START, self.END, "Empty"
         )
@@ -390,7 +390,7 @@ class TestBuildRangeReportSums:
             "Date":     ["2025-06-01"] * 10,
             "Type":     ["Expense"] * 10,
             "Category": cats,
-            "_pln":     [float(i + 1) * 100 for i in range(10)],
+            "_base":     [float(i + 1) * 100 for i in range(10)],
             "IsDone":   [True] * 10,
         })
         text = _build_range_report(
@@ -584,8 +584,8 @@ class TestLoadTransactionData:
             "IsDone":       [True,            True,          True],
         })
 
-    def test_pln_nan_recomputed_from_value_times_rate(self):
-        """Row where Value(PLN) is NaN: amount_pln = Value * rate."""
+    def test_base_nan_recomputed_from_value_times_rate(self):
+        """Row where Value(PLN) is NaN: amount_base = Value * rate."""
         with patch("scheduled_report.get_excel_path_for_reading", return_value="fake.xlsx"), \
              patch("scheduled_report.load_currency_rates", return_value={"EUR": 4.0, "PLN": 1.0}), \
              patch("pandas.read_excel", return_value=self._base_df()):
@@ -593,10 +593,10 @@ class TestLoadTransactionData:
         # EUR row: 50 * 4.0 = 200
         eur_rows = df[df["Currency"] == "EUR"]
         assert len(eur_rows) == 1
-        assert eur_rows.iloc[0]["amount_pln"] == pytest.approx(200.0)
+        assert eur_rows.iloc[0]["amount_base"] == pytest.approx(200.0)
 
-    def test_pln_row_nan_uses_value_directly(self):
-        """PLN row with NaN Value(PLN): amount_pln = Value * 1.0 (PLN rate)."""
+    def test_base_row_nan_uses_value_directly(self):
+        """PLN row with NaN Value(PLN): amount_base = Value * 1.0 (PLN rate)."""
         raw = pd.DataFrame({
             "Date":         ["2025-06-01"],
             "Type":         ["Expense"],
@@ -612,7 +612,7 @@ class TestLoadTransactionData:
              patch("scheduled_report.load_currency_rates", return_value={"PLN": 1.0}), \
              patch("pandas.read_excel", return_value=raw):
             df = scheduled_report.load_transaction_data()
-        assert df.iloc[0]["amount_pln"] == pytest.approx(300.0)
+        assert df.iloc[0]["amount_base"] == pytest.approx(300.0)
 
     def test_unknown_currency_defaults_rate_1(self):
         """Row with currency not in rates dict: rate defaults to 1.0."""
@@ -631,7 +631,7 @@ class TestLoadTransactionData:
              patch("scheduled_report.load_currency_rates", return_value={"PLN": 1.0}), \
              patch("pandas.read_excel", return_value=raw):
             df = scheduled_report.load_transaction_data()
-        assert df.iloc[0]["amount_pln"] == pytest.approx(77.0)
+        assert df.iloc[0]["amount_base"] == pytest.approx(77.0)
 
 
 class TestLoadCurrencyRates:
@@ -645,7 +645,7 @@ class TestLoadCurrencyRates:
         ws = wb.active
         ws.title = "Lists"
         ws.cell(1, 1, header_of(ListsSchema, "currency"))
-        ws.cell(1, 2, header_of(ListsSchema, "rate_to_pln"))
+        ws.cell(1, 2, header_of(ListsSchema, "rate_to_base"))
         for i, (code, rate) in enumerate([("EUR", 4.25), ("USD", 3.90), ("GBP", 5.10)], 2):
             ws.cell(i, 1, code)
             ws.cell(i, 2, rate)
@@ -656,7 +656,7 @@ class TestLoadCurrencyRates:
         assert rates["USD"] == pytest.approx(3.90)
         assert rates["GBP"] == pytest.approx(5.10)
 
-    def test_returns_pln_fallback_on_exception(self):
+    def test_returns_base_fallback_on_exception(self):
         with patch("scheduled_report.get_excel_path_for_reading", side_effect=Exception("no file")):
             rates = scheduled_report.load_currency_rates()
         assert rates == {"PLN": 1.0}
