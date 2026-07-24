@@ -173,6 +173,43 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
+
+- [ ] **Description match is an unconditional OR** — an Income row with
+      Category "Freelance" and Description "Salary" counts as salary,
+      inflating unaccounted math. Safer: fall back to Description only when
+      Category is empty/blank. Same in `maybe_prompt_cycle_start`.
+      (`cycles.py` `salary_mask`)
+- [ ] **Empty `SALARY_CATEGORY` degenerates** — a blank keyword matches every
+      Income row with a blank Category or Description. Add
+      `if not keyword: return all-False`. (`cycles.py` `salary_mask`)
+- [ ] **Exact-match on Description brittle for statement imports** — bank
+      salary rows often read "SALARY JUL 2024" / "ACME PAYROLL"; the exact
+      `== "salary"` match misses them — the same failure mode PR #36 fixed.
+      Check what the user's bank statement actually titles the salary transfer
+      before the re-import; if longer than the bare word, switch to a
+      word-boundary contains match. (`cycles.py` `salary_mask`)
+- [ ] **Test durability** — `test_detect_matches_salary_in_category_without_
+      description_column` relies on `_cycle_df()` incidentally lacking a
+      Description column; pin with `assert "Description" not in df.columns`.
+      (`tests/test_cycles.py`)
+
+## Follow-up: markdown-validator review notes (PR #37, 2026-07-25)
+
+- [ ] **Escape-stripping order vs backslashes inside code spans** — the
+      validator strips `\X` pairs before locating code spans; a legal
+      `` \` `` inside a code span would mis-pair the remaining backticks.
+      Not hit by current text. (`tests/test_help_markdown.py`)
+- [ ] **Extend the markdown validator to every static MarkdownV2 reply** —
+      /help and /start are covered; `cmd_setcurrency`'s unknown-currency
+      reply and all `<cmd> help` subcommand texts are not. Extract
+      `_find_unescaped_reserved` into a shared test helper and parametrize.
+      (`tests/test_help_markdown.py`, `handlers/*.py`)
+- [ ] **Register a PTB error handler** — "No error handlers are registered"
+      in the VM log; a global `Application.add_error_handler` that logs and
+      replies with a plain-text fallback would have surfaced the /help
+      failure to the user on day one instead of silence. (`bot.py`)
+
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
 Not scheduled — captured for when the user starts building a web UI to
