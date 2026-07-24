@@ -163,7 +163,7 @@ async def _send_detect_prompt(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         amounts_str = " \\+ ".join(_esc(f"{a:,.0f}") for a in entry["amounts"])
         text = (
             f"💰 *{idx} of {total}* — {d}\n"
-            f"Two salary payments: {amounts_str}\n\n"
+            f"{len(entry['amounts'])} salary payments: {amounts_str}\n\n"
             "Does this date start a new budget cycle?"
         )
 
@@ -220,7 +220,7 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         return
 
     if data == "detect:review":
-        candidates = ctx.user_data.get("detect_candidates") or []
+        candidates = ctx.user_data.pop("detect_candidates", None) or []
         ctx.user_data["detect_queue"] = list(candidates)
         ctx.user_data["detect_total"] = len(candidates)
         await query.edit_message_reply_markup(reply_markup=None)

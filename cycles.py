@@ -193,7 +193,6 @@ def detect_cycle_candidates(
             }
         )
 
-    results.sort(key=lambda x: x["date"])
     return results
 
 
