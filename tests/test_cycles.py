@@ -136,7 +136,7 @@ def _cycle_df():
         "Date":     ["2026-06-25", "2026-06-26", "2026-07-01", "2026-07-02", "2026-06-01"],
         "Type":     ["Income",     "Income",     "Expense",    "Savings",    "Expense"],
         "Category": ["Salary",     "Freelance",  "Groceries",  "Bank Deposit", "Groceries"],
-        "_pln":     [6000.0,       900.0,        1500.0,       1000.0,       999.0],
+        "_base":     [6000.0,       900.0,        1500.0,       1000.0,       999.0],
         "IsDone":   [True,         True,         True,         True,         True],
     })
 
@@ -152,7 +152,7 @@ def test_cycle_totals_unaccounted_uses_salary_only():
 
 def test_cycle_totals_negative_unaccounted_means_over_reported():
     df = _cycle_df()
-    df.loc[df["Category"] == "Groceries", "_pln"] = 7000.0
+    df.loc[df["Category"] == "Groceries", "_base"] = 7000.0
     totals = cycle_totals(df, date(2026, 6, 25), date(2026, 7, 23))
     assert totals["unaccounted"] < 0
 

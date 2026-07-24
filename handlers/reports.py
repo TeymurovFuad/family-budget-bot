@@ -22,7 +22,7 @@ from data import (
 from excel_ops import async_update_currency_rates
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel
 from formatters import (
-    format_amount, format_pln_as_currency, budget_progress_bar, savings_emoji,
+    format_amount, format_base_as_currency, budget_progress_bar, savings_emoji,
 )
 
 
@@ -53,20 +53,20 @@ async def _send_cycle_summary(update, ccy: str, df, rates,
     unaccounted  = totals["unaccounted"]
     unacc_note   = " (over-reported)" if unaccounted < 0 else ""
 
-    net_line = (f"✅ *Net:* {format_pln_as_currency(net, ccy, rates)}" if net >= 0
-                else f"⚠️ *Net:* {format_pln_as_currency(net, ccy, rates)}")
+    net_line = (f"✅ *Net:* {format_base_as_currency(net, ccy, rates)}" if net >= 0
+                else f"⚠️ *Net:* {format_base_as_currency(net, ccy, rates)}")
 
     await update.message.reply_text(
         f"📊 *Cycle {label} — Summary* ({ccy})\n"
         f"_{start.isoformat()} → today, day {days_elapsed}_\n\n"
-        f"💰 Income:   `{format_pln_as_currency(income, ccy, rates)}`\n"
-        f"💸 Expenses: `{format_pln_as_currency(expense, ccy, rates)}`\n"
-        f"🏦 Savings:  `{format_pln_as_currency(savings, ccy, rates)}`\n"
+        f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
+        f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
+        f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
         f"{net_line}\n\n"
         f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*\n"
-        f"💼 Salary received: `{format_pln_as_currency(totals['salary'], ccy, rates)}`\n"
-        f"❓ Unaccounted: `{format_pln_as_currency(unaccounted, ccy, rates)}`{unacc_note}\n"
-        f"📉 Daily average spend: `{format_pln_as_currency(daily_avg, ccy, rates)}`",
+        f"💼 Salary received: `{format_base_as_currency(totals['salary'], ccy, rates)}`\n"
+        f"❓ Unaccounted: `{format_base_as_currency(unaccounted, ccy, rates)}`{unacc_note}\n"
+        f"📉 Daily average spend: `{format_base_as_currency(daily_avg, ccy, rates)}`",
         parse_mode="Markdown",
     )
 
@@ -98,9 +98,9 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     sub     = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-    income  = sub[sub["Type"] == "Income"]["_pln"].sum()
-    expense = sub[sub["Type"] == "Expense"]["_pln"].sum()
-    savings = sub[sub["Type"] == "Savings"]["_pln"].sum()
+    income  = sub[sub["Type"] == "Income"]["_base"].sum()
+    expense = sub[sub["Type"] == "Expense"]["_base"].sum()
+    savings = sub[sub["Type"] == "Savings"]["_base"].sum()
     net     = income - expense - savings
     rate    = savings / income if income > 0 else 0
 
@@ -109,17 +109,17 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     days_in_month = calendar.monthrange(now.year, now.month)[1]
     projected     = expense / days_elapsed * days_in_month if days_elapsed > 0 else 0
 
-    net_line = (f"✅ *Net:* {format_pln_as_currency(net, ccy, rates)}" if net >= 0
-                else f"⚠️ *Net:* {format_pln_as_currency(net, ccy, rates)}")
+    net_line = (f"✅ *Net:* {format_base_as_currency(net, ccy, rates)}" if net >= 0
+                else f"⚠️ *Net:* {format_base_as_currency(net, ccy, rates)}")
 
     summary_text = (
         f"📊 *{month} {year} — Summary* ({ccy})\n\n"
-        f"💰 Income:   `{format_pln_as_currency(income, ccy, rates)}`\n"
-        f"💸 Expenses: `{format_pln_as_currency(expense, ccy, rates)}`\n"
-        f"🏦 Savings:  `{format_pln_as_currency(savings, ccy, rates)}`\n"
+        f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
+        f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
+        f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
         f"{net_line}\n\n"
         f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*\n"
-        f"📈 Projected month-end spend: `{format_pln_as_currency(projected, ccy, rates)}`"
+        f"📈 Projected month-end spend: `{format_base_as_currency(projected, ccy, rates)}`"
     )
     await update.message.reply_text(summary_text, parse_mode="Markdown")
 
@@ -152,13 +152,13 @@ async def cmd_week(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if sub.empty:
         await update.message.reply_text("No expense data found for the last 7 days."); return
 
-    by_cat = sub.groupby("Category")["_pln"].sum().sort_values(ascending=False)
+    by_cat = sub.groupby("Category")["_base"].sum().sort_values(ascending=False)
     total  = by_cat.sum()
 
-    lines = [f"📅 *Last 7 days — {format_pln_as_currency(total, ccy, rates)} total*\n"]
+    lines = [f"📅 *Last 7 days — {format_base_as_currency(total, ccy, rates)} total*\n"]
     for cat, amt in by_cat.items():
         pct = amt / total * 100 if total > 0 else 0
-        lines.append(f"• {cat}: `{format_pln_as_currency(amt, ccy, rates)}` ({pct:.0f}%)")
+        lines.append(f"• {cat}: `{format_base_as_currency(amt, ccy, rates)}` ({pct:.0f}%)")
 
     await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
@@ -197,7 +197,7 @@ async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         sub = df[(df["Year"] == year) & (df["Month"] == month)
                  & (df["Type"] == "Expense") & df["IsDone"]]
         title = f"📋 *Budget vs Actual — {month} {year}* ({ccy})\n"
-    by_cat = sub.groupby("Category")["_pln"].sum()
+    by_cat = sub.groupby("Category")["_base"].sum()
     rate   = get_rate(ccy, rates)
 
     lines        = [title]
@@ -205,12 +205,12 @@ async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     total_actual = 0
 
     for cat in load_reference_data()["categories"]:
-        budget_pln = budgets.get(cat, 0)
-        actual_pln = by_cat.get(cat, 0)
-        if budget_pln == 0 and actual_pln == 0:
+        budget_base = budgets.get(cat, 0)
+        actual_base = by_cat.get(cat, 0)
+        if budget_base == 0 and actual_base == 0:
             continue
-        budget = budget_pln / rate
-        actual = actual_pln / rate
+        budget = budget_base / rate
+        actual = actual_base / rate
         total_budget += budget
         total_actual += actual
         over     = actual > budget > 0
@@ -252,7 +252,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     sub = (df[(df["Year"] == year) & (df["Month"] == month)
               & (df["Type"] == "Expense") & df["IsDone"]]
-           .sort_values("_pln", ascending=False).head(5))
+           .sort_values("_base", ascending=False).head(5))
 
     if sub.empty:
         await update.message.reply_text("No expenses found this month."); return
@@ -262,10 +262,10 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         desc     = row.get("Description", "") or ""
         cat      = row.get("Category", "?")
         orig_ccy = str(row.get("Currency", "PLN"))
-        orig_val = row.get("Value", row["_pln"])
+        orig_val = row.get("Value", row["_base"])
         extra    = f" ({orig_val:,.0f} {orig_ccy})" if orig_ccy != "PLN" and orig_ccy != ccy else ""
         lines.append(
-            f"{i}. `{format_pln_as_currency(row['_pln'], ccy, rates)}`{extra} — "
+            f"{i}. `{format_base_as_currency(row['_base'], ccy, rates)}`{extra} — "
             f"{desc or cat} _{cat}_"
         )
 
@@ -296,9 +296,9 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         y  = now.year + ((now.month - delta - 1) // 12)
         ms = month_name(m + 1)
         sub    = df[(df["Year"] == y) & (df["Month"] == ms) & df["IsDone"]]
-        income  = sub[sub["Type"] == "Income"]["_pln"].sum()
-        expense = sub[sub["Type"] == "Expense"]["_pln"].sum()
-        savings_amt = sub[sub["Type"] == "Savings"]["_pln"].sum()
+        income  = sub[sub["Type"] == "Income"]["_base"].sum()
+        expense = sub[sub["Type"] == "Expense"]["_base"].sum()
+        savings_amt = sub[sub["Type"] == "Savings"]["_base"].sum()
         rate    = savings_amt / income * 100 if income > 0 else 0
         month_labels.append(ms[:3])   # abbreviated month name
         rate_values.append(round(rate, 1))
@@ -344,14 +344,14 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ {e}"); return
 
     sub      = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-    income   = sub[sub["Type"] == "Income"]["_pln"].sum()
-    expense  = sub[sub["Type"] == "Expense"]["_pln"].sum()
-    savings  = sub[sub["Type"] == "Savings"]["_pln"].sum()
+    income   = sub[sub["Type"] == "Income"]["_base"].sum()
+    expense  = sub[sub["Type"] == "Expense"]["_base"].sum()
+    savings  = sub[sub["Type"] == "Savings"]["_base"].sum()
     net      = income - expense - savings
     rate     = savings / income if income > 0 else 0
-    by_cat   = sub[sub["Type"] == "Expense"].groupby("Category")["_pln"].sum()
-    by_person = sub[sub["Type"] == "Expense"].groupby("Person")["_pln"].sum()
-    recur    = sub[(sub["Type"] == "Expense") & sub["IsRecurring"].fillna(False).astype(bool)]["_pln"].sum()
+    by_cat   = sub[sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
+    by_person = sub[sub["Type"] == "Expense"].groupby("Person")["_base"].sum()
+    recur    = sub[(sub["Type"] == "Expense") & sub["IsRecurring"].fillna(False).astype(bool)]["_base"].sum()
     discret  = expense - recur
 
     now             = now_utc()
@@ -359,7 +359,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     prev_year       = year if now.month > 1 else year - 1
     prev_month_name = month_name(prev_month_num)
     prev_sub        = df[(df["Year"] == prev_year) & (df["Month"] == prev_month_name) & df["IsDone"]]
-    prev_by_cat     = prev_sub[prev_sub["Type"] == "Expense"].groupby("Category")["_pln"].sum()
+    prev_by_cat     = prev_sub[prev_sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
 
     by_input_ccy = sub[sub["Type"] == "Expense"].groupby("Currency")["Value"].sum()
     multi_ccy    = len(by_input_ccy) > 1
@@ -367,28 +367,28 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lines = [
         f"📑 *Monthly Report — {month} {year}* ({ccy})",
         "━━━━━━━━━━━━━━━━━━━",
-        f"💰 Income:      `{format_pln_as_currency(income, ccy, rates)}`",
-        f"💸 Expenses:    `{format_pln_as_currency(expense, ccy, rates)}`",
-        f"   ↳ Fixed:     `{format_pln_as_currency(recur, ccy, rates)}`",
-        f"   ↳ Variable:  `{format_pln_as_currency(discret, ccy, rates)}`",
-        f"🏦 Savings:     `{format_pln_as_currency(savings, ccy, rates)}`",
-        f"📈 Net:         `{format_pln_as_currency(net, ccy, rates)}`",
+        f"💰 Income:      `{format_base_as_currency(income, ccy, rates)}`",
+        f"💸 Expenses:    `{format_base_as_currency(expense, ccy, rates)}`",
+        f"   ↳ Fixed:     `{format_base_as_currency(recur, ccy, rates)}`",
+        f"   ↳ Variable:  `{format_base_as_currency(discret, ccy, rates)}`",
+        f"🏦 Savings:     `{format_base_as_currency(savings, ccy, rates)}`",
+        f"📈 Net:         `{format_base_as_currency(net, ccy, rates)}`",
         f"📊 Savings rate: *{rate:.0%}* {savings_emoji(rate)}",
         "",
         f"━━━ By Category (vs {prev_month_name}) ━━━",
     ]
     for cat, amt in by_cat.sort_values(ascending=False).items():
-        budget_pln = budgets.get(cat, 0)
+        budget_base = budgets.get(cat, 0)
         pct        = amt / expense * 100 if expense > 0 else 0
-        flag       = " 🔴" if budget_pln and amt > budget_pln else ""
+        flag       = " 🔴" if budget_base and amt > budget_base else ""
         prev_amt   = prev_by_cat.get(cat, 0)
         if prev_amt > 0:
             delta     = amt - prev_amt
-            delta_fmt = format_pln_as_currency(abs(delta), ccy, rates)
+            delta_fmt = format_base_as_currency(abs(delta), ccy, rates)
             mom       = f" ({'+' if delta >= 0 else '-'}{delta_fmt})"
         else:
             mom = ""
-        lines.append(f"• {cat}: `{format_pln_as_currency(amt, ccy, rates)}` ({pct:.0f}%){flag}{mom}")
+        lines.append(f"• {cat}: `{format_base_as_currency(amt, ccy, rates)}` ({pct:.0f}%){flag}{mom}")
 
     if multi_ccy:
         lines += ["", "━━━ Original currencies ━━━"]
@@ -399,7 +399,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines += ["", "━━━ By Person ━━━"]
         for person, amt in by_person.sort_values(ascending=False).items():
             if person:
-                lines.append(f"• {person}: `{format_pln_as_currency(amt, ccy, rates)}`")
+                lines.append(f"• {person}: `{format_base_as_currency(amt, ccy, rates)}`")
 
     report_text = "\n".join(lines)
     MAX = 4000
@@ -550,7 +550,7 @@ async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if sub.empty:
         await update.message.reply_text("No expense data for this month."); return
 
-    by_cat = sub.groupby("Category")["_pln"].sum().sort_values(ascending=False)
+    by_cat = sub.groupby("Category")["_base"].sum().sort_values(ascending=False)
 
     def to_display(pln_val):
         r = rates.get(ccy, 1)
@@ -632,21 +632,21 @@ def _build_range_report(
     )
     sub = df[mask]
 
-    income   = sub[sub["Type"] == "Income"]["_pln"].sum()
-    expense  = sub[sub["Type"] == "Expense"]["_pln"].sum()
-    savings  = sub[sub["Type"] == "Savings"]["_pln"].sum()
+    income   = sub[sub["Type"] == "Income"]["_base"].sum()
+    expense  = sub[sub["Type"] == "Expense"]["_base"].sum()
+    savings  = sub[sub["Type"] == "Savings"]["_base"].sum()
     net      = income - expense - savings
     rate     = savings / income if income > 0 else 0
-    by_cat   = sub[sub["Type"] == "Expense"].groupby("Category")["_pln"].sum()
+    by_cat   = sub[sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
 
     lines = [
         f"📅 *Range Report — {label}* ({ccy})",
         f"_{start} → {end}_",
         "━━━━━━━━━━━━━━━━━━━",
-        f"💰 Income:   `{format_pln_as_currency(income, ccy, rates)}`",
-        f"💸 Expenses: `{format_pln_as_currency(expense, ccy, rates)}`",
-        f"🏦 Savings:  `{format_pln_as_currency(savings, ccy, rates)}`",
-        f"📈 Net:      `{format_pln_as_currency(net, ccy, rates)}`",
+        f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`",
+        f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`",
+        f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`",
+        f"📈 Net:      `{format_base_as_currency(net, ccy, rates)}`",
         f"📊 Savings rate: *{rate:.0%}* {savings_emoji(rate)}",
     ]
 
@@ -654,9 +654,9 @@ def _build_range_report(
         lines.append("\n━━━ Top Categories ━━━")
         for cat, amt in by_cat.sort_values(ascending=False).head(8).items():
             pct = amt / expense * 100 if expense > 0 else 0
-            budget_pln = budgets.get(cat, 0)
-            flag       = " 🔴" if budget_pln and amt > budget_pln else ""
-            lines.append(f"• {cat}: `{format_pln_as_currency(amt, ccy, rates)}` ({pct:.0f}%){flag}")
+            budget_base = budgets.get(cat, 0)
+            flag       = " 🔴" if budget_base and amt > budget_base else ""
+            lines.append(f"• {cat}: `{format_base_as_currency(amt, ccy, rates)}` ({pct:.0f}%){flag}")
 
     return "\n".join(lines)
 
@@ -788,22 +788,22 @@ async def check_budget_alert(update, category: str, ccy: str, rates: dict) -> No
             return
         now  = now_utc()
         year, month = now.year, month_name(now.month)
-        spent_pln = df[
+        spent_base = df[
             (df["Year"] == year) & (df["Month"] == month) &
             (df["Category"] == category) & (df["Type"] == "Expense") & df["IsDone"]
-        ]["_pln"].sum()
-        pct = spent_pln / budget if budget > 0 else 0
+        ]["_base"].sum()
+        pct = spent_base / budget if budget > 0 else 0
         if pct >= 1.0:
             await update.message.reply_text(
                 f"🚨 *{category}* budget exceeded!\n"
-                f"{format_pln_as_currency(spent_pln, ccy, rates)} spent of "
-                f"{format_pln_as_currency(budget, ccy, rates)} ({pct*100:.0f}%)",
+                f"{format_base_as_currency(spent_base, ccy, rates)} spent of "
+                f"{format_base_as_currency(budget, ccy, rates)} ({pct*100:.0f}%)",
                 parse_mode="Markdown"
             )
         elif pct >= 0.8:
             await update.message.reply_text(
                 f"⚠️ *{category}* at {pct*100:.0f}% of budget — "
-                f"{format_pln_as_currency(budget - spent_pln, ccy, rates)} remaining",
+                f"{format_base_as_currency(budget - spent_base, ccy, rates)} remaining",
                 parse_mode="Markdown"
             )
     except Exception as e:

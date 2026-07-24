@@ -8,7 +8,7 @@ from telegram.ext import Application
 
 from config import ALLOWED_USERS, get_display_currency, log
 from data import load_data, load_rates, load_budgets, now_utc, current_year_and_month, month_name
-from formatters import format_pln_as_currency, savings_emoji
+from formatters import format_base_as_currency, savings_emoji
 
 
 async def send_weekly_report(app: Application):
@@ -27,24 +27,24 @@ async def send_weekly_report(app: Application):
         ccy = get_display_currency(uid)
         try:
             sub        = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-            expense    = sub[sub["Type"] == "Expense"]["_pln"].sum()
-            income     = sub[sub["Type"] == "Income"]["_pln"].sum()
-            savings    = sub[sub["Type"] == "Savings"]["_pln"].sum()
-            by_cat     = sub[sub["Type"] == "Expense"].groupby("Category")["_pln"].sum()
+            expense    = sub[sub["Type"] == "Expense"]["_base"].sum()
+            income     = sub[sub["Type"] == "Income"]["_base"].sum()
+            savings    = sub[sub["Type"] == "Savings"]["_base"].sum()
+            by_cat     = sub[sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
             daily_rate = expense / now.day if now.day > 0 else 0
             projected  = daily_rate * calendar.monthrange(now.year, now.month)[1]
 
             lines = [
                 f"📅 *Weekly check-in — {month} {year}* ({ccy})\n",
-                f"💸 Spent so far:  `{format_pln_as_currency(expense, ccy, rates)}`",
-                f"💰 Income so far: `{format_pln_as_currency(income, ccy, rates)}`",
-                f"🏦 Saved:         `{format_pln_as_currency(savings, ccy, rates)}`",
-                f"📈 Projected monthly spend: `{format_pln_as_currency(projected, ccy, rates)}`\n",
+                f"💸 Spent so far:  `{format_base_as_currency(expense, ccy, rates)}`",
+                f"💰 Income so far: `{format_base_as_currency(income, ccy, rates)}`",
+                f"🏦 Saved:         `{format_base_as_currency(savings, ccy, rates)}`",
+                f"📈 Projected monthly spend: `{format_base_as_currency(projected, ccy, rates)}`\n",
                 "Top categories:",
             ]
             for cat, amt in by_cat.sort_values(ascending=False).head(4).items():
                 flag = " 🔴" if budgets.get(cat, 0) and amt > budgets[cat] else ""
-                lines.append(f"• {cat}: `{format_pln_as_currency(amt, ccy, rates)}`{flag}")
+                lines.append(f"• {cat}: `{format_base_as_currency(amt, ccy, rates)}`{flag}")
 
             await app.bot.send_message(chat_id=uid, text="\n".join(lines), parse_mode="Markdown")
         except Exception:
@@ -68,19 +68,19 @@ async def send_monthly_summary(app: Application):
         ccy = get_display_currency(uid)
         try:
             sub     = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
-            income  = sub[sub["Type"] == "Income"]["_pln"].sum()
-            expense = sub[sub["Type"] == "Expense"]["_pln"].sum()
-            savings = sub[sub["Type"] == "Savings"]["_pln"].sum()
+            income  = sub[sub["Type"] == "Income"]["_base"].sum()
+            expense = sub[sub["Type"] == "Expense"]["_base"].sum()
+            savings = sub[sub["Type"] == "Savings"]["_base"].sum()
             net     = income - expense - savings
             rate    = savings / income if income > 0 else 0
             await app.bot.send_message(
                 chat_id=uid,
                 text=(
                     f"🗓 *{month} {year} — Final Report* ({ccy})\n\n"
-                    f"💰 Income:   `{format_pln_as_currency(income, ccy, rates)}`\n"
-                    f"💸 Expenses: `{format_pln_as_currency(expense, ccy, rates)}`\n"
-                    f"🏦 Savings:  `{format_pln_as_currency(savings, ccy, rates)}`\n"
-                    f"📈 Net:      `{format_pln_as_currency(net, ccy, rates)}`\n\n"
+                    f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
+                    f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
+                    f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
+                    f"📈 Net:      `{format_base_as_currency(net, ccy, rates)}`\n\n"
                     f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*\n\n"
                     "Use /report for the full breakdown."
                 ),

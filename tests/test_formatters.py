@@ -13,7 +13,7 @@ import formatters
 from formatters import (
     format_amount,
     convert,
-    format_pln_as_currency,
+    format_base_as_currency,
     budget_progress_bar,
     savings_emoji,
     sanitize_description,
@@ -25,7 +25,7 @@ from formatters import (
 
 class TestFormatAmount:
 
-    def test_integer_amount_pln(self):
+    def test_integer_amount_base(self):
         assert format_amount(150, "PLN") == "150 PLN"
 
     def test_amount_with_thousands_separator(self):
@@ -42,7 +42,7 @@ class TestFormatAmount:
         result = format_amount(10000, "USD")
         assert "10,000" in result
 
-    def test_default_currency_is_pln(self):
+    def test_default_currency_is_base(self):
         assert format_amount(50) == "50 PLN"
 
 
@@ -51,7 +51,7 @@ class TestFormatAmount:
 
 class TestConvert:
 
-    def test_pln_to_pln_returns_same_value(self, monkeypatch):
+    def test_base_to_base_returns_same_value(self, monkeypatch):
         monkeypatch.setattr(data_module, "get_rate", lambda ccy, rates: 1.0)
         assert convert(100.0, "PLN", {}) == 100.0
 
@@ -71,20 +71,20 @@ class TestConvert:
         assert convert(300.0, "BAD", {}) == pytest.approx(300.0)
 
 
-# ── format_pln_as_currency ────────────────────────────────────────────────────
+# ── format_base_as_currency ────────────────────────────────────────────────────
 
 
 class TestFormatPlnAsCurrency:
 
-    def test_pln_to_pln_formats_unchanged(self, monkeypatch):
+    def test_base_to_base_formats_unchanged(self, monkeypatch):
         monkeypatch.setattr(data_module, "get_rate", lambda ccy, rates: 1.0)
-        result = format_pln_as_currency(500.0, "PLN", {})
+        result = format_base_as_currency(500.0, "PLN", {})
         assert result == "500 PLN"
 
-    def test_pln_to_eur_converts_and_formats(self, monkeypatch):
+    def test_base_to_eur_converts_and_formats(self, monkeypatch):
         monkeypatch.setattr(data_module, "get_rate", lambda ccy, rates: 4.0)
         # 400 PLN / 4.0 = 100 EUR
-        result = format_pln_as_currency(400.0, "EUR", {"EUR": 4.0})
+        result = format_base_as_currency(400.0, "EUR", {"EUR": 4.0})
         assert result == "100 EUR"
 
 

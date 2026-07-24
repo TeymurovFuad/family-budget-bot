@@ -10,7 +10,7 @@ from ai_parser import parse_quick
 from config import auth, auth_write, get_display_currency, log
 from data import load_rates, load_reference_data
 from excel_ops import append_transaction
-from formatters import format_pln_as_currency, sanitize_description
+from formatters import format_base_as_currency, sanitize_description
 import merchant_map
 from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
@@ -101,11 +101,11 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # Build a presentation layer for user confirmation.
     ccy   = get_display_currency(update.effective_user.id)
     rates = load_rates()
-    val_pln = normalized["value"]
+    val_base = normalized["value"]
     if normalized["currency"] != "PLN" and normalized["currency"] in rates:
-        val_pln = normalized["value"] * rates[normalized["currency"]]
+        val_base = normalized["value"] * rates[normalized["currency"]]
 
-    label    = format_pln_as_currency(val_pln, ccy, rates)
+    label    = format_base_as_currency(val_base, ccy, rates)
     desc     = normalized.get("description", "")
     cat      = normalized.get("category", "")
     person   = normalized.get("person", "") or "household"

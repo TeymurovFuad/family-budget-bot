@@ -78,13 +78,13 @@ class TestDoAppendTransaction:
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         assert ws.cell(2, headers["IsDone"]).value is True
 
-    def test_value_pln_column_contains_formula(self, excel_path, sample_transaction):
+    def test_value_base_column_contains_formula(self, excel_path, sample_transaction):
         _do_append_transaction(sample_transaction)
         # Load WITHOUT data_only to see the raw formula
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert isinstance(formula, str)
         assert formula.startswith("=")
 
@@ -270,11 +270,11 @@ class TestAppendTransactionsBatch:
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert isinstance(formula, str)
         assert formula.startswith("=")
 
-    def test_batch_value_pln_formula_references_i2_j100(self, excel_path):
+    def test_batch_value_base_formula_references_i2_j100(self, excel_path):
         transactions = [
             Transaction(
                 date=datetime.date(2024, 6, 1),
@@ -288,7 +288,7 @@ class TestAppendTransactionsBatch:
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert "$H$2:$I$100" in formula
 
     def test_batch_date_modified_is_datetime_not_string(self, excel_path):
@@ -350,7 +350,7 @@ class TestReplayRecoveryQueue:
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert "$H$2:$I$100" in formula
         assert "$I$2:$J$100" not in formula
 

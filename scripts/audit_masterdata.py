@@ -57,7 +57,7 @@ for r in range(2, ws_md.max_row + 1):
     per  = ws_md.cell(r, hdr["Person"]).value
     ccy  = str(ws_md.cell(r, hdr["Currency"]).value or "")
     desc = str(ws_md.cell(r, hdr["Description"]).value or "")
-    vpln = ws_md.cell(r, hdr.get("Value (PLN)", 12)).value
+    vpln = ws_md.cell(r, hdr.get("Value (base)", 12)).value
 
     if cat and cat not in categories:
         flag("unknown_category", r, f"category={cat!r} ({typ}, {val}, {desc[:40]!r})")

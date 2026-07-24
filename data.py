@@ -67,8 +67,8 @@ def get_rate(ccy: str, rates: dict[str, float]) -> float:
 
 def load_data() -> pd.DataFrame:
     """
-    Load MasterData sheet. All aggregations use the '_pln' column.
-    Value (PLN) contains Excel formulas — pandas reads cached results, which may
+    Load MasterData sheet. All aggregations use the '_base' column.
+    Value (base) contains Excel formulas — pandas reads cached results, which may
     be NaN for rows never opened in Excel. Falls back to computing from Value *
     exchange rate so reports never show 0 due to stale formula cache.
     """
@@ -77,26 +77,26 @@ def load_data() -> pd.DataFrame:
 
     df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
 
-    if "Value (PLN)" in df.columns:
-        df["_pln"] = pd.to_numeric(df["Value (PLN)"], errors="coerce")
+    if "Value (base)" in df.columns:
+        df["_base"] = pd.to_numeric(df["Value (base)"], errors="coerce")
     else:
-        df["_pln"] = pd.to_numeric(df["Value"], errors="coerce")
+        df["_base"] = pd.to_numeric(df["Value"], errors="coerce")
 
     if "Currency" not in df.columns:
         df["Currency"] = "PLN"
     df["Currency"] = df["Currency"].fillna("PLN")
 
-    # Recompute _pln for any row where the formula cache is missing
-    missing = df["_pln"].isna() & df["Value"].notna()
+    # Recompute _base for any row where the formula cache is missing
+    missing = df["_base"].isna() & df["Value"].notna()
     if missing.any():
         rates = load_rates()
-        df.loc[missing, "_pln"] = df.loc[missing].apply(
+        df.loc[missing, "_base"] = df.loc[missing].apply(
             lambda r: r["Value"] * rates.get(str(r["Currency"]).upper(), 1.0),
             axis=1,
         )
 
     df["Year"]  = pd.to_numeric(df["Year"],  errors="coerce").astype("Int64")
-    df = df.dropna(subset=["_pln", "Type", "Year", "Month"])
+    df = df.dropna(subset=["_base", "Type", "Year", "Month"])
     df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
 
     return df

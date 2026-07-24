@@ -117,8 +117,8 @@ class TestE2EFullTransactionFlow:
         for row in range(2, 5):
             assert _cell(ws, row, "IsDone", h) is True
 
-    def test_value_pln_formula_is_set_on_all_rows(self, excel_path):
-        """Value (PLN) column must contain Excel formulas, not plain numbers."""
+    def test_value_base_formula_is_set_on_all_rows(self, excel_path):
+        """Value (base) column must contain Excel formulas, not plain numbers."""
         for i, cat in enumerate(["Groceries", "Transport", "Housing"], 1):
             txn = Transaction(
                 date=datetime.date(2024, 6, i),
@@ -134,7 +134,7 @@ class TestE2EFullTransactionFlow:
         h = _headers(ws)
 
         for row in range(2, 5):
-            formula = _cell(ws, row, "Value (PLN)", h)
+            formula = _cell(ws, row, "Value (base)", h)
             assert isinstance(formula, str), f"Row {row}: expected formula string"
             assert formula.startswith("="), f"Row {row}: formula should start with ="
 
@@ -319,7 +319,7 @@ class TestE2EBatchAppend:
         values = sorted(r["Value"] for r in results)
         assert values == pytest.approx([100.0, 200.0, 300.0])
 
-    def test_batch_each_row_has_value_pln_formula(self, excel_path):
+    def test_batch_each_row_has_value_base_formula(self, excel_path):
         transactions = [
             Transaction(
                 date=datetime.date(2024, 6, i),
@@ -337,7 +337,7 @@ class TestE2EBatchAppend:
         h = _headers(ws)
 
         for row in range(2, 5):
-            formula = _cell(ws, row, "Value (PLN)", h)
+            formula = _cell(ws, row, "Value (base)", h)
             assert isinstance(formula, str)
             assert formula.startswith("=")
 

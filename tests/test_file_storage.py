@@ -54,7 +54,7 @@ class TestCreateBlankExcel:
         expected = [
             "Date", "Year", "Month", "Value", "Type", "Category",
             "Person", "Description", "IsRecurring", "IsDone",
-            "Currency", "Value (PLN)", "Date Modified (UTC)",
+            "Currency", "Value (base)", "Date Modified (UTC)",
         ]
         actual = [ws.cell(1, c).value for c in range(1, 14)]
         assert actual == expected
@@ -77,12 +77,12 @@ class TestCreateBlankExcel:
     def test_lists_sheet_has_rate_header_in_col_i(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
-        assert ws.cell(1, 9).value == "Rate to PLN"
+        assert ws.cell(1, 9).value == "Rate to base"
 
     def test_lists_sheet_has_budget_header_in_col_d(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
-        assert ws.cell(1, 4).value == "Budget (PLN)"
+        assert ws.cell(1, 4).value == "Budget (base)"
 
     def test_lists_sheet_col_g_is_empty(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
@@ -100,7 +100,7 @@ class TestCreateBlankExcel:
         assert ws.cell(13, 1).value == "Dec"
 
     def test_lists_sheet_budget_column_is_blank_by_default(self, excel_path):
-        # Budget (PLN) col is present but unpopulated — user fills in limits
+        # Budget (base) col is present but unpopulated — user fills in limits
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
         for c in range(1, ws.max_column + 1):
@@ -331,7 +331,7 @@ def test_repair_template_keeps_validation_ranges(tmp_path, monkeypatch):
     ws.title = "MasterData"
     for i, h in enumerate(["Date", "Year", "Month", "Value", "Type", "Category",
                            "Person", "Description", "IsRecurring", "IsDone",
-                           "Currency", "Value (PLN)", "Date Modified (UTC)"], 1):
+                           "Currency", "Value (base)", "Date Modified (UTC)"], 1):
         ws.cell(1, i, h)
     for r in range(2, 500):
         ws.cell(r, 4, 1.0)

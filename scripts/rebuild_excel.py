@@ -153,7 +153,7 @@ def rebuild_guide(ws):
         ('I', 'IsRecurring',     'TRUE / FALSE'),
         ('J', 'IsDone',          'TRUE = confirmed, FALSE = pending'),
         ('K', 'Currency',        'Dropdown from Lists col I'),
-        ('L', 'Value (PLN)',     'Formula: Value × exchange rate'),
+        ('L', 'Value (base)',     'Formula: Value × exchange rate'),
         ('M', 'Date Modified',   'Auto-set by bot (UTC)'),
     ]:
         body_row(r, f'{col_ltr}  {header}', desc, green_left=True); r += 1
@@ -524,7 +524,7 @@ def _run(source: Path, dest: Path):
     NEW_HEADERS = [
         "Date", "Year", "Month", "Value", "Type", "Category",
         "Person", "Description", "IsRecurring", "IsDone",
-        "Currency", "Value (PLN)", "Date Modified (UTC)",
+        "Currency", "Value (base)", "Date Modified (UTC)",
     ]
 
     # Rates dict for recomputing Value(PLN) where missing
@@ -542,7 +542,7 @@ def _run(source: Path, dest: Path):
         recur_val    = row.get("IsRecurring")
         done_val     = row.get("IsDone")
         ccy_val      = row.get("Currency") or "PLN"
-        pln_val      = row.get("Value (PLN)")
+        pln_val      = row.get("Value (base)")
         mod_val      = row.get("Date Modified (UTC)")
 
         # Recompute Value(PLN) if missing

@@ -86,6 +86,67 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 - Security/PII audit 2026-07-22: clean. One low-priority nit: `deploy/budget-bot.service`
   hardcodes `User=ubuntu` — reveals VM OS-user convention, no IP/credentials.
 
+## Bugs (confirmed live, 2026-07-24)
+
+- [ ] **Quick-add doesn't recognise Savings as transaction type** — user typed
+      "2380 added to savings 23 July 2026"; bot replied: ❌ Unknown category
+      'Savings'. Use one of: Groceries, Housing, …
+      Root cause: the AI parser maps "savings" / "saved" to the Category field
+      instead of the Type field. "Savings" is a valid TxnType (Lists sheet B
+      column), not a category.
+      Expected: parser sets type="Savings", category="" (let user pick or
+      default to "Other"); the shared validator should also catch a
+      type=Expense / category=Savings mismatch and promote type.
+      Workaround: use /add and manually pick Type=Savings step by step.
+
+- [ ] **/cycle detect shows wrong salary candidates for Jul 2024** — bot
+      prompted "📅 Jul 2024 — Which income was your salary?" and offered:
+        2024-08-01 - 11,871 PLN
+        2024-08-01 - 11,856 PLN
+      with payday window 2024-07-20 → 2024-08-05.
+      Actual Jul 2024 salary: 12,027 PLN on 2024-07-01 — falls BEFORE the
+      window start (2024-07-20) and was therefore missed. The two candidates
+      shown are the August salaries (2024-08-01), both inside the Jul window
+      because the window extends to 2024-08-05; there are two because Aug has
+      two salary entries (11,871 + 11,856 PLN).
+      Root cause: the payday window for the first detected cycle is anchored
+      too late, excluding salaries paid at the very start of the month (day 1).
+      Fix: widen the window backward (e.g. anchor at the 1st of the target
+      month instead of the 20th) for the first cycle, or let the first-cycle
+      search use a broader range.
+      (`cycles.py` `detect_cycle_candidates` window logic)
+
+## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
+
+Not scheduled — captured for when the user starts building a web UI to
+replace/supplement Excel as the primary interface.
+
+- **Trigger for this idea**: discussed switching the datastore from Excel to
+  SQLite as part of the PLN/base-currency rename work. Conclusion: Excel stays
+  the source of truth for now — the household edits the spreadsheet directly,
+  and $0-hosting depends on no separate DB process. Excel's exact-header-match
+  fragility (the whole reason this rename PR needed a migration script) is a
+  real cost, but not enough on its own to justify a full datastore swap today.
+- **The user's actual plan**: build a web UI later. When that happens, SQLite
+  becomes the natural backing store for the UI (proper schema, migrations,
+  no VLOOKUP/exact-header-match fragility, safer concurrent writes than the
+  current `atomic_save` + recovery-queue workaround). Excel then becomes an
+  export target rather than the primary store — an "Export to Excel" button
+  instead of Excel-as-database.
+- **Suggested approach — step by step, not a big-bang rewrite**:
+  1. Add SQLite as a **parallel** datastore alongside Excel — writes go to
+     both, reads still come from Excel (bot behavior unchanged, zero risk).
+  2. Build the web UI against SQLite only, once schema/migrations are solid.
+  3. Once the web UI is the primary way transactions are entered, flip reads
+     to SQLite and add an explicit "Export to Excel" button for anyone who
+     still wants the spreadsheet view.
+  4. Retire dual-write once SQLite is trusted as the sole source of truth.
+- **Open questions to resolve before starting**: schema design for
+  MasterData/Lists/Cycles equivalents; how `Value (base)` / rate conversion
+  formulas (currently Excel VLOOKUP) get reimplemented in SQL or the app
+  layer; whether the recovery-queue mechanism is still needed once SQLite
+  has real transactions.
+
 ## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
 
 - [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
@@ -748,6 +809,45 @@ wording need a second pass — deferred to avoid scope creep in PR #32.
       is already UTC; verify no other handler surfaces a timezone name to the user. If
       any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
       UTC or a generic "your local time" phrase.
+
+- [ ] **Default-currency fallback hardcodes PLN** — `data.py` (`fillna("PLN")`),
+      `models.py` / `states.py` transaction defaults, `scheduled_report.py` fallback,
+      `excel_schema.py` writer default (`row.get("currency", "PLN")`). For a public repo
+      the fallback must come from the `DISPLAY_CURRENCY` setting (already prompted in
+      `setup_bot.py`), not a hardcoded currency — swapping PLN for EUR/USD would repeat
+      the same mistake. One source of truth: `settings.DISPLAY_CURRENCY`.
+
+### Additional PLN hardcodings found in scan (2026-07-24)
+
+### IMPROVEMENT — `goal_pln` field and "Goal (PLN)" column header in ListsSchema
+- `excel_schema.py:236`: `goal_pln: Any = col("Goal (PLN)")` — the Pydantic field name
+  and the Excel column header both embed "PLN". Any non-PLN user sees a "Goal (PLN)" column
+  header in their spreadsheet and the schema attribute name is misleading.
+- Expected: rename column header to "Goal" (or "Goal (base)") and field to `goal_base`;
+  migration script or `ensure_lists_sheet` rename on first open so existing workbooks
+  are upgraded transparently.
+
+### IMPROVEMENT — `/cycle detect` inline-button labels hardcode PLN
+- `handlers/cycle.py:144`: unambiguous-month summary line renders
+  `{amount:,.0f} PLN` verbatim.
+- `handlers/cycle.py:178`: per-candidate inline-button label renders
+  `{date} — {amount:,.0f} PLN` verbatim.
+- Expected: replace the bare "PLN" with the configured display currency
+  (`get_display_currency()`) so detect labels match all other bot amount strings.
+
+### IMPROVEMENT — AI parser prompt hardcodes Polish "zł/zl = PLN" shorthand
+- `ai_parser.py:280`: the bulk-parse system prompt includes `"zł/zl = PLN"` as a
+  currency alias hint. This is Poland-specific; a non-PLN user will never type "zł"
+  and the hint adds noise that could mislead the model into defaulting to PLN.
+- Expected: omit the alias entirely, or make it conditional on PLN appearing in
+  `lists["currencies"]`.
+
+### IMPROVEMENT — Template script resets Dashboard Currency filter to PLN
+- `scripts/make_template.py:95`: `ws.cell(2, c + 1, "PLN")` hard-resets the
+  Dashboard Currency dropdown cell to "PLN" when generating or resetting the template.
+  A non-PLN user who regenerates the template loses their currency filter setting.
+- Expected: read the first entry from the Lists currencies range and use that as the
+  reset value, or leave the cell blank (showing all currencies).
 
 ## Follow-up PR: cycle-aware report gaps (found 2026-07-24)
 

@@ -66,7 +66,7 @@ def header_of(schema_cls, field_name: str) -> str:
 
 def load_currency_rates_from_path(excel_path) -> dict[str, float]:
     """
-    Read {currency_code: rate_to_pln} from the Lists sheet.
+    Read {currency_code: rate_to_base} from the Lists sheet.
     Uses ListsSchema to locate columns by header name — no positional assumptions.
     Returns {"PLN": 1.0} on any failure.
     """
@@ -77,7 +77,7 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
         ws = wb["Lists"]
         idx      = col_indices(ws, ListsSchema)
         ccy_col  = idx.get("currency")
-        rate_col = idx.get("rate_to_pln")
+        rate_col = idx.get("rate_to_base")
         if not ccy_col or not rate_col:
             return {"PLN": 1.0}
         rates: dict[str, float] = {}
@@ -104,7 +104,7 @@ def lists_currency_range(wb) -> str:
     from openpyxl.utils import get_column_letter
     idx      = col_indices(wb["Lists"], ListsSchema)
     ccy_col  = idx.get("currency",    8)
-    rate_col = idx.get("rate_to_pln", 9)
+    rate_col = idx.get("rate_to_base", 9)
     return f"${get_column_letter(ccy_col)}$2:${get_column_letter(rate_col)}$100"
 
 
@@ -150,7 +150,7 @@ def extend_validation_ranges(ws, last_row: int, margin: int = _VALIDATION_MARGIN
 def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     """
     Write one transaction dict into MasterData row r.
-    The single source of truth for column layout and the Value (PLN) formula —
+    The single source of truth for column layout and the Value (base) formula —
     used by single append, batch append, and recovery-queue replay.
     """
     from datetime import datetime, timezone
@@ -186,10 +186,10 @@ def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     ccy_col = c("currency", 11)
     ws.cell(r, ccy_col, row.get("currency", "PLN"))
 
-    vpln_col     = c("value_pln", 12)
+    vbase_col    = c("value_base", 12)
     value_letter = get_column_letter(c("value", 4))
     ccy_letter   = get_column_letter(ccy_col)
-    ws.cell(r, vpln_col,
+    ws.cell(r, vbase_col,
         f'=IF(OR({ccy_letter}{r}="",{ccy_letter}{r}="PLN"),'
         f'{value_letter}{r},'
         f'{value_letter}{r}*VLOOKUP({ccy_letter}{r},Lists!{lu_range},2,0))'
@@ -214,7 +214,7 @@ class MasterDataSchema:
     is_recurring:  Any = col("IsRecurring")
     is_done:       Any = col("IsDone")
     currency:      Any = col("Currency")
-    value_pln:     Any = col("Value (PLN)")
+    value_base:    Any = col("Value (base)")
     date_modified: Any = col("Date Modified (UTC)")
 
 
@@ -226,11 +226,11 @@ class ListsSchema:
     months:      Any = col("Months")
     txn_types:   Any = col("TxnTypes")
     categories:  Any = col("Categories")
-    budget_pln:  Any = col("Budget (PLN)")
+    budget_base: Any = col("Budget (base)")
     persons:     Any = col("Persons")
     years:       Any = col("Years")
     currency:    Any = col("Currency")
-    rate_to_pln: Any = col("Rate to PLN")
+    rate_to_base: Any = col("Rate to base")
     goal_name:   Any = col("Goal Name")
     alloc_pct:   Any = col("Alloc %")
     goal_pln:    Any = col("Goal (PLN)")

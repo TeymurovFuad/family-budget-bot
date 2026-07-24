@@ -228,17 +228,17 @@ def detect_cycle_candidates(
             candidates = [
                 {
                     "date": row["_date"],
-                    "amount": round(float(row["_pln"]), 2),
+                    "amount": round(float(row["_base"]), 2),
                     "description": str(row.get("Description", "")),
                 }
             ]
         else:
             unambiguous = False
-            top3 = income_in_window.nlargest(3, "_pln")
+            top3 = income_in_window.nlargest(3, "_base")
             candidates = [
                 {
                     "date": r["_date"],
-                    "amount": round(float(r["_pln"]), 2),
+                    "amount": round(float(r["_base"]), 2),
                     "description": str(r.get("Description", "")),
                 }
                 for _, r in top3.iterrows()
@@ -306,7 +306,7 @@ def record_cycle_starts_batch(starts: list[date]) -> int:
 def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
     """
     Aggregate MasterData over [start, end] (inclusive; end is today for the
-    open-ended current cycle). All sums use the _pln column.
+    open-ended current cycle). All sums use the _base column.
 
     unaccounted = salary received − tracked expenses − tracked savings;
     negative means over-reported.
@@ -318,14 +318,14 @@ def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
         & (dates.dt.date <= end)
         & df["IsDone"]
     ]
-    income  = sub[sub["Type"] == "Income"]["_pln"].sum()
-    expense = sub[sub["Type"] == "Expense"]["_pln"].sum()
-    savings = sub[sub["Type"] == "Savings"]["_pln"].sum()
+    income  = sub[sub["Type"] == "Income"]["_base"].sum()
+    expense = sub[sub["Type"] == "Expense"]["_base"].sum()
+    savings = sub[sub["Type"] == "Savings"]["_base"].sum()
     salary_mask = (sub["Type"] == "Income") & (
         sub["Category"].astype(str).str.strip().str.lower()
         == settings.SALARY_CATEGORY.strip().lower()
     )
-    salary = sub[salary_mask]["_pln"].sum()
+    salary = sub[salary_mask]["_base"].sum()
     return {
         "sub": sub,
         "income": income,

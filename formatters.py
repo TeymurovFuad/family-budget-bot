@@ -15,7 +15,7 @@ def convert(pln_amount: float, ccy: str, rates: dict) -> float:
     return pln_amount / rate if rate else pln_amount
 
 
-def format_pln_as_currency(pln_amount: float, ccy: str, rates: dict) -> str:
+def format_base_as_currency(pln_amount: float, ccy: str, rates: dict) -> str:
     return format_amount(convert(pln_amount, ccy, rates), ccy)
 
 

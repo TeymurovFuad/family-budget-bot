@@ -53,7 +53,7 @@ def _make_txn(value=100.0, currency="PLN", txn_type="Expense",
 
 class TestLoadData:
 
-    def test_expense_pln_load_data_row_present(self, excel_path):
+    def test_expense_base_load_data_row_present(self, excel_path):
         append_transactions_batch([_make_txn(100.0, "PLN", "Expense", "Groceries", datetime.date(2024, 6, 15))])
         df = load_data()
         assert len(df) == 1
@@ -63,7 +63,7 @@ class TestLoadData:
         assert int(df.iloc[0]["Year"]) == 2024
         assert df.iloc[0]["Month"] == "Jun"
 
-    def test_expense_pln_is_done_true(self, excel_path):
+    def test_expense_base_is_done_true(self, excel_path):
         append_transactions_batch([_make_txn()])
         df = load_data()
         assert bool(df.iloc[0]["IsDone"]) is True
@@ -96,17 +96,17 @@ class TestLoadData:
         assert int(df.iloc[0]["Year"]) == 2024
         assert df.iloc[0]["Month"] == "Mar"
 
-    def test_load_data_pln_currency_computes_pln(self, excel_path):
+    def test_load_data_base_currency_computes_base(self, excel_path):
         append_transactions_batch([_make_txn(200.0, "PLN")])
         df = load_data()
         # Formula is NaN when read by pandas; fallback: Value * 1.0 = 200.0
-        assert df.iloc[0]["_pln"] == pytest.approx(200.0)
+        assert df.iloc[0]["_base"] == pytest.approx(200.0)
 
-    def test_load_data_eur_transaction_computes_pln_via_rate(self, excel_path):
+    def test_load_data_eur_transaction_computes_base_via_rate(self, excel_path):
         append_transactions_batch([_make_txn(100.0, "EUR")])
         df = load_data()
         # EUR rate from blank excel = 4.28; fallback: 100 * 4.28 = 428.0
-        assert df.iloc[0]["_pln"] == pytest.approx(428.0)
+        assert df.iloc[0]["_base"] == pytest.approx(428.0)
 
 
 # ── E2E: delete then query ────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ class TestBatchAppend:
         ]
         append_transactions_batch(txns)
         df = load_data()
-        pln_values = sorted(df["_pln"].tolist())
+        pln_values = sorted(df["_base"].tolist())
         assert pln_values == pytest.approx([50.0, 100.0, 150.0])
 
 
@@ -187,7 +187,7 @@ class TestBatchAppend:
 
 class TestScheduledReport:
 
-    def test_load_currency_rates_returns_pln(self, excel_path):
+    def test_load_currency_rates_returns_base(self, excel_path):
         rates = load_currency_rates()
         assert "PLN" in rates
         assert rates["PLN"] == pytest.approx(1.0)
@@ -200,7 +200,7 @@ class TestScheduledReport:
         append_transactions_batch([_make_txn(50.0, "EUR")])
         df = load_transaction_data()
         assert not df.empty
-        assert df.iloc[0]["amount_pln"] == pytest.approx(50.0 * 4.28)
+        assert df.iloc[0]["amount_base"] == pytest.approx(50.0 * 4.28)
 
     def test_build_weekly_report_contains_projected(self, excel_path):
         today = datetime.datetime.now()
@@ -321,7 +321,7 @@ class TestSendDailyReminder:
         df = pd.DataFrame({
             "Date": [today_dt],
             "Value": [100.0],
-            "_pln": [100.0],
+            "_base": [100.0],
             "Type": ["Expense"],
             "Year": pd.array([today.year], dtype="Int64"),
             "Month": ["Jun"],
@@ -343,7 +343,7 @@ class TestSendDailyReminder:
         df = pd.DataFrame({
             "Date": [old_date],
             "Value": [100.0],
-            "_pln": [100.0],
+            "_base": [100.0],
             "Type": ["Expense"],
             "Year": pd.array([2020], dtype="Int64"),
             "Month": ["Jan"],
@@ -363,7 +363,7 @@ class TestSendDailyReminder:
         df = pd.DataFrame({
             "Date": pd.Series([], dtype="datetime64[ns]"),
             "Value": pd.Series([], dtype=float),
-            "_pln": pd.Series([], dtype=float),
+            "_base": pd.Series([], dtype=float),
             "Type": pd.Series([], dtype=str),
             "Year": pd.array([], dtype="Int64"),
             "Month": pd.Series([], dtype=str),
