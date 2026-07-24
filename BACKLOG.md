@@ -10,20 +10,17 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-24 — PR #32 open: bank-statement fingerprint fix + /cycle detect + help subcommands)*
+> *(Last updated: 2026-07-24 — PRs through #32 merged)*
 
 ### PR state at last update
-- **All PRs #1–#30 merged.**
-- **PR #32 open** (`fuadteymurov:claude/work` → `TeymurovFuad:master`, MERGEABLE):
-  - Bug fix: re-upload of a mapped bank statement no longer triggers re-mapping (fingerprint was missing from saved profile JSON)
-  - Bug fix: `/help` MarkdownV2 fix (was silently failing)
-  - Feature: `/cycle detect` — historical backfill scan; `detect_cycle_candidates()` + `record_cycle_starts_batch()` in `cycles.py`; full inline-button UX in `handlers/cycle.py`
+- **All PRs #1–#32 merged.** PR #32 shipped:
+  - Bug fix: re-upload of a mapped bank statement no longer triggers re-mapping (fingerprint was missing from saved profile JSON); profiles saved before the fix need one re-map to pick up the fingerprint, then work silently forever after
+  - Bug fix: `/help` MarkdownV2 fix (was silently failing due to unescaped special chars)
+  - Feature: `/cycle detect` — historical backfill scan (`detect_cycle_candidates` + `record_cycle_starts_batch` in `cycles.py`; full inline-button UX in `handlers/cycle.py`); reviewed and blocking bug fixed (duplicate prompt in mixed unambiguous+ambiguous flow)
   - Feature: all 16 commands accept `<cmd> help` subcommand
-  - Polish: help text examples changed from PLN to EUR
-- **17 unchecked findings** are queued in the "budget cycles review notes
-  (pre-PR verify, 2026-07-24)" and "PR #30 review notes (2026-07-24)" sections
-  below — triage them into the follow-up cycle PRs.
-- **Next open work**: `/summary` picker UX PR (see "Next up"), then
+  - Polish: help text examples changed from PLN to EUR (remaining PLN in runtime messages deferred — see backlog)
+  - Docs: README + DOCUMENTATION updated for all of the above
+- **Next open work**: `/summary` picker UX PR first (see "Next up"), then
   Cycle Dashboard sheet + sync check. Designs in "budget cycles — agreed design"
   and "/summary picker UX — agreed design" sections below.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
@@ -43,8 +40,7 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **Merge PR #32** — MERGEABLE, owner must squash-merge.
-  2. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
+  1. **`/summary` picker UX PR** — now HIGHER priority: with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
      UX — agreed design" below.
