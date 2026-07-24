@@ -99,22 +99,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       type=Expense / category=Savings mismatch and promote type.
       Workaround: use /add and manually pick Type=Savings step by step.
 
-- [ ] **/cycle detect shows wrong salary candidates for Jul 2024** — bot
-      prompted "📅 Jul 2024 — Which income was your salary?" and offered:
-        2024-08-01 - 11,871 PLN
-        2024-08-01 - 11,856 PLN
-      with payday window 2024-07-20 → 2024-08-05.
-      Actual Jul 2024 salary: 12,027 PLN on 2024-07-01 — falls BEFORE the
-      window start (2024-07-20) and was therefore missed. The two candidates
-      shown are the August salaries (2024-08-01), both inside the Jul window
-      because the window extends to 2024-08-05; there are two because Aug has
-      two salary entries (11,871 + 11,856 PLN).
-      Root cause: the payday window for the first detected cycle is anchored
-      too late, excluding salaries paid at the very start of the month (day 1).
-      Fix: widen the window backward (e.g. anchor at the 1st of the target
-      month instead of the 20th) for the first cycle, or let the first-cycle
-      search use a broader range.
-      (`cycles.py` `detect_cycle_candidates` window logic)
+- [x] **/cycle detect shows wrong salary candidates for Jul 2024** — window
+      was anchored at the 20th, missing salaries paid on day 1. Fixed:
+      `window_start` now set to the 1st of the target month.
+      (`cycles.py` `detect_cycle_candidates`)
 
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
