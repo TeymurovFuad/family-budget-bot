@@ -969,17 +969,10 @@ the live Excel and merchant map. No bank name ever enters the repo; only an
 
 ## Follow-up: /cycle detect review notes (PR #32, 2026-07-24)
 
-- [ ] **`awaiting_detect_date` leaks across unrelated messages** — clicking "Custom date"
-      sets `ctx.user_data["awaiting_detect_date"]`; if the user ignores the prompt and
-      types anything else, `handle_detect_text` (group=2) fires and returns
-      "❌ Use YYYY-MM-DD." with no escape path. Fix: add a "Cancel" inline button to the
-      custom-date edit message and/or clear `awaiting_detect_date` inside the
-      `detect:pick`, `detect:none`, and `detect:confirm_all` callback branches.
-      (`handlers/cycle.py`)
-- [ ] **`handle_detect_text` has no `@auth_write`** — write path (`async_record_cycle_start`)
-      runs without re-checking auth. Low practical risk (flow can only start via `/cycle detect`
-      which is auth-gated), but inconsistent with all other write handlers.
-      (`handlers/cycle.py:263`)
+- [x] **`awaiting_detect_date` leaks / `handle_detect_text` has no `@auth_write`** —
+      both issues eliminated: custom-date text input removed entirely in the detect
+      redesign. The detect flow is now fully inline-button driven; no group-2 text
+      handler exists. (`handlers/cycle.py`)
 - [ ] **Empty-fingerprint fallback in bulk_conv is silent** — the `or []` guard on
       `profile["fingerprint"]` is unreachable in the normal path, but if it fires the
       profile saves with an empty fingerprint and will never match on re-upload. Add a
