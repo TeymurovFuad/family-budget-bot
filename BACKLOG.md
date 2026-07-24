@@ -116,6 +116,37 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       search use a broader range.
       (`cycles.py` `detect_cycle_candidates` window logic)
 
+## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
+
+Not scheduled — captured for when the user starts building a web UI to
+replace/supplement Excel as the primary interface.
+
+- **Trigger for this idea**: discussed switching the datastore from Excel to
+  SQLite as part of the PLN/base-currency rename work. Conclusion: Excel stays
+  the source of truth for now — the household edits the spreadsheet directly,
+  and $0-hosting depends on no separate DB process. Excel's exact-header-match
+  fragility (the whole reason this rename PR needed a migration script) is a
+  real cost, but not enough on its own to justify a full datastore swap today.
+- **The user's actual plan**: build a web UI later. When that happens, SQLite
+  becomes the natural backing store for the UI (proper schema, migrations,
+  no VLOOKUP/exact-header-match fragility, safer concurrent writes than the
+  current `atomic_save` + recovery-queue workaround). Excel then becomes an
+  export target rather than the primary store — an "Export to Excel" button
+  instead of Excel-as-database.
+- **Suggested approach — step by step, not a big-bang rewrite**:
+  1. Add SQLite as a **parallel** datastore alongside Excel — writes go to
+     both, reads still come from Excel (bot behavior unchanged, zero risk).
+  2. Build the web UI against SQLite only, once schema/migrations are solid.
+  3. Once the web UI is the primary way transactions are entered, flip reads
+     to SQLite and add an explicit "Export to Excel" button for anyone who
+     still wants the spreadsheet view.
+  4. Retire dual-write once SQLite is trusted as the sole source of truth.
+- **Open questions to resolve before starting**: schema design for
+  MasterData/Lists/Cycles equivalents; how `Value (base)` / rate conversion
+  formulas (currently Excel VLOOKUP) get reimplemented in SQL or the app
+  layer; whether the recovery-queue mechanism is still needed once SQLite
+  has real transactions.
+
 ## Follow-up PR: primary-user write gate + /setbudget (2026-07-23)
 
 - [x] **Primary-user write gate** — `ALLOWED_TELEGRAM_IDS` is now an ordered
