@@ -157,6 +157,63 @@ def test_cycle_totals_negative_unaccounted_means_over_reported():
     assert totals["unaccounted"] < 0
 
 
+# ── /cycle list and /cycle remove ──────────────────────────────────────────────
+
+async def test_cmd_cycle_list_shows_all_boundaries(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 5, 24))
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["list"]))
+    text = upd.message.reply_text.call_args[0][0]
+    assert "May 2026" in text and "2026-05-24 → 2026-06-24" in text
+    assert "Jun 2026" in text and "2026-06-25 → today" in text
+
+
+async def test_cmd_cycle_list_empty_ledger(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["list"]))
+    assert "No cycle boundaries" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_cmd_cycle_remove_deletes_boundary(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 5, 24))
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove", "2026-05-24"]))
+    assert "Removed" in upd.message.reply_text.call_args[0][0]
+    assert load_cycles() == [(date(2026, 6, 25), "Jun 2026")]
+
+
+async def test_cmd_cycle_remove_unknown_date(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove", "2026-01-01"]))
+    assert "No cycle boundary" in upd.message.reply_text.call_args[0][0]
+    assert len(load_cycles()) == 1
+
+
+async def test_cmd_cycle_remove_bad_args(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove"]))
+    assert "Usage" in upd.message.reply_text.call_args[0][0]
+    upd2 = make_update()
+    await cmd_cycle(upd2, make_ctx(["remove", "not-a-date"]))
+    assert "Could not parse" in upd2.message.reply_text.call_args[0][0]
+
+
+def test_remove_cycle_start_roundtrip(excel_path):
+    record_cycle_start(date(2026, 6, 25))
+    assert cycles.remove_cycle_start(date(2026, 6, 25)) is True
+    assert cycles.remove_cycle_start(date(2026, 6, 25)) is False
+    assert load_cycles() == []
+    assert record_cycle_start(date(2026, 6, 26)) is True
+
+
 # ── detect_cycle_candidates ────────────────────────────────────────────────────
 
 def _detect_df():

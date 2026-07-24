@@ -125,6 +125,37 @@ async def async_record_cycle_start(start: date) -> bool:
         return await loop.run_in_executor(None, record_cycle_start, start)
 
 
+def remove_cycle_start(start: date) -> bool:
+    """
+    Delete one boundary row from the Cycles sheet.
+    Returns False when that start date is not in the ledger.
+    """
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        if CYCLES_SHEET_NAME not in wb.sheetnames:
+            return False
+        ws = wb[CYCLES_SHEET_NAME]
+        idx = col_indices(ws, CyclesSchema)
+        start_col = idx.get("start_date")
+        if not start_col:
+            return False
+        for row in range(2, ws.max_row + 1):
+            if _to_date(ws.cell(row, start_col).value) == start:
+                ws.delete_rows(row)
+                atomic_save(wb, excel_path)
+                log.info("Removed cycle boundary %s", start)
+                return True
+        return False
+
+
+async def async_remove_cycle_start(start: date) -> bool:
+    loop = asyncio.get_running_loop()
+    async with _excel_write_lock:
+        return await loop.run_in_executor(None, remove_cycle_start, start)
+
+
 def current_cycle_start(today: date, cycles: list[tuple[date, str]] | None = None) -> tuple[date, str] | None:
     """Latest recorded boundary on or before today, or None (→ calendar fallback)."""
     if cycles is None:
