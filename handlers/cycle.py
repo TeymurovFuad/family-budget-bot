@@ -276,7 +276,10 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
         return
     if transaction.transaction_type != "Income":
         return
-    if (transaction.category or "").strip().lower() != settings.SALARY_CATEGORY.strip().lower():
+    keyword = settings.SALARY_CATEGORY.strip().lower()
+    in_category = (transaction.category or "").strip().lower() == keyword
+    in_description = (getattr(transaction, "description", "") or "").strip().lower() == keyword
+    if not in_category and not in_description:
         return
     today = datetime.now(TIMEZONE).date()
     if not should_prompt_new_cycle(today):

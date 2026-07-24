@@ -104,6 +104,43 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       `window_start` now set to the 1st of the target month.
       (`cycles.py` `detect_cycle_candidates`)
 
+## Bugs (confirmed live, 2026-07-25)
+
+- [x] **/cycle detect finds nothing when 'Salary' is in Description, not
+      Category** — real MasterData salary rows carry empty Category and
+      "Salary" in Description; the PR #35 detect filtered on Category only and
+      reported "nothing to backfill" against 1400+ imported rows. Fixed:
+      shared `cycles.salary_mask()` matches the salary keyword in Category OR
+      Description; applied in `detect_cycle_candidates`, `cycle_totals`
+      (unaccounted math), and the live salary prompt
+      (`maybe_prompt_cycle_start`).
+
+- [ ] **Statement profile saved with wrong decimal separator corrupts every
+      amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for
+      a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400
+      rows imported with 100× inflated values. Three compounding gaps:
+      (a) profile list (`/bulk profile`) doesn't show the separator;
+      (b) debit/credit-split proposal message omits the separator entirely;
+      (c) "Fix a column" can only remap columns — separator, date format, and
+      sign convention cannot be corrected in the confirm flow.
+      Also add a sanity check: sample amount values like `79.99` (2 digits
+      after ".") contradict comma-decimal — validate proposal against samples
+      before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
+
+- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
+      returns no category; `_normalize_parsed_rows` defaults empties to
+      "Other"; merchant memory only helps for known merchants (empty on first
+      import). The AI-categorization step for unknown merchants (BACKLOG
+      "known format" design: "AI only for unknown merchants") was never wired
+      into the statement path. 1400 rows imported as Other.
+      (`handlers/bulk_conv.py` `_finish_profile_parse`)
+
+- [ ] **Deployed bot stops replying to commands (file uploads still work)** —
+      observed live 2026-07-25 after PR #35 deploy. Commands give no reply at
+      all; uploading a file mid-/bulk works. Needs journalctl inspection on
+      the VM; suspicion: exception during handler registration or a stale
+      partially-updated process. Not reproduced locally — all tests pass.
+
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
 Not scheduled — captured for when the user starts building a web UI to

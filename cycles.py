@@ -145,6 +145,20 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
+def salary_mask(df: pd.DataFrame) -> pd.Series:
+    """
+    Boolean mask for salary rows: Income type AND the salary keyword in
+    Category OR Description. Description matters because bulk-imported and
+    hand-entered salary rows often carry 'Salary' as the description with an
+    empty category.
+    """
+    keyword = settings.SALARY_CATEGORY.strip().lower()
+    matches = df["Category"].astype(str).str.strip().str.lower() == keyword
+    if "Description" in df.columns:
+        matches |= df["Description"].astype(str).str.strip().str.lower() == keyword
+    return (df["Type"] == "Income") & matches
+
+
 def detect_cycle_candidates(
     df: pd.DataFrame,
     existing_cycles: list[tuple[date, str]] | None = None,
@@ -165,12 +179,10 @@ def detect_cycle_candidates(
     df = df.copy()
     df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
-    salary_cat = settings.SALARY_CATEGORY.strip().lower()
     salary_rows = df[
         df["_date"].notna()
         & df["IsDone"].astype(bool)
-        & (df["Type"] == "Income")
-        & (df["Category"].astype(str).str.strip().str.lower() == salary_cat)
+        & salary_mask(df)
         & (df["_date"] <= date.today())
     ].copy()
 
@@ -253,11 +265,7 @@ def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
     income  = sub[sub["Type"] == "Income"]["_base"].sum()
     expense = sub[sub["Type"] == "Expense"]["_base"].sum()
     savings = sub[sub["Type"] == "Savings"]["_base"].sum()
-    salary_mask = (sub["Type"] == "Income") & (
-        sub["Category"].astype(str).str.strip().str.lower()
-        == settings.SALARY_CATEGORY.strip().lower()
-    )
-    salary = sub[salary_mask]["_base"].sum()
+    salary = sub[salary_mask(sub)]["_base"].sum()
     return {
         "sub": sub,
         "income": income,
