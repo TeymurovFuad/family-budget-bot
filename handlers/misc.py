@@ -40,7 +40,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "*Add transactions*\n"
         "/add — log one transaction step by step\n"
         "/bulk — import many transactions from photo, file or text; review the parsed rows, reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
-        "Or just type naturally: \"groceries 89 EUR\" to quick\\-add\\.\n\n"
+        "Or just type naturally: \"groceries 89 PLN\" to quick\\-add\\.\n\n"
         "*Reports*\n"
         "/summary — this month at a glance: income, expenses, savings\n"
         "/week — last 7 days of spending by category\n"
@@ -184,7 +184,7 @@ async def cmd_setbudget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "💰 */setbudget* — Set category budget \\(owner only\\)\n\n"
-            "Pick a category from the list, then send the new monthly limit in EUR\\.\n"
+            "Pick a category from the list, then send the new monthly limit in PLN\\.\n"
             "Limits show in /budget and flag overspending in /report\\.",
             parse_mode="MarkdownV2",
         )
