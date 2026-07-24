@@ -179,7 +179,7 @@ def detect_cycle_candidates(
     max_month = max_date.month
 
     while (year, month) <= (max_year, max_month):
-        window_start = date(year, month, 20)
+        window_start = date(year, month, 1)
         if month < 12:
             window_end = date(year, month + 1, 5)
         else:
