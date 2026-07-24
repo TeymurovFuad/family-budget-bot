@@ -135,11 +135,29 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       into the statement path. 1400 rows imported as Other.
       (`handlers/bulk_conv.py` `_finish_profile_parse`)
 
-- [ ] **Deployed bot stops replying to commands (file uploads still work)** —
-      observed live 2026-07-25 after PR #35 deploy. Commands give no reply at
-      all; uploading a file mid-/bulk works. Needs journalctl inspection on
-      the VM; suspicion: exception during handler registration or a stale
-      partially-updated process. Not reproduced locally — all tests pass.
+- [x] **Deployed bot stops replying to commands (file uploads still work)** —
+      root cause found in VM logs: /help replied with MarkdownV2 containing an
+      unescaped `=` (`BUDGET_CYCLE=1` — the `_` was escaped, the `=` was not);
+      Telegram rejected with BadRequest and the user saw nothing. Second
+      occurrence of this bug class (PR #32 fixed one instance and shipped this
+      one in the same file). Fixed in the help-markdown PR: offending strings
+      moved into code spans; new `tests/test_help_markdown.py` validates the
+      full /help text offline so any unescaped reserved char fails CI.
+      Follow-up: register a PTB error handler (`Application.add_error_handler`)
+      so send-failures reply with a fallback plain-text message instead of
+      silence — "No error handlers are registered" appears in the same log.
+
+- [ ] **Monthly Summary sheet is never updated by the bot** — nothing in
+      runtime code writes to Monthly Summary; its per-month formula rows are
+      created once by `scripts/rebuild_excel.py`. Any transaction saved for a
+      month that has no pre-built row (bulk-imported history, or simply a new
+      month starting) appears nowhere in the sheet. Confirmed live 2026-07-25:
+      1400 imported rows spanning 2024 left Monthly Summary empty.
+      Options: (a) bot appends a formula row for unseen Year/Month on save;
+      (b) rebuild-script-style sync check like the planned Cycle Dashboard
+      sync; (c) convert the sheet to dynamic formulas (SUMPRODUCT over open
+      ranges) that need no per-month rows. Decide with the schema-simplification
+      PR ("Derive Year/Month from Date by formula" — same territory).
 
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
