@@ -216,6 +216,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
 | `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old, or if no cycle has been recorded yet |
 | `SALARY_CATEGORY` | — | `Salary` | Category name that marks salary income for cycle detection and the unaccounted metric |
+| `CYCLE_DETECT_KEYWORDS` | — | *(empty)* | Extra comma-separated words that mark a transaction as salary when found in its Description (e.g. `wynagrodzenie,payroll`) — see "How a salary is detected" |
 
 ### Commands
 
@@ -241,7 +242,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/setcurrency` | Pick display currency from a keyboard |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
 | `/export` | Download the live Excel workbook as a Telegram document |
-| `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a new cycle boundary; `/cycle detect` backfills historical boundaries — **owner only**, needs `BUDGET_CYCLE=1` |
+| `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a boundary; `/cycle detect [word ...]` backfills history; `/cycle list` shows all boundaries; `/cycle remove YYYY-MM-DD` deletes one — **owner only**, needs `BUDGET_CYCLE=1` |
 
 `/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, `/cycle`, and
 quick-add (typed transactions) are **owner-only** — only the first ID listed in
@@ -403,11 +404,32 @@ identical to the default calendar mode.
 /cycle started                start a new cycle from today
 /cycle started YYYY-MM-DD     start a new cycle from that date
 /cycle detect                 scan transaction history and backfill historical cycle boundaries
+/cycle detect <word> ...      same scan with extra search words (e.g. /cycle detect wynagrodzenie)
+/cycle list                   show every recorded boundary with its date range
+/cycle remove YYYY-MM-DD      delete a wrongly recorded boundary
 ```
 
 `/cycle` is **owner-only** — only the first ID in `ALLOWED_TELEGRAM_IDS` can
 call it. Future dates are rejected, and recording the same start date twice is
 a no-op — boundaries are written once and never recomputed.
+
+**Fixing a wrong boundary:** `/cycle list` shows every recorded date;
+`/cycle remove YYYY-MM-DD` deletes the wrong one; `/cycle started` with the
+correct date records the replacement. Removing a boundary merges its
+transactions into the previous cycle — no transaction data is touched.
+
+### How a salary is detected
+
+A transaction counts as salary when it is type **Income** and either its
+Category equals `SALARY_CATEGORY` (default `Salary`) or its Description
+contains any detection keyword as a whole word — so bank transfer titles like
+"WYNAGRODZENIE ZA LIPIEC ACME" match. The keyword list is `SALARY_CATEGORY`
+plus `CYCLE_DETECT_KEYWORDS` (comma-separated .env setting, e.g.
+`CYCLE_DETECT_KEYWORDS=wynagrodzenie,payroll`) plus any words passed to
+`/cycle detect <word> ...` for that one scan. The same matching drives
+`/cycle detect`, the salary-cycle prompt, and the unaccounted metric.
+Prefer the .env setting over per-scan words: per-scan words find the
+boundaries, but the unaccounted math only sees keywords configured in .env.
 
 The boundary is written immediately to the `Cycles` sheet in the workbook with
 a label such as "Jul 2026". Labels always include the year so multi-year

@@ -157,6 +157,136 @@ def test_cycle_totals_negative_unaccounted_means_over_reported():
     assert totals["unaccounted"] < 0
 
 
+# ── /cycle list and /cycle remove ──────────────────────────────────────────────
+
+async def test_cmd_cycle_list_shows_all_boundaries(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 5, 24))
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["list"]))
+    text = upd.message.reply_text.call_args[0][0]
+    assert "May 2026" in text and "2026-05-24 → 2026-06-24" in text
+    assert "Jun 2026" in text and "2026-06-25 → today" in text
+
+
+async def test_cmd_cycle_list_empty_ledger(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["list"]))
+    assert "No cycle boundaries" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_cmd_cycle_remove_deletes_boundary(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 5, 24))
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove", "2026-05-24"]))
+    assert "Removed" in upd.message.reply_text.call_args[0][0]
+    assert load_cycles() == [(date(2026, 6, 25), "Jun 2026")]
+
+
+async def test_cmd_cycle_remove_unknown_date(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove", "2026-01-01"]))
+    assert "No cycle boundary" in upd.message.reply_text.call_args[0][0]
+    assert len(load_cycles()) == 1
+
+
+async def test_cmd_cycle_remove_bad_args(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["remove"]))
+    assert "Usage" in upd.message.reply_text.call_args[0][0]
+    upd2 = make_update()
+    await cmd_cycle(upd2, make_ctx(["remove", "not-a-date"]))
+    assert "Could not parse" in upd2.message.reply_text.call_args[0][0]
+
+
+def test_remove_cycle_start_roundtrip(excel_path):
+    record_cycle_start(date(2026, 6, 25))
+    assert cycles.remove_cycle_start(date(2026, 6, 25)) is True
+    assert cycles.remove_cycle_start(date(2026, 6, 25)) is False
+    assert load_cycles() == []
+    assert record_cycle_start(date(2026, 6, 26)) is True
+
+
+# ── detect_cycle_candidates ────────────────────────────────────────────────────
+
+def _detect_df():
+    """Rows shaped like real bulk-imported salary data: category empty,
+    'Salary' in Description."""
+    return pd.DataFrame({
+        "Date":        ["2024-07-01", "2024-08-01", "2024-08-01", "2024-07-01"],
+        "Type":        ["Income",     "Income",     "Income",     "Expense"],
+        "Category":    ["",           "",           "",           "Groceries"],
+        "Description": ["Salary",     "Salary",     "Salary",     ""],
+        "_base":        [12027.0,      11871.0,      11856.0,      2000.0],
+        "IsDone":      [True,         True,         True,         True],
+    })
+
+
+def test_detect_matches_salary_in_description():
+    results = cycles.detect_cycle_candidates(_detect_df(), existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2024, 7, 1), date(2024, 8, 1)]
+    assert results[0]["unambiguous"] is True
+    assert results[0]["amounts"] == [12027.0]
+    assert results[1]["unambiguous"] is False
+    assert results[1]["amounts"] == [11871.0, 11856.0]
+
+
+def test_detect_skips_already_recorded_dates():
+    results = cycles.detect_cycle_candidates(
+        _detect_df(), existing_cycles=[(date(2024, 7, 1), "Jul 2024")]
+    )
+    assert [r["date"] for r in results] == [date(2024, 8, 1)]
+
+
+def test_detect_matches_salary_in_category_without_description_column():
+    df = _cycle_df()
+    assert "Description" not in df.columns  # pins the guard this test covers
+    results = cycles.detect_cycle_candidates(df, existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2026, 6, 25)]
+
+
+def test_detect_contains_match_on_bank_transfer_titles():
+    df = _detect_df()
+    df["Description"] = [
+        "WYNAGRODZENIE ZA LIPIEC ACME SP Z OO",
+        "SALARY JUL 2024",
+        "salary",
+        "",
+    ]
+    results = cycles.detect_cycle_candidates(
+        df, existing_cycles=[], extra_keywords=["wynagrodzenie"]
+    )
+    assert [r["date"] for r in results] == [date(2024, 7, 1), date(2024, 8, 1)]
+
+
+def test_detect_extra_keywords_from_settings(monkeypatch):
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wynagrodzenie"])
+    df = _detect_df()
+    df["Description"] = ["Wynagrodzenie", "x", "y", ""]
+    results = cycles.detect_cycle_candidates(df, existing_cycles=[])
+    assert [r["date"] for r in results] == [date(2024, 7, 1)]
+
+
+def test_salary_mask_empty_keyword_matches_nothing(monkeypatch):
+    monkeypatch.setattr(settings, "SALARY_CATEGORY", "")
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", [])
+    assert not cycles.salary_mask(_detect_df()).any()
+
+
+def test_salary_keyword_not_matched_as_substring():
+    df = _detect_df()
+    df["Description"] = ["salaryman payment", "x", "y", ""]
+    df["Category"] = ["", "", "", "Groceries"]
+    assert not cycles.salary_mask(df).any()
+
+
 # ── /cycle command ─────────────────────────────────────────────────────────────
 
 async def test_cmd_cycle_flag_off_is_inert(excel_path, monkeypatch):

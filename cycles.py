@@ -8,6 +8,7 @@ the flag; these helpers just read/write the ledger.
 """
 
 import asyncio
+import re
 from datetime import date
 
 import pandas as pd
@@ -124,6 +125,37 @@ async def async_record_cycle_start(start: date) -> bool:
         return await loop.run_in_executor(None, record_cycle_start, start)
 
 
+def remove_cycle_start(start: date) -> bool:
+    """
+    Delete one boundary row from the Cycles sheet.
+    Returns False when that start date is not in the ledger.
+    """
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        if CYCLES_SHEET_NAME not in wb.sheetnames:
+            return False
+        ws = wb[CYCLES_SHEET_NAME]
+        idx = col_indices(ws, CyclesSchema)
+        start_col = idx.get("start_date")
+        if not start_col:
+            return False
+        for row in range(2, ws.max_row + 1):
+            if _to_date(ws.cell(row, start_col).value) == start:
+                ws.delete_rows(row)
+                atomic_save(wb, excel_path)
+                log.info("Removed cycle boundary %s", start)
+                return True
+        return False
+
+
+async def async_remove_cycle_start(start: date) -> bool:
+    loop = asyncio.get_running_loop()
+    async with _excel_write_lock:
+        return await loop.run_in_executor(None, remove_cycle_start, start)
+
+
 def current_cycle_start(today: date, cycles: list[tuple[date, str]] | None = None) -> tuple[date, str] | None:
     """Latest recorded boundary on or before today, or None (→ calendar fallback)."""
     if cycles is None:
@@ -145,9 +177,39 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
+def cycle_detect_keywords(extra: list[str] | None = None) -> list[str]:
+    """SALARY_CATEGORY plus CYCLE_DETECT_KEYWORDS plus any ad-hoc extras, lowercased,
+    deduplicated, blanks dropped."""
+    words = [settings.SALARY_CATEGORY, *settings.CYCLE_DETECT_KEYWORDS, *(extra or [])]
+    seen: list[str] = []
+    for w in words:
+        w = str(w or "").strip().lower()
+        if w and w not in seen:
+            seen.append(w)
+    return seen
+
+
+def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd.Series:
+    """
+    Boolean mask for salary rows: Income type AND a salary keyword in Category
+    (exact match) or Description (word-boundary contains). Description matters
+    because bulk-imported salary rows carry the bank's transfer title (e.g.
+    'WYNAGRODZENIE ZA LIPIEC') with an empty category.
+    """
+    keywords = cycle_detect_keywords(extra_keywords)
+    if not keywords:
+        return pd.Series(False, index=df.index)
+    matches = df["Category"].astype(str).str.strip().str.lower().isin(keywords)
+    if "Description" in df.columns:
+        pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
+        matches |= df["Description"].astype(str).str.contains(pattern, case=False, regex=True)
+    return (df["Type"] == "Income") & matches
+
+
 def detect_cycle_candidates(
     df: pd.DataFrame,
     existing_cycles: list[tuple[date, str]] | None = None,
+    extra_keywords: list[str] | None = None,
 ) -> list[dict]:
     """
     Scan transaction history for salary arrivals not yet recorded as cycle
@@ -165,12 +227,10 @@ def detect_cycle_candidates(
     df = df.copy()
     df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
-    salary_cat = settings.SALARY_CATEGORY.strip().lower()
     salary_rows = df[
         df["_date"].notna()
         & df["IsDone"].astype(bool)
-        & (df["Type"] == "Income")
-        & (df["Category"].astype(str).str.strip().str.lower() == salary_cat)
+        & salary_mask(df, extra_keywords)
         & (df["_date"] <= date.today())
     ].copy()
 
@@ -253,11 +313,7 @@ def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
     income  = sub[sub["Type"] == "Income"]["_base"].sum()
     expense = sub[sub["Type"] == "Expense"]["_base"].sum()
     savings = sub[sub["Type"] == "Savings"]["_base"].sum()
-    salary_mask = (sub["Type"] == "Income") & (
-        sub["Category"].astype(str).str.strip().str.lower()
-        == settings.SALARY_CATEGORY.strip().lower()
-    )
-    salary = sub[salary_mask]["_base"].sum()
+    salary = sub[salary_mask(sub)]["_base"].sum()
     return {
         "sub": sub,
         "income": income,
