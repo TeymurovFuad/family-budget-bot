@@ -10,19 +10,26 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-24 — PRs through #32 merged)*
+> *(Last updated: 2026-07-25 — PRs through #35 merged; #36 and #37 open, reviewed PASS, awaiting owner squash-merge)*
 
 ### PR state at last update
-- **All PRs #1–#32 merged.** PR #32 shipped:
-  - Bug fix: re-upload of a mapped bank statement no longer triggers re-mapping (fingerprint was missing from saved profile JSON); profiles saved before the fix need one re-map to pick up the fingerprint, then work silently forever after
-  - Bug fix: `/help` MarkdownV2 fix (was silently failing due to unescaped special chars)
-  - Feature: `/cycle detect` — historical backfill scan (`detect_cycle_candidates` + `record_cycle_starts_batch` in `cycles.py`; full inline-button UX in `handlers/cycle.py`); reviewed and blocking bug fixed (duplicate prompt in mixed unambiguous+ambiguous flow)
-  - Feature: all 16 commands accept `<cmd> help` subcommand
-  - Polish: help text examples changed from PLN to EUR (remaining PLN in runtime messages deferred — see backlog)
-  - Docs: README + DOCUMENTATION updated for all of the above
-- **Next open work**: `/summary` picker UX PR first (see "Next up"), then
-  Cycle Dashboard sheet + sync check. Designs in "budget cycles — agreed design"
-  and "/summary picker UX — agreed design" sections below.
+- **PRs #1–#35 merged.** #35 redesigned `/cycle detect` (salary-event driven,
+  Confirm all / Review one-by-one UX, no calendar windows).
+- **PR #36 (open, reviewed PASS twice)**: cycle detect matches salary in
+  Description via keyword list — `CYCLE_DETECT_KEYWORDS` .env setting,
+  `/cycle detect <word> ...` ad-hoc words, word-boundary contains matching,
+  `/cycle list` + `/cycle remove YYYY-MM-DD` commands, detailed `/cycle help`,
+  DOCUMENTATION.md updated. 42 tests.
+- **PR #37 (open, reviewed PASS twice)**: /help was silently dead — unescaped
+  `=` in MarkdownV2 (BadRequest, user saw nothing; found via journalctl).
+  /start first-name now escaped too. New offline MarkdownV2 validator test.
+- **User state 2026-07-25**: cleared MasterData + Monthly Summary after a bad
+  1400-row import (amounts ×100 from wrong profile decimal separator, all
+  categories "Other"). Will re-import AFTER the statement-import fixes land.
+  User's bank salary titles: "wynagrodzenie" / "salary" / both — set
+  `CYCLE_DETECT_KEYWORDS=wynagrodzenie` in the VM .env after #36 deploys.
+- **Next open work**: see "Next up" — formulas-survive-growth PR first, then
+  statement-import correctness (decimal separator + categorization).
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -193,6 +200,24 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       description_column` relies on `_cycle_df()` incidentally lacking a
       Description column; pin with `assert "Description" not in df.columns`.
       (`tests/test_cycles.py`)
+
+## Follow-up: re-review notes (PR #36/#37 second pass, 2026-07-25)
+
+- [ ] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** —
+      boundaries found with per-scan words whose keyword is not in
+      `CYCLE_DETECT_KEYWORDS` produce cycles whose salary rows count as plain
+      income in the unaccounted math. Docs advise the .env route; consider
+      persisting per-scan words or warning when they find matches. (`cycles.py`)
+- [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!`
+      can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed.
+      (`cycles.py` `salary_mask`)
+- [ ] **Keyword set widens the Description-OR blast radius** — extends the
+      existing "Description match is unconditional OR" note above: with more
+      keywords, more non-salary income descriptions can trigger the prompt.
+- [ ] **/start hostile-name test doesn't run the balance checks** — `_RESERVED`
+      excludes `*`/`_`, and the balance assertions live only in the /help test;
+      factor into a shared helper run by both. (`tests/test_help_markdown.py`)
+- [ ] **No test for empty first_name → "there" fallback.** (`tests/test_help_markdown.py`)
 
 ## Follow-up: markdown-validator review notes (PR #37, 2026-07-25)
 
