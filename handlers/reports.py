@@ -426,7 +426,7 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "💱 */rates* — Exchange rates\n\n"
-            "Shows exchange rates stored in your Excel \\(PLN per 1 unit\\)\\.\n"
+            "Shows exchange rates stored in your Excel \\(EUR per 1 unit\\)\\.\n"
             "Use `/rates refresh` to fetch live rates from frankfurter\\.dev and update Excel\\.",
             parse_mode="MarkdownV2",
         )
