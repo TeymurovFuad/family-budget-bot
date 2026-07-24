@@ -6,6 +6,7 @@ from telegram import (
     InlineKeyboardButton, InlineKeyboardMarkup, Update,
     ReplyKeyboardMarkup, ReplyKeyboardRemove,
 )
+from telegram.helpers import escape_markdown
 from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, get_display_currency, set_display_currency, log
@@ -20,7 +21,7 @@ from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT
 @auth
 @log_call()
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    name = update.effective_user.first_name
+    name = escape_markdown(update.effective_user.first_name or "there", version=2)
     ccy  = get_display_currency(update.effective_user.id)
     await update.message.reply_text(
         f"👋 Hi *{name}*\\! I'm your *Budget Bot*\\.\n\n"
@@ -58,13 +59,13 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "*Settings*\n"
         "/setcurrency — change the display currency\n"
         "/setbudget — set the monthly budget limit for a category \\(owner only\\)\n"
-        "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(owner only, needs BUDGET\\_CYCLE=1\\)\n"
+        "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(owner only, needs `BUDGET_CYCLE=1`\\)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
         "/help — this list\n\n"
         "*Owner only*\n"
         "/bulk profile list — list all saved bank\\-statement profiles\n"
-        "/bulk profile delete <name> — delete a saved profile by name\n",
+        "/bulk profile delete `name` — delete a saved profile by name\n",
         parse_mode="MarkdownV2",
     )
 
