@@ -367,7 +367,7 @@ def create_blank_excel(path: Path) -> None:
     ws_md.append([
         "Date", "Year", "Month", "Value", "Type", "Category",
         "Person", "Description", "IsRecurring", "IsDone",
-        "Currency", "Value (PLN)", "Date Modified (UTC)",
+        "Currency", "Value (base)", "Date Modified (UTC)",
     ])
 
     ws_li = wb.create_sheet("Lists")
@@ -399,7 +399,7 @@ def create_blank_excel(path: Path) -> None:
     for i, v in enumerate(months,     2): ws_li.cell(i, 1, v)
     for i, v in enumerate(txn_types,  2): ws_li.cell(i, 2, v)
     for i, v in enumerate(categories, 2): ws_li.cell(i, 3, v)
-    # col 4 = Budget (PLN) — left blank; user fills in per-category limits
+    # col 4 = Budget (base) — left blank; user fills in per-category limits
     for i, v in enumerate(years,      2): ws_li.cell(i, 6, v)
     for i, (code, rate) in enumerate(currencies, 2):
         ws_li.cell(i, 8, code)   # Currency
@@ -647,7 +647,7 @@ def update_currency_rates_in_excel(new_rates: dict[str, float]) -> None:
 def update_category_budget_in_excel(category: str, new_budget_pln: float) -> None:
     """
     Write a new monthly budget limit (in PLN) for one category into the Lists
-    sheet Budget (PLN) column. Only updates the row whose Categories cell
+    sheet Budget (base) column. Only updates the row whose Categories cell
     already matches `category` — never adds or removes a category row.
     """
     from openpyxl import load_workbook
@@ -661,7 +661,7 @@ def update_category_budget_in_excel(category: str, new_budget_pln: float) -> Non
         bud_col  = idx.get("budget_pln")
 
         if cat_col is None or bud_col is None:
-            log.warning("Categories or Budget (PLN) column not found in Lists sheet — budget not updated")
+            log.warning("Categories or Budget (base) column not found in Lists sheet — budget not updated")
             return
 
         for row in range(2, ws.max_row + 1):

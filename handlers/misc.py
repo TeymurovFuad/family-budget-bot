@@ -164,7 +164,7 @@ async def setcurrency_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def _build_setbudget_keyboard() -> InlineKeyboardMarkup:
     """Build the category picker, 2 buttons per row, each showing the current
-    Budget (PLN) value for that category."""
+    Budget (base) value for that category."""
     categories = load_reference_data().get("categories", [])
     budgets = load_budgets()
     buttons = [
@@ -184,7 +184,7 @@ async def cmd_setbudget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "💰 */setbudget* — Set category budget \\(owner only\\)\n\n"
-            "Pick a category from the list, then send the new monthly limit in EUR\\.\n"
+            "Pick a category from the list, then send the new monthly limit in your display currency\\.\n"
             "Limits show in /budget and flag overspending in /report\\.",
             parse_mode="MarkdownV2",
         )
@@ -228,7 +228,7 @@ async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             raise ValueError
     except (ValueError, TypeError):
         await update.message.reply_text(
-            "❌ Please enter a non-negative number for the budget (PLN):"
+            "❌ Please enter a non-negative number for the Budget (base):"
         )
         return SET_BUDGET_AMOUNT
 

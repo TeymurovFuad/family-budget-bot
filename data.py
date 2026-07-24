@@ -68,7 +68,7 @@ def get_rate(ccy: str, rates: dict[str, float]) -> float:
 def load_data() -> pd.DataFrame:
     """
     Load MasterData sheet. All aggregations use the '_pln' column.
-    Value (PLN) contains Excel formulas — pandas reads cached results, which may
+    Value (base) contains Excel formulas — pandas reads cached results, which may
     be NaN for rows never opened in Excel. Falls back to computing from Value *
     exchange rate so reports never show 0 due to stale formula cache.
     """
@@ -77,8 +77,8 @@ def load_data() -> pd.DataFrame:
 
     df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
 
-    if "Value (PLN)" in df.columns:
-        df["_pln"] = pd.to_numeric(df["Value (PLN)"], errors="coerce")
+    if "Value (base)" in df.columns:
+        df["_pln"] = pd.to_numeric(df["Value (base)"], errors="coerce")
     else:
         df["_pln"] = pd.to_numeric(df["Value"], errors="coerce")
 

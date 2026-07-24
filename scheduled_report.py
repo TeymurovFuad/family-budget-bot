@@ -64,7 +64,7 @@ def load_budget_amounts() -> dict[str, float]:
 def load_transaction_data() -> pd.DataFrame:
     excel_path = get_excel_path_for_reading()
     df = pd.read_excel(excel_path, sheet_name="MasterData")
-    pln_column = "Value (PLN)" if "Value (PLN)" in df.columns else "Value"
+    pln_column = "Value (base)" if "Value (base)" in df.columns else "Value"
     df["amount_pln"] = pd.to_numeric(df[pln_column], errors="coerce")
     df["Value"]      = pd.to_numeric(df["Value"], errors="coerce")
     df["Year"]       = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")

@@ -289,7 +289,7 @@ class TestCreateBlankExcelColumnPositions:
 
     def test_masterdata_value_pln_in_col_12(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
-        assert wb["MasterData"].cell(1, 12).value == "Value (PLN)"
+        assert wb["MasterData"].cell(1, 12).value == "Value (base)"
 
     def test_masterdata_date_modified_in_col_13(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
@@ -309,7 +309,7 @@ class TestCreateBlankExcelColumnPositions:
 
     def test_lists_budget_header_in_col_d(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
-        assert wb["Lists"].cell(1, 4).value == "Budget (PLN)"
+        assert wb["Lists"].cell(1, 4).value == "Budget (base)"
 
     def test_lists_person_header_in_col_e(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
@@ -352,7 +352,7 @@ class TestCreateBlankExcelColumnPositions:
     def test_lists_budget_col_is_blank_by_default(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
-        assert ws.cell(1, 4).value == "Budget (PLN)"
+        assert ws.cell(1, 4).value == "Budget (base)"
         for row in range(2, ws.max_row + 1):
             assert ws.cell(row, 4).value is None
 
@@ -426,7 +426,7 @@ class TestLoadListsExhaustive:
         wb.active.title = "MasterData"
         wb.active.append(["Date", "Year", "Month", "Value", "Type", "Category",
                            "Person", "Description", "IsRecurring", "IsDone",
-                           "Currency", "Value (PLN)", "Date Modified (UTC)"])
+                           "Currency", "Value (base)", "Date Modified (UTC)"])
         wb.save(path)
         result = load_lists(path)
         assert result["months"] == []
@@ -627,7 +627,7 @@ class TestDoAppendTransactionExhaustive:
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert isinstance(formula, str)
         assert formula.startswith("=")
 
@@ -642,7 +642,7 @@ class TestDoAppendTransactionExhaustive:
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         # Range is built dynamically from Lists Currency/Rate column positions
         assert "$H$2:$I$100" in formula, (
             f"VLOOKUP range must be $H$2:$I$100, got: {formula!r}"
@@ -803,7 +803,7 @@ class TestReplayRecoveryQueue:
         wb = openpyxl.load_workbook(excel_path, data_only=False)
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
-        formula = ws.cell(2, headers["Value (PLN)"]).value
+        formula = ws.cell(2, headers["Value (base)"]).value
         assert isinstance(formula, str) and formula.startswith("=")
 
     def test_replay_empty_queue_writes_nothing(self, excel_path, tmp_path, monkeypatch):
@@ -871,7 +871,7 @@ class TestLoadData:
             "Type": "Expense",
             "Category": "Groceries",
             "Currency": "EUR",
-            "Value (PLN)": 428.0,   # cached result — EUR * 4.28
+            "Value (base)": 428.0,   # cached result — EUR * 4.28
             "IsDone": True,
         }])
 
@@ -894,7 +894,7 @@ class TestLoadData:
             "Type": "Expense",
             "Category": "Groceries",
             "Currency": "EUR",
-            # Value (PLN) intentionally omitted → NaN in pandas
+            # Value (base) intentionally omitted → NaN in pandas
             "IsDone": True,
         }])
 
@@ -922,7 +922,7 @@ class TestLoadData:
             "Value": 250.0,
             "Type": "Income",
             "Currency": "PLN",
-            # Value (PLN) left out → fallback
+            # Value (base) left out → fallback
             "IsDone": True,
         }])
 
@@ -964,7 +964,7 @@ class TestLoadData:
             "Value": 10.0,
             "Type": None,        # must be dropped
             "Currency": "PLN",
-            "Value (PLN)": 10.0,
+            "Value (base)": 10.0,
             "IsDone": True,
         }])
 
@@ -984,7 +984,7 @@ class TestLoadData:
             "Value": 10.0,
             "Type": "Expense",
             "Currency": "PLN",
-            "Value (PLN)": 10.0,
+            "Value (base)": 10.0,
             "IsDone": True,
         }])
 
@@ -1005,7 +1005,7 @@ class TestLoadData:
             "Value": None,       # no value → NaN
             "Type": "Expense",
             "Currency": "PLN",
-            # Value (PLN) also absent
+            # Value (base) also absent
             "IsDone": True,
         }])
 
@@ -1025,7 +1025,7 @@ class TestLoadData:
             "Value": 10.0,
             "Type": "Expense",
             "Currency": "PLN",
-            "Value (PLN)": 10.0,
+            "Value (base)": 10.0,
             "IsDone": None,      # must default to True
         }])
 
@@ -1046,7 +1046,7 @@ class TestLoadData:
             "Value": 55.0,
             "Type": "Income",
             "Currency": None,    # must become "PLN"
-            "Value (PLN)": 55.0,
+            "Value (base)": 55.0,
             "IsDone": True,
         }])
 
@@ -1136,7 +1136,7 @@ class TestLoadBudgets:
         ws = wb["Lists"]
         next_row = ws.max_row + 1
         ws.cell(next_row, 3).value = "UniqueTestCat"  # Category col
-        ws.cell(next_row, 4).value = 1500.0            # Budget (PLN) col
+        ws.cell(next_row, 4).value = 1500.0            # Budget (base) col
         wb.save(excel_path)
 
         budgets = data_mod.load_budgets()
@@ -1150,7 +1150,7 @@ class TestLoadBudgets:
         ws = wb["Lists"]
         next_row = ws.max_row + 1
         ws.cell(next_row, 3).value = "TestBudgetCat"   # Category col
-        ws.cell(next_row, 4).value = 2100.0             # Budget (PLN) col
+        ws.cell(next_row, 4).value = 2100.0             # Budget (base) col
         wb.save(excel_path)
 
         budgets = data_mod.load_budgets()

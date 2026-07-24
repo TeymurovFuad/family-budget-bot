@@ -576,7 +576,7 @@ class TestLoadTransactionData:
             "Date":         ["2025-06-01", "2025-06-02", "2025-06-03"],
             "Type":         ["Income",     "Expense",    "Expense"],
             "Category":     ["Salary",     "Food",       "Transport"],
-            "Value (PLN)":  [5000.0,        200.0,        None],   # last NaN
+            "Value (base)":  [5000.0,        200.0,        None],   # last NaN
             "Value":        [5000.0,         200.0,         50.0],
             "Currency":     ["PLN",          "PLN",         "EUR"],
             "Year":         [2025,           2025,          2025],
@@ -601,7 +601,7 @@ class TestLoadTransactionData:
             "Date":         ["2025-06-01"],
             "Type":         ["Expense"],
             "Category":     ["Food"],
-            "Value (PLN)":  [None],
+            "Value (base)":  [None],
             "Value":        [300.0],
             "Currency":     ["PLN"],
             "Year":         [2025],
@@ -620,7 +620,7 @@ class TestLoadTransactionData:
             "Date":         ["2025-06-01"],
             "Type":         ["Expense"],
             "Category":     ["Food"],
-            "Value (PLN)":  [None],
+            "Value (base)":  [None],
             "Value":        [77.0],
             "Currency":     ["XYZ"],
             "Year":         [2025],

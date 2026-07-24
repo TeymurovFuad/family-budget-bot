@@ -150,7 +150,7 @@ def extend_validation_ranges(ws, last_row: int, margin: int = _VALIDATION_MARGIN
 def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     """
     Write one transaction dict into MasterData row r.
-    The single source of truth for column layout and the Value (PLN) formula —
+    The single source of truth for column layout and the Value (base) formula —
     used by single append, batch append, and recovery-queue replay.
     """
     from datetime import datetime, timezone
@@ -214,7 +214,7 @@ class MasterDataSchema:
     is_recurring:  Any = col("IsRecurring")
     is_done:       Any = col("IsDone")
     currency:      Any = col("Currency")
-    value_pln:     Any = col("Value (PLN)")
+    value_pln:     Any = col("Value (base)")
     date_modified: Any = col("Date Modified (UTC)")
 
 
@@ -226,7 +226,7 @@ class ListsSchema:
     months:      Any = col("Months")
     txn_types:   Any = col("TxnTypes")
     categories:  Any = col("Categories")
-    budget_pln:  Any = col("Budget (PLN)")
+    budget_pln:  Any = col("Budget (base)")
     persons:     Any = col("Persons")
     years:       Any = col("Years")
     currency:    Any = col("Currency")
