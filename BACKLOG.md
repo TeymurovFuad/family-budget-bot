@@ -177,6 +177,25 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Follow-up: decimal-separator review notes (PR #39, 2026-07-25)
+
+- [ ] **Sanity check only fires for NEW proposals — the already-saved bad profile
+      is never re-validated** — `validate_proposal_against_samples` runs in the
+      new-format path; a profile already saved with the wrong separator (the
+      live incident) still parses silently on fingerprint match. Run the same
+      check against the first rows at match time and warn before parsing.
+      The user's actual corrupt profile must be deleted by hand
+      (`/bulk profile` → Delete) before re-importing. (`handlers/bulk_conv.py`)
+- [ ] **Typed date_format is not validated** — `bulk_profile_fix_setting`
+      accepts any text as a strptime pattern; a typo (e.g. `%d.%m.%y` vs `%Y`)
+      saves fine and only surfaces as skipped rows at parse time. Try the
+      pattern against a sample date cell before accepting. (`handlers/bulk_conv.py`)
+- [ ] **Backticks in the date-format prompt render literally** — the
+      `fix_settings:date_fmt` message uses `` ` `` without parse_mode
+      (deliberately safe given the MarkdownV2 bug history, but cosmetically
+      wrong). Either drop the backticks or send with parse_mode and escapes.
+      (`handlers/bulk_conv.py`)
+
 ## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
 
 - [ ] **Description match is an unconditional OR** — an Income row with
