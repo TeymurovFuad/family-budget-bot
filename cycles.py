@@ -192,17 +192,21 @@ def cycle_detect_keywords(extra: list[str] | None = None) -> list[str]:
 def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd.Series:
     """
     Boolean mask for salary rows: Income type AND a salary keyword in Category
-    (exact match) or Description (word-boundary contains). Description matters
-    because bulk-imported salary rows carry the bank's transfer title (e.g.
-    'WYNAGRODZENIE ZA LIPIEC') with an empty category.
+    (word-boundary contains), or in Description when Category is blank.
+    Description matters because bulk-imported salary rows carry the bank's
+    transfer title (e.g. 'WYNAGRODZENIE ZA LIPIEC') with an empty category;
+    a categorised row ('Freelance' + 'Salary' description) is not a salary.
     """
     keywords = cycle_detect_keywords(extra_keywords)
     if not keywords:
         return pd.Series(False, index=df.index)
-    matches = df["Category"].astype(str).str.strip().str.lower().isin(keywords)
+    pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
+    category = df["Category"].fillna("").astype(str).str.strip()
+    matches = category.str.contains(pattern, case=False, regex=True)
     if "Description" in df.columns:
-        pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
-        matches |= df["Description"].astype(str).str.contains(pattern, case=False, regex=True)
+        matches |= (category == "") & df["Description"].astype(str).str.contains(
+            pattern, case=False, regex=True
+        )
     return (df["Type"] == "Income") & matches
 
 

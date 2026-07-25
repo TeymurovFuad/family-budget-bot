@@ -214,9 +214,23 @@ def validate_parsed_row(
         ), {}, []
 
     if categories and category_raw.lower() not in category_map:
-        return False, (
-            f"Unknown category '{category_raw}'. Use one of: {', '.join(categories)}."
-        ), {}, []
+        # Promote only type names that can never be a real category (per
+        # CATEGORY_IMPLIES_TYPE, e.g. Savings). "Income"/"Expense" stay
+        # unknown-category errors — they are legitimate category labels.
+        promoted = txn_type_map.get(category_raw.lower())
+        implied_here = CATEGORY_IMPLIES_TYPE.get(category_raw.lower())
+        if promoted and implied_here and implied_here.lower() == promoted.lower():
+            fallback = category_map.get("other", "")
+            corrections.append(
+                f"category '{category_raw}' is a transaction type → type '{promoted}'"
+                + (f", category '{fallback}'" if fallback else "")
+            )
+            txn_type_raw = promoted
+            category_raw = fallback
+        else:
+            return False, (
+                f"Unknown category '{category_raw}'. Use one of: {', '.join(categories)}."
+            ), {}, []
 
     if currencies and currency_raw not in currency_map:
         return False, f"Unknown currency '{currency_raw}'. Use one of: {', '.join(currencies)}.", {}, []

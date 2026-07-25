@@ -294,7 +294,12 @@ Import a whole bank statement or receipt in one go:
    - Any person value the AI still emits is moved into the description
      (the Person field is retired).
    - Unknown transaction types default to Expense.
-   Every correction is reported before the preview.
+   - "Savings" received as a category is automatically promoted: the row
+     becomes type Savings with category Other (Savings is a transaction type,
+     never a category).
+   Every correction is reported before the preview as a 🛡 auto-correction.
+   The same corrections — including the Savings promotion — apply to quick-add
+   (typed transactions) too.
 5. The bot shows a numbered preview, split across several messages for large
    imports (row numbers stay stable across pages), sorted by date.
 6. Review the preview and reply with commands to adjust it:
@@ -374,7 +379,11 @@ deletes one directly. Both are owner-only, like all write commands.
 **Drafts survive interruptions.** The draft is stored per user on disk, so if
 the review session times out (30 minutes) or the bot restarts, just run
 `/bulk` again and it resumes where you left off. A draft holds at most 50
-pending rows — save or cancel before importing more.
+pending rows. If a new upload arrives while the draft is full, the newly
+parsed rows are not lost — they are held aside, and as soon as you `save` or
+`cancel` the current draft the held rows automatically load as a new draft
+for review. A second upload while rows are already held is refused with an
+explicit message — finish the current draft first.
 
 **A note on the `.bak` file:** every save writes to a temporary file first and
 keeps a rolling `.bak` copy of the previous version next to the workbook, so a
@@ -419,10 +428,13 @@ transactions into the previous cycle — no transaction data is touched.
 
 ### How a salary is detected
 
-A transaction counts as salary when it is type **Income** and either its
-Category equals `SALARY_CATEGORY` (default `Salary`) or its Description
-contains any detection keyword as a whole word — so bank transfer titles like
-"WYNAGRODZENIE ZA LIPIEC ACME" match. The keyword list is `SALARY_CATEGORY`
+A transaction counts as salary when it is type **Income** and its Category
+contains a detection keyword as a whole word — so a category of "Salary Bonus"
+matches the keyword `salary`, but "Salaries" does not. The Description is only
+checked when the Category is blank: a bulk-imported row with an empty category
+and the bank transfer title "WYNAGRODZENIE ZA LIPIEC ACME" matches, while a
+categorised row (e.g. category "Freelance", description "salary top-up") does
+not — its category already says what it is. The keyword list is `SALARY_CATEGORY`
 plus `CYCLE_DETECT_KEYWORDS` (comma-separated .env setting, e.g.
 `CYCLE_DETECT_KEYWORDS=wynagrodzenie,payroll`) plus any words passed to
 `/cycle detect <word> ...` for that one scan. The same matching drives

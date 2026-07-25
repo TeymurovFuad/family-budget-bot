@@ -240,8 +240,9 @@ CRITICAL field rules:
   If unsure, use "Other".
 - Transfer recipients, counterparties, and landlords belong in "description" —
   there is no separate field for them.
-- "type" must be coherent with "category": category Savings ⇒ type Savings
-  (transfers to your own savings account are Savings, never Expense);
+- "Savings" is a transaction TYPE, never a category: transfers to your own
+  savings account get type "Savings" and category "Other", never Expense.
+- "type" must be coherent with "category":
   category Salary ⇒ type Income. Refunds/returns are Income with the
   category of the ORIGINAL purchase (e.g. a returned jacket is Income/Shopping).
 
@@ -277,13 +278,15 @@ Return ONLY a JSON object with these keys:
 - "description": clean 2-4 word merchant label (max 40 chars) — never card numbers, BPID:/reference codes, or city/country suffixes
 
 Use only the exact categories and types provided above. Do not invent new categories or transaction types.
-Keep "type" coherent with "category": category Savings ⇒ type Savings (moving money to your own savings is Savings, never Expense); category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
+"Savings" is a transaction TYPE, never a category: when the message says "savings", "saved", "put into savings" or similar, set type "Savings" and category "Other". Moving money to your own savings is type Savings, never Expense.
+Keep "type" coherent with "category": category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
 If you cannot map the message to an exact known category or type, return: {{"not_transaction": true}}
 
 Examples:
 "groceries 89" → {{"value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
 "lunch 45 EUR" → {{"value": 45, "currency": "EUR", "type": "Expense", "category": "Dining Out", "description": "lunch"}}
 "salary 5000" → {{"value": 5000, "currency": "PLN", "type": "Income", "category": "Salary", "description": "salary"}}
+"2380 added to savings" → {{"value": 2380, "currency": "PLN", "type": "Savings", "category": "Other", "description": "savings"}}
 "hello" → {{"not_transaction": true}}
 "2026-05-24 groceries 89" → {{"date": "2026-05-24", "value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
 """
