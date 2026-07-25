@@ -178,6 +178,59 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Minimalism audit — agreed design (Designer review, 2026-07-25)
+
+Whole-workbook redundancy audit against comparable minimal budget apps
+(r/ynab usage discussions, Actual-vs-Firefly comparisons, GitHub Telegram
+budget bots). Verdict: the core — quick entry → categories → budget-vs-actual
+→ cycle unaccounted — matches exactly what succeeds elsewhere; all redundancy
+is peripheral. The cycle "unaccounted" metric is the bot's differentiator:
+promote it as the headline number, don't bury it among nine reports.
+
+**User decision 2026-07-25: the household budgets as one unit — the Person
+field is retired entirely** (no future per-person scenario). Two stages:
+
+- [ ] **Retire Person, stage 1 (no schema change)** — remove Person from every
+      flow: /add stops asking (write ""), bulk drops the per-row `person=`
+      edit field and the planned ask-once-per-import item, /report drops the
+      by-person section, merchant map stops storing person defaults. Column
+      stays in MasterData, silently empty. Supersedes the UX-group "person
+      attribution" item.
+- [ ] **Retire Person, stage 2 (schema)** — drop the Person column itself in
+      the schema-simplification PR, together with the other cuts below.
+
+Remaining agreed cuts, in the order they pay off:
+
+- [ ] **Delete the goals columns from ListsSchema** (`goal_name`/`goal_alloc`/
+      `goal_base`) — declared in the schema, referenced nowhere else in the
+      codebase. Pure dead weight; delete the schema fields, leave workbook
+      cells alone. (`excel_schema.py`)
+- [ ] **Drop `IsDone`** — every writer hardcodes True, ~20 report filters
+      carry `& df["IsDone"]` that can never exclude anything, and the dead
+      field already caused one bug. Fold into the schema-simplification PR
+      (migration + filter sweep). (`excel_schema.py`, `models.py`, `data.py`,
+      `handlers/reports.py`)
+- [ ] **Collapse the report surface to two commands** — keep `/summary`
+      (period picker: this cycle / this month / last 7 days / range) and
+      `/budget`; fold `/top`, `/savings`, `/week`, `/report`, `/chart`,
+      `/range` content into sections/buttons of those two. Retires six
+      commands, closes the cycle-awareness gaps for /report and /top by
+      construction, shrinks the help/MarkdownV2/E2E surface. Do together
+      with the /summary picker UX PR (same screen).
+- [ ] **Schema-simplification PR scope (consolidated)** — one migration, four
+      cuts: derive Year/Month from Date (existing item), drop IsDone, drop
+      Person column (stage 2), drop goals columns; convert Monthly Summary
+      to dynamic formulas (existing "never updated" bug's option c) so the
+      PR #38 row-append machinery can be deleted. One script, one formula
+      sweep, four redundancies gone.
+- [ ] **Recurring detection from history replaces the /add question**
+      (existing UX item, elevated) — same merchant ±10% in ≥2 prior months
+      ⇒ auto-flag; /add stops asking, bulk stops hardcoding False.
+- [ ] **Quick-add primary, /add default-and-confirm** (existing UX item,
+      elevated) — after amount+category pre-fill everything, jump to confirm
+      card; 9 round-trips → 2. Entry friction is the #1 churn cause in
+      comparable apps.
+
 ## Follow-up: AI-categorization review notes (PR #40, 2026-07-25)
 
 - [ ] **Model must echo merchant names verbatim for the mapping to apply** —
