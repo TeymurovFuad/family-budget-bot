@@ -214,9 +214,19 @@ def validate_parsed_row(
         ), {}, []
 
     if categories and category_raw.lower() not in category_map:
-        return False, (
-            f"Unknown category '{category_raw}'. Use one of: {', '.join(categories)}."
-        ), {}, []
+        promoted = txn_type_map.get(category_raw.lower())
+        if promoted:
+            fallback = category_map.get("other", "")
+            corrections.append(
+                f"category '{category_raw}' is a transaction type → type '{promoted}'"
+                + (f", category '{fallback}'" if fallback else "")
+            )
+            txn_type_raw = promoted
+            category_raw = fallback
+        else:
+            return False, (
+                f"Unknown category '{category_raw}'. Use one of: {', '.join(categories)}."
+            ), {}, []
 
     if currencies and currency_raw not in currency_map:
         return False, f"Unknown currency '{currency_raw}'. Use one of: {', '.join(currencies)}.", {}, []

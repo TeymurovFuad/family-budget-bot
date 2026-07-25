@@ -148,6 +148,23 @@ class TestValidateParsedRow:
             _row(type="Expense", category="Salary"), LISTS, today=TODAY)
         assert ok and norm["type"] == "Income"
 
+    # Live bug: "2380 added to savings" parsed as category Savings, but the
+    # real Lists sheet has no Savings category — Savings is a TxnType only.
+    def test_txn_type_in_category_field_promoted(self):
+        lists = {**LISTS, "categories": ["Groceries", "Transport", "Salary", "Other"]}
+        ok, _, norm, corr = validate_parsed_row(
+            _row(type="Expense", category="Savings"), lists, today=TODAY)
+        assert ok
+        assert norm["type"] == "Savings"
+        assert norm["category"] == "Other"
+        assert any("transaction type" in c for c in corr)
+
+    def test_txn_type_in_category_field_promoted_case_insensitive(self):
+        lists = {**LISTS, "categories": ["Groceries", "Transport", "Salary", "Other"]}
+        ok, _, norm, _ = validate_parsed_row(
+            _row(type="Expense", category="savings"), lists, today=TODAY)
+        assert ok and norm["type"] == "Savings" and norm["category"] == "Other"
+
     def test_coherent_row_gets_no_correction(self):
         ok, _, norm, corr = validate_parsed_row(
             _row(type="Savings", category="Savings"), LISTS, today=TODAY)

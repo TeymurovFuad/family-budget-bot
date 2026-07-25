@@ -928,6 +928,13 @@ class TestEditConvValue:
         assert result == states.EDIT_CONFIRM
         assert ctx.user_data["edit_new_value"] == "new description"
 
+    async def test_description_formula_injection_guarded(self):
+        ctx = self._make_ctx("Description")
+        upd = make_update("=SUM(A1:A9)")
+        result = await edit_value(upd, ctx)
+        assert result == states.EDIT_CONFIRM
+        assert ctx.user_data["edit_new_value"] == "'=SUM(A1:A9)"
+
     async def test_cancel_ends(self):
         ctx = self._make_ctx("Amount")
         upd = make_update("Cancel")

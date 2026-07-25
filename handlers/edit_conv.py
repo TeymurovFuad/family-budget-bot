@@ -10,7 +10,7 @@ from config import auth_write, get_display_currency, log
 from log_decorators import log_call
 from data import load_rates, load_reference_data, now_utc
 from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, RowMovedError, _excel_write_lock
-from formatters import format_base_as_currency, format_amount
+from formatters import format_base_as_currency, format_amount, sanitize_description
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
 
 EDIT_FIELD_MAP = {
@@ -116,7 +116,9 @@ async def edit_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     current = ctx.user_data["edit_txn"].get(EDIT_FIELD_MAP[field], "")
 
     new_value = text
-    if field == "Amount":
+    if field == "Description":
+        new_value = sanitize_description(text)
+    elif field == "Amount":
         try:
             new_value = float(text.replace(",", "."))
             if new_value <= 0:
