@@ -423,6 +423,11 @@ async def _finish_profile_parse(
 
     parsed, corrections = _normalize_parsed_rows(parsed, lists)
     memory_notes = _apply_merchant_memory(parsed)
+    # AI categorization for merchants the map doesn't know — statement parsing
+    # itself extracts no category, so without this first imports are all 'Other'.
+    ai_notes = await loop.run_in_executor(
+        None, lambda: _apply_ai_categorization(parsed, lists)
+    )
     parsed, validator_corrections = _validate_bulk_rows(parsed, lists)
     corrections += validator_corrections
 
@@ -431,6 +436,13 @@ async def _finish_profile_parse(
         more = f"\n  … and {len(memory_notes) - 10} more" if len(memory_notes) > 10 else ""
         await update.effective_message.reply_text(
             f"🧠 {len(memory_notes)} row(s) categorized from merchant memory:\n{shown}{more}"
+        )
+    if ai_notes:
+        shown = "\n".join(f"  • {n}" for n in ai_notes[:10])
+        more = f"\n  … and {len(ai_notes) - 10} more" if len(ai_notes) > 10 else ""
+        await update.effective_message.reply_text(
+            f"🤖 {len(ai_notes)} merchant(s) categorized by AI — check the preview, "
+            f"edit with `N category=...` to correct (corrections are remembered):\n{shown}{more}"
         )
     if corrections:
         shown = "\n".join(f"  • {c}" for c in corrections[:10])
@@ -1094,6 +1106,46 @@ def _apply_merchant_memory(parsed: list[dict]) -> list[str]:
     return notes
 
 
+def _apply_ai_categorization(parsed: list[dict], lists: dict) -> list[str]:
+    """
+    Categorize statement rows the merchant map didn't cover — profile parsing
+    extracts no category, so without this every first-import row lands on
+    'Other'. One compact AI call for the unique unknown merchants; only
+    categories that exactly match Lists are applied (never 'Other' — that is
+    already the fallback). AI guesses are NOT written to merchant memory:
+    the user's preview edits are what teach the map, so a wrong guess can't
+    become sticky. Rows touched get row['ai'] = True (🤖 in the preview).
+    """
+    categories = lists.get("categories") or []
+    if not categories:
+        return []
+
+    targets: dict[str, list[dict]] = {}
+    for row in parsed:
+        if row.get("mem") or row.get("dropped"):
+            continue
+        cat = str(row.get("category") or "").strip()
+        if cat and cat != "Other":
+            continue
+        desc = str(row.get("description") or "").strip()
+        if desc:
+            targets.setdefault(desc, []).append(row)
+    if not targets:
+        return []
+
+    mapping = ai_parser.categorize_merchants(sorted(targets), categories)
+    cat_set = set(categories)
+    notes: list[str] = []
+    for merchant, rows in targets.items():
+        cat = str(mapping.get(merchant) or "").strip()
+        if cat in cat_set and cat != "Other":
+            for row in rows:
+                row["category"] = cat
+                row["ai"] = True
+            notes.append(f"'{merchant}' → {cat}" + (f" ({len(rows)} rows)" if len(rows) > 1 else ""))
+    return notes
+
+
 def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
     """
     Run the shared validator on one draft row: normalize what's unambiguous,
@@ -1183,7 +1235,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         txn_type = t.get("type") or ""
         person_suffix = f" | person={_md_escape(person)}" if person else ""
         type_suffix = f" | type={_md_escape(txn_type)}" if txn_type else ""
-        mem_suffix = " 🧠" if t.get("mem") else ""
+        mem_suffix = " 🧠" if t.get("mem") else (" 🤖" if t.get("ai") else "")
         invalid = t.get("invalid") or ""
         invalid_suffix = f"\n   ⚠️ {_md_escape(invalid)} (won't be saved — edit it first)" if invalid else ""
         dropped_suffix = (

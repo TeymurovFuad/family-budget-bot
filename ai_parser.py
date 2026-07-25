@@ -493,3 +493,54 @@ def parse_quick(text: str, lists: dict) -> dict | None:
 
 def parse_image(image_bytes: bytes, lists: dict, mime_type: str = "image/jpeg") -> list[dict]:
     return get_provider().parse_image(image_bytes, lists, mime_type)
+
+
+# ── Merchant categorization (statement imports) ──────────────────────────────
+#
+# Token economy: statement profiles extract date/amount/description
+# deterministically with zero tokens; the only AI work left is assigning a
+# category to merchants the merchant map doesn't know yet. Sending a compact
+# list of unique merchant names (~5 output tokens each) instead of full
+# transaction JSON keeps the cost at a small fraction of a full parse.
+
+# Kept byte-identical across calls so DeepSeek's prompt-prefix cache applies;
+# all dynamic content (categories, merchants) goes in the user message.
+_CATEGORIZE_SYSTEM_PROMPT = (
+    "You assign spending categories to bank-statement merchant names. "
+    "Reply with ONLY a JSON object mapping each merchant name (key verbatim, "
+    "exactly as given) to the single best category from the provided list. "
+    'Use category names exactly as given. If unsure, use "Other".'
+)
+
+_CATEGORIZE_BATCH_SIZE = 80
+
+
+def categorize_merchants(merchants: list[str], categories: list[str]) -> dict[str, str]:
+    """
+    One compact AI call (per batch of 80) mapping unique merchant names to
+    categories. Returns {merchant: category}; missing/failed merchants are
+    simply absent — the caller falls back to its default. Never raises.
+    """
+    if not merchants or not categories:
+        return {}
+    provider = get_provider()
+    result: dict[str, str] = {}
+    for i in range(0, len(merchants), _CATEGORIZE_BATCH_SIZE):
+        batch = merchants[i:i + _CATEGORIZE_BATCH_SIZE]
+        user = (
+            f"Categories: {json.dumps(categories, ensure_ascii=False)}\n"
+            f"Merchants: {json.dumps(batch, ensure_ascii=False)}"
+        )
+        try:
+            raw = provider.chat([
+                {"role": "system", "content": _CATEGORIZE_SYSTEM_PROMPT},
+                {"role": "user", "content": user},
+            ])
+            parsed = _try_parse_json(raw)
+            if isinstance(parsed, dict):
+                result.update({str(k): str(v) for k, v in parsed.items()})
+            else:
+                log.warning("categorize_merchants: non-object response for batch %d", i)
+        except Exception as exc:
+            log.warning("categorize_merchants batch %d failed: %s", i, exc)
+    return result

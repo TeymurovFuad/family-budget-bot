@@ -145,13 +145,14 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       contradict the proposed separator before saving.
       (`statement_profiles.py`, `handlers/bulk_conv.py`)
 
-- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
-      returns no category; `_normalize_parsed_rows` defaults empties to
-      "Other"; merchant memory only helps for known merchants (empty on first
-      import). The AI-categorization step for unknown merchants (BACKLOG
-      "known format" design: "AI only for unknown merchants") was never wired
-      into the statement path. 1400 rows imported as Other.
-      (`handlers/bulk_conv.py` `_finish_profile_parse`)
+- [x] **Statement imports categorize everything as 'Other'** — fixed: new
+      `ai_parser.categorize_merchants()` makes one compact call (unique
+      merchant names → categories, batched at 80) after merchant memory in
+      `_finish_profile_parse`; only exact Lists matches are applied, rows get
+      a 🤖 preview marker, and AI guesses are NOT persisted to merchant
+      memory (only user preview edits teach the map). This completes the
+      token-economy "split extraction from categorization" design for
+      statement imports. (`ai_parser.py`, `handlers/bulk_conv.py`)
 
 - [x] **Deployed bot stops replying to commands (file uploads still work)** —
       root cause found in VM logs: /help replied with MarkdownV2 containing an
