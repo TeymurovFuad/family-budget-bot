@@ -19,7 +19,6 @@ EDIT_FIELD_MAP = {
     "Category":    "Category",
     "Description": "Description",
     "Date":        "Date",
-    "Person":      "Person",
 }
 
 
@@ -29,7 +28,7 @@ async def cmd_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "✏️ */edit* — Edit a transaction\n\n"
-            "Shows the last 10 transactions\\. Pick one by number, then choose a field to change: Amount, Currency, Category, Description, Date, or Person\\.",
+            "Shows the last 10 transactions\\. Pick one by number, then choose a field to change: Amount, Currency, Category, Description, or Date\\.",
             parse_mode="MarkdownV2",
         )
         return ConversationHandler.END
@@ -49,10 +48,9 @@ async def cmd_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         raw_ccy  = txn.get("Currency", "PLN")
         label    = format_amount(raw_val or 0, raw_ccy or "PLN")
         cat      = txn.get("Category", "")
-        person   = txn.get("Person", "") or "household"
         desc     = txn.get("Description", "") or ""
         date_str = str(txn.get("Date", ""))[:10]
-        lines.append(f"{i}. `{label}` — {cat} / {person} — {desc} ({date_str})")
+        lines.append(f"{i}. `{label}` — {cat} — {desc} ({date_str})")
 
     keyboard = ReplyKeyboardMarkup(
         [[str(i) for i in range(1, 6)], [str(i) for i in range(6, 11)], ["Cancel"]],
@@ -75,7 +73,7 @@ async def edit_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["edit_idx"] = idx
     ctx.user_data["edit_txn"] = ctx.user_data["edit_txns"][idx]
     keyboard = ReplyKeyboardMarkup(
-        [["Amount", "Currency", "Category"], ["Description", "Date", "Person"], ["Cancel"]],
+        [["Amount", "Currency", "Category"], ["Description", "Date"], ["Cancel"]],
         one_time_keyboard=True, resize_keyboard=True,
     )
     await update.message.reply_text("Which field do you want to change?", reply_markup=keyboard)
@@ -102,15 +100,6 @@ async def edit_field(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ccy_list = sorted(load_rates().keys())
         keyboard = ReplyKeyboardMarkup([ccy_list[:3], ccy_list[3:], ["Cancel"]], one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(f"Current: `{current}`\nPick new currency:", parse_mode="Markdown", reply_markup=keyboard)
-    elif text == "Person":
-        persons = load_reference_data().get("persons", [])
-        rows = [[p] for p in persons] + [["Nobody", "Cancel"]]
-        keyboard = ReplyKeyboardMarkup(rows, one_time_keyboard=True, resize_keyboard=True)
-        msg = f"Current: `{current}`\nPick person:" if persons else (
-            f"Current: `{current}`\nType a name or tap Nobody.\n\n"
-            "_Tip: pre-add family members to the Lists sheet in Excel for quick buttons._"
-        )
-        await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=keyboard)
     else:
         await update.message.reply_text(f"Current: `{current}`\nEnter new value:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     return EDIT_VALUE

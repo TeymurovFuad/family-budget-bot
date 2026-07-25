@@ -200,12 +200,13 @@ def test_quick_prompt_includes_currencies():
     assert "PLN" in prompt
 
 
-def test_quick_prompt_includes_persons():
+def test_quick_prompt_omits_persons():
+    # Person field retired — the prompt must not mention household persons.
     lists = {"categories": ["Groceries", "Transport"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"], "persons": ["Alice", "Bob"]}
     prompt = _build_quick_prompt(lists)
-    assert "Alice" in prompt
-    assert "Bob" in prompt
-    assert "exact categories, types, and person names" in prompt.lower()
+    assert "Alice" not in prompt
+    assert "Bob" not in prompt
+    assert "person" not in prompt.lower()
 
 
 def test_quick_prompt_includes_date_instruction():

@@ -350,7 +350,6 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     net      = income - expense - savings
     rate     = savings / income if income > 0 else 0
     by_cat   = sub[sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
-    by_person = sub[sub["Type"] == "Expense"].groupby("Person")["_base"].sum()
     recur    = sub[(sub["Type"] == "Expense") & sub["IsRecurring"].fillna(False).astype(bool)]["_base"].sum()
     discret  = expense - recur
 
@@ -394,12 +393,6 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         lines += ["", "━━━ Original currencies ━━━"]
         for input_ccy, total in by_input_ccy.items():
             lines.append(f"• {input_ccy}: {total:,.0f}")
-
-    if not by_person.empty:
-        lines += ["", "━━━ By Person ━━━"]
-        for person, amt in by_person.sort_values(ascending=False).items():
-            if person:
-                lines.append(f"• {person}: `{format_base_as_currency(amt, ccy, rates)}`")
 
     report_text = "\n".join(lines)
     MAX = 4000

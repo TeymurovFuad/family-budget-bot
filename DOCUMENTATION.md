@@ -45,7 +45,7 @@ Every transaction is one row. There are 13 columns:
 | D | Value | ✅ You fill | The amount in the transaction's own currency |
 | E | Type | ✅ Dropdown | Expense / Income / Savings |
 | F | Category | ✅ Dropdown | One of 17 categories |
-| G | Person | ✅ Dropdown | <YOUR_NAME> / <FAMILY_MEMBER_1> / <FAMILY_MEMBER_2> / <FAMILY_MEMBER_3> — leave blank if it's a household expense |
+| G | Person | ❌ Retired | Legacy column — the household budgets as one unit. The bot always leaves it blank; mention people in Description if needed |
 | H | Description | ✅ Free text | A short note — 3 to 6 words is enough |
 | I | IsRecurring | ✅ You fill | TRUE if paid every month (rent, loan, internet) |
 | J | IsDone | ✅ You fill | TRUE = paid. FALSE = planned but not yet paid (excluded from totals) |
@@ -69,10 +69,9 @@ Without this it shows 0.
 3. Set **Currency** if not PLN. The PLN equivalent calculates automatically.
 4. Choose **Type** from the dropdown: Expense, Income, or Savings.
 5. Choose **Category** from the dropdown.
-6. Set **Person** if the expense is clearly for one family member.
-7. Write a short **Description**.
-8. Set **IsRecurring** = TRUE for anything that repeats every month.
-9. Leave **IsDone** = TRUE for transactions already made.
+6. Write a short **Description** (mention a family member here if it matters).
+7. Set **IsRecurring** = TRUE for anything that repeats every month.
+8. Leave **IsDone** = TRUE for transactions already made.
 
 ---
 
@@ -100,8 +99,8 @@ Without this it shows 0.
 | Subscriptions | Google Drive, Proton VPN, streaming |
 | Other | Anything that doesn't fit |
 
-**Person column** works alongside Category. Use it when an expense is clearly for
-one person. Example: Category = Healthcare, Person = a family member for a pharmacy purchase.
+**Person column** is retired — the household budgets as one unit. Mention a
+family member in the Description when it matters (e.g. "pharmacy — kid").
 
 ---
 
@@ -187,7 +186,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | A | Month abbreviations | Never |
 | B | Transaction types | Never |
 | C | Categories | Add a new category here, then add it to the Dashboard budget table |
-| D | Family members | Add a new person here |
+| D | Family members | Legacy — the Person field is retired; the bot no longer uses this list |
 | E | Years | Add the next year here before January |
 | G | Currency codes | Add a new currency here |
 | H | Rates to PLN | Edit when an exchange rate changes |
@@ -230,7 +229,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/budget` | All 17 categories with budget vs actual and progress bars |
 | `/top` | The 5 biggest expenses this month |
 | `/savings` | Savings rate for each of the last 6 months |
-| `/report` | Full report: fixed vs variable, by category, by person |
+| `/report` | Full report: fixed vs variable, by category |
 | `/chart` | Spending by category rendered as a chart image |
 | `/range` | Report for a custom date range (preset buttons or typed dates) |
 | `/rates` | Exchange rates (`/rates refresh` fetches live rates) |
@@ -292,8 +291,8 @@ Import a whole bank statement or receipt in one go:
 4. The AI output is auto-validated against the Lists sheet:
    - Categories not in the list are fuzzy-matched to a real category
      (or fall back to Other).
-   - Person values that aren't known family members are moved into the
-     description instead.
+   - Any person value the AI still emits is moved into the description
+     (the Person field is retired).
    - Unknown transaction types default to Expense.
    Every correction is reported before the preview.
 5. The bot shows a numbered preview, split across several messages for large

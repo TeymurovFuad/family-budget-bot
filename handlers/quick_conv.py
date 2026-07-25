@@ -108,11 +108,10 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     label    = format_base_as_currency(val_base, ccy, rates)
     desc     = normalized.get("description", "")
     cat      = normalized.get("category", "")
-    person   = normalized.get("person", "") or "household"
     txn_type = normalized.get("type", "Expense")
 
     await update.message.reply_text(
-        f"💳 *{label}* — {cat} / {person} — {desc} ({txn_type})\nSave?",
+        f"💳 *{label}* — {cat} — {desc} ({txn_type})\nSave?",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardMarkup([["Yes", "No"]], one_time_keyboard=True, resize_keyboard=True),
     )
@@ -161,8 +160,8 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             is_recurring=bool(parsed.get("is_recurring", False)),
         )
         log.info(
-            "User %s quick-add transaction saved: value=%s currency=%s category=%s person=%s",
-            uid, transaction.value, transaction.currency, transaction.category, transaction.person,
+            "User %s quick-add transaction saved: value=%s currency=%s category=%s",
+            uid, transaction.value, transaction.currency, transaction.category,
         )
         await append_transaction(transaction)
         log.info("User %s quick-add saved", uid)

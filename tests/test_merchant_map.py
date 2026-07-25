@@ -137,7 +137,7 @@ class TestMerchantMapStore:
         assert label == "Uber trip"
         entry = merchant_map.lookup(merchant_map.load_merchant_map(), "UBER   TRIP")
         assert entry["category"] == "Transport"
-        assert entry["person"] == "Alice"
+        assert "person" not in entry  # field retired — never written anymore
         assert entry["is_recurring"] is True
 
     def test_learn_from_row_without_description_is_noop(self):
@@ -265,7 +265,8 @@ class TestBulkIntegration:
         ]
         notes = _apply_merchant_memory(rows)
         assert rows[0]["category"] == "Transport"
-        assert rows[0]["person"] == "Alice"
+        # Person field retired — a legacy map entry's person is never applied.
+        assert rows[0]["person"] == ""
         assert rows[0].get("mem") is True
         assert rows[1].get("mem") is None
         assert len(notes) == 1 and "merchant memory" in notes[0]

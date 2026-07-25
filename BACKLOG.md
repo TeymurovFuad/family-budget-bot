@@ -190,12 +190,14 @@ promote it as the headline number, don't bury it among nine reports.
 **User decision 2026-07-25: the household budgets as one unit — the Person
 field is retired entirely** (no future per-person scenario). Two stages:
 
-- [ ] **Retire Person, stage 1 (no schema change)** — remove Person from every
+- [x] **Retire Person, stage 1 (no schema change)** — remove Person from every
       flow: /add stops asking (write ""), bulk drops the per-row `person=`
       edit field and the planned ask-once-per-import item, /report drops the
       by-person section, merchant map stops storing person defaults. Column
       stays in MasterData, silently empty. Supersedes the UX-group "person
-      attribution" item.
+      attribution" item. *(done: 2026-07-25 — /add, /edit, /delete, /bulk,
+      quick-add, /report, AI prompts and merchant map all person-free;
+      writers still stamp person="" so the column stays intact)*
 - [ ] **Retire Person, stage 2 (schema)** — drop the Person column itself in
       the schema-simplification PR, together with the other cuts below.
 
@@ -632,9 +634,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: UX
 
-- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once
-      "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays.
-      /add: move person out of the mandatory flow (default household, edit from confirm card).
+- [x] **Person attribution per import** — *(superseded 2026-07-25 by "Retire Person,
+      stage 1": the household budgets as one unit, the Person field is retired)*
 - [ ] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.

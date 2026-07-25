@@ -220,8 +220,6 @@ def _try_parse_structured_text(text: str) -> list[dict] | None:
 def _build_parse_prompt(lists: dict) -> str:
     all_cats  = ", ".join(lists.get("categories", []))
     txn_types = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
-    persons   = ", ".join(lists.get("persons", []))
-    person_note = f" (known persons: {persons})" if persons else ""
     return f"""You are a financial transaction parser. Extract ALL transactions from the input.
 
 Return ONLY a JSON array. Each element must have these exact keys:
@@ -231,7 +229,6 @@ Return ONLY a JSON array. Each element must have these exact keys:
 - "type": {txn_types}
 - "category": one of: {all_cats}
 - "description": clean 2-4 word merchant label (max 60 chars)
-- "person": ""{person_note}
 
 CRITICAL field rules:
 - "description" must be a clean, human-readable merchant or purpose label
@@ -241,9 +238,8 @@ CRITICAL field rules:
 - "category" MUST be copied EXACTLY, character for character, from the list above.
   Never invent, shorten, translate, or paraphrase a category name.
   If unsure, use "Other".
-- "person" identifies WHO IN THE HOUSEHOLD made the transaction. It must be one of
-  the known persons above or "". NEVER put the transfer recipient, counterparty,
-  merchant, or landlord here — mention them in "description" instead.
+- Transfer recipients, counterparties, and landlords belong in "description" —
+  there is no separate field for them.
 - "type" must be coherent with "category": category Savings ⇒ type Savings
   (transfers to your own savings account are Savings, never Expense);
   category Salary ⇒ type Income. Refunds/returns are Income with the
@@ -261,7 +257,7 @@ Rules:
 - If a transaction is ambiguous, still return the best possible structured entry rather than skipping it.
 - Receipt: all items = Expense, category = Groceries unless clearly otherwise.
 - Round amounts to 2 decimal places.
-- Use the exact categories, types, and person names provided above when possible; otherwise fall back to "Other".
+- Use the exact categories and types provided above when possible; otherwise fall back to "Other".
 
 Return ONLY the JSON array, no other text."""
 
@@ -269,8 +265,6 @@ Return ONLY the JSON array, no other text."""
 def _build_quick_prompt(lists: dict) -> str:
     all_cats  = ", ".join(lists.get("categories", []))
     txn_types = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
-    persons   = ", ".join(lists.get("persons", []))
-    person_note = f" (known persons: {persons})" if persons else ""
     return f"""You are a transaction parser for a Polish household finance bot.
 
 Parse the user message as a single financial transaction.
@@ -281,18 +275,17 @@ Return ONLY a JSON object with these keys:
 - "type": {txn_types}
 - "category": one of: {all_cats}
 - "description": clean 2-4 word merchant label (max 40 chars) — never card numbers, BPID:/reference codes, or city/country suffixes
-- "person": ""{person_note}
 
-Use only the exact categories, types, and person names provided above. Do not invent new categories, transaction types, or persons.
+Use only the exact categories and types provided above. Do not invent new categories or transaction types.
 Keep "type" coherent with "category": category Savings ⇒ type Savings (moving money to your own savings is Savings, never Expense); category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
-If you cannot map the message to an exact known category, type, or person, return: {{"not_transaction": true}}
+If you cannot map the message to an exact known category or type, return: {{"not_transaction": true}}
 
 Examples:
-"groceries 89" → {{"value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries", "person": ""}}
-"lunch 45 EUR" → {{"value": 45, "currency": "EUR", "type": "Expense", "category": "Dining Out", "description": "lunch", "person": ""}}
-"salary 5000" → {{"value": 5000, "currency": "PLN", "type": "Income", "category": "Salary", "description": "salary", "person": ""}}
+"groceries 89" → {{"value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
+"lunch 45 EUR" → {{"value": 45, "currency": "EUR", "type": "Expense", "category": "Dining Out", "description": "lunch"}}
+"salary 5000" → {{"value": 5000, "currency": "PLN", "type": "Income", "category": "Salary", "description": "salary"}}
 "hello" → {{"not_transaction": true}}
-"2026-05-24 groceries 89" → {{"date": "2026-05-24", "value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries", "person": ""}}
+"2026-05-24 groceries 89" → {{"date": "2026-05-24", "value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
 """
 
 # ── Provider interface ────────────────────────────────────────────────────────

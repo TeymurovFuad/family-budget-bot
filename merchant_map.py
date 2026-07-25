@@ -3,7 +3,8 @@ merchant_map.py — merchant → category memory.
 
 A small JSON store (data/merchant_map.json, same pattern as user prefs and
 bulk drafts) mapping a cleaned, case-folded merchant key to the defaults the
-household uses for that merchant: category, type, label, person, is_recurring.
+household uses for that merchant: category, type, label, is_recurring.
+(Old entries may still carry a legacy "person" key — tolerated, never written.)
 
 Why: repeat merchants are ~80% of statement rows. A deterministic lookup
 means their categorization never drifts AND costs zero DeepSeek tokens —
@@ -31,7 +32,7 @@ log = logging.getLogger(__name__)
 MERCHANT_MAP_PATH = settings.MERCHANT_MAP_PATH
 
 # Fields a map entry may carry; everything else is dropped on save.
-_ENTRY_FIELDS = ("label", "category", "type", "person", "is_recurring")
+_ENTRY_FIELDS = ("label", "category", "type", "is_recurring")
 
 # A merchant must appear this many times in MasterData (with a dominant
 # category) before seeding trusts it.
@@ -95,7 +96,7 @@ def lookup(mapping: dict, description) -> dict | None:
 
 def learn_from_row(row: dict) -> str | None:
     """
-    Persist one row's category/type/person/is_recurring as the defaults for
+    Persist one row's category/type/is_recurring as the defaults for
     its merchant. Called when the user edits a row in the /bulk preview —
     a human correction is the strongest signal we get. Returns the cleaned
     merchant label that was learned, or None if the row can't be keyed.
@@ -113,7 +114,6 @@ def learn_from_row(row: dict) -> str | None:
         "label": clean_merchant_description(desc.lstrip("'")),
         "category": str(row.get("category")).strip(),
         "type": str(row.get("type") or "Expense").strip(),
-        "person": str(row.get("person") or "").strip(),
         "is_recurring": is_recurring,
     }
     save_merchant_map(mapping)
@@ -137,7 +137,6 @@ def seed_from_master() -> dict:
     desc_h = header_of(MasterDataSchema, "description")
     cat_h = header_of(MasterDataSchema, "category")
     type_h = header_of(MasterDataSchema, "type")
-    person_h = header_of(MasterDataSchema, "person")
     rec_h = header_of(MasterDataSchema, "is_recurring")
     if desc_h not in df.columns or cat_h not in df.columns:
         return {}
@@ -155,7 +154,6 @@ def seed_from_master() -> dict:
             "label": clean_merchant_description(str(desc).lstrip("'")),
             "category": str(cat).strip(),
             "type": str(df.at[i, type_h]).strip() if type_h in df.columns and pd.notna(df.at[i, type_h]) else "Expense",
-            "person": str(df.at[i, person_h]).strip() if person_h in df.columns and pd.notna(df.at[i, person_h]) else "",
             "is_recurring": bool(df.at[i, rec_h]) if rec_h in df.columns and pd.notna(df.at[i, rec_h]) else False,
         })
 
@@ -171,7 +169,6 @@ def seed_from_master() -> dict:
             "label": matching[-1]["label"],
             "category": top_cat,
             "type": Counter(r["type"] for r in matching).most_common(1)[0][0],
-            "person": Counter(r["person"] for r in matching).most_common(1)[0][0],
             "is_recurring": sum(r["is_recurring"] for r in matching) * 2 > len(matching),
         }
     return result
@@ -206,6 +203,6 @@ def try_local_quick_parse(text: str) -> dict | None:
         "type": entry.get("type") or "Expense",
         "category": entry.get("category") or "Other",
         "description": entry.get("label") or clean_merchant_description(desc),
-        "person": entry.get("person") or "",
+        "person": "",  # field retired — legacy map entries with a person key are ignored
         "is_recurring": bool(entry.get("is_recurring", False)),
     }

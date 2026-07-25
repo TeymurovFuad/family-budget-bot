@@ -1,4 +1,4 @@
-"""/add conversation — 9-step flow to log a new transaction."""
+"""/add conversation — 8-step flow to log a new transaction."""
 
 from datetime import datetime, date, timezone
 
@@ -15,7 +15,7 @@ from models import Transaction, AddTransactionState
 from validators import parse_amount
 from states import (
     ADD_VALUE, ADD_CURRENCY, ADD_TYPE, ADD_CATEGORY,
-    ADD_PERSON, ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
+    ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
 )
 
 
@@ -24,7 +24,7 @@ async def cmd_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "➕ */add* — Add a transaction\n\n"
-            "Guided 9\\-step flow: amount → currency → type → category → person → date → description → recurring → confirm\\.\n"
+            "Guided 8\\-step flow: amount → currency → type → category → date → description → recurring → confirm\\.\n"
             "You can /cancel at any step\\.",
             parse_mode="MarkdownV2",
         )
@@ -136,29 +136,7 @@ async def add_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please choose from the list.")
         return ADD_CATEGORY
     state.category = cat
-    persons = lists["persons"]
-    if persons:
-        keyboard = ReplyKeyboardMarkup(
-            [persons, ["— nobody specific —"]], one_time_keyboard=True, resize_keyboard=True
-        )
-        msg = "For *whom*?"
-    else:
-        keyboard = ReplyKeyboardMarkup(
-            [["— nobody specific —"]], one_time_keyboard=True, resize_keyboard=True
-        )
-        msg = (
-            "For *whom*? Type a name or tap skip.\n\n"
-            "_Tip: you can pre-add family members to the Lists sheet in Excel "
-            "so they appear as quick buttons here._"
-        )
-    await update.message.reply_text(msg, parse_mode="Markdown", reply_markup=keyboard)
-    return ADD_PERSON
-
-
-async def add_person(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    p = update.message.text.strip()
-    state: AddTransactionState = ctx.user_data["state"]
-    state.person = "" if "nobody" in p.lower() else p
+    state.person = ""  # Person field retired — the household budgets as one unit
     await update.message.reply_text(
         "Date? (YYYY-MM-DD or 'today'):",
         reply_markup=ReplyKeyboardMarkup([["today"]], one_time_keyboard=True, resize_keyboard=True),
@@ -241,7 +219,6 @@ async def add_recurring(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Amount:      `{state.value:,.2f} {ccy}`{pln_note}\n"
         f"Type:        `{state.transaction_type}`\n"
         f"Category:    `{state.category or '—'}`\n"
-        f"Person:      `{state.person or '—'}`\n"
         f"Date:        `{txn_date.strftime('%Y-%m-%d')}`\n"
         f"Description: `{state.description or '—'}`\n"
         f"Recurring:   `{'Yes' if state.is_recurring else 'No'}`"

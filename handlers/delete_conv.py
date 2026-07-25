@@ -40,9 +40,8 @@ async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         val      = txn.get("Value", "?")
         txn_ccy  = str(txn.get("Currency", "PLN") or "PLN")
         cat      = str(txn.get("Category", "") or "—")
-        person   = str(txn.get("Person", "") or "—")
         label    = str(txn.get("Description", "") or cat)
-        lines.append(f"{i}. `{val} {txn_ccy}` — {cat} / {person} — {label} ({date_str})")
+        lines.append(f"{i}. `{val} {txn_ccy}` — {cat} — {label} ({date_str})")
 
     lines.append("\nSend the number, or /cancel")
     kb = [[str(i) for i in range(1, len(recent_reversed) + 1)]]
