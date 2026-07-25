@@ -288,6 +288,14 @@ def test_salary_mask_description_ignored_when_category_present():
     assert list(mask) == [False, True, True, False]
 
 
+def test_salary_mask_nan_category_falls_back_to_description():
+    df = _detect_df()
+    df["Category"] = [float("nan"), None, float("nan"), "Groceries"]
+    df["Description"] = ["Salary", "SALARY JUL 2024", "x", ""]
+    mask = cycles.salary_mask(df)
+    assert list(mask) == [True, True, False, False]
+
+
 def test_salary_keyword_not_matched_as_substring():
     df = _detect_df()
     df["Description"] = ["salaryman payment", "x", "y", ""]

@@ -1222,6 +1222,27 @@ class TestBulkConvReceive:
             assert "50" in sent
             assert ctx.user_data["bulk_parsed"], "draft must be loaded for save/cancel"
 
+    async def test_second_upload_does_not_clobber_held_overflow(self):
+        upd = make_update("50 PLN groceries", user_id=99998)
+        ctx = make_ctx()
+        held = [{"date": "2024-05-01", "value": 7, "currency": "PLN",
+                 "type": "Expense", "category": "Groceries", "description": "held earlier",
+                 "person": ""}]
+        ctx.user_data["_pending_overflow"] = held
+        with tempfile.TemporaryDirectory() as tmpdir:
+            draft_dir = Path(tmpdir) / "bulk_drafts"
+            draft_dir.mkdir()
+            draft_path = draft_dir / "99998.json"
+            draft_path.write_text(json.dumps([{"date": f"2024-01-{i:02d}", "value": 1, "currency": "PLN", "category": "Groceries", "description": "x", "person": "", "status": "pending"} for i in range(1, 52)]))
+            with patch("handlers.bulk_conv._bulk_draft_dir", return_value=draft_dir), \
+                 patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+                 patch("handlers.bulk_conv.parse_text", return_value=[{"date": "2024-06-01", "value": 15, "currency": "PLN", "category": "Groceries", "description": "milk", "person": ""}]):
+                result = await bulk_receive(upd, ctx)
+            assert result == states.BULK_CONFIRM
+            assert ctx.user_data["_pending_overflow"] == held
+            sent = upd.message.reply_text.call_args.args[0]
+            assert "held" in sent and "NOT kept" in sent
+
     async def test_bulk_receive_allows_exactly_50_pending_entries(self):
         upd = make_update("50 PLN groceries", user_id=77777)
         ctx = make_ctx()

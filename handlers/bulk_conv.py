@@ -1695,6 +1695,18 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         log.info("User %s bulk normalize: %d corrections", uid, len(corrections))
 
     if _draft_limit_reached(uid):
+        held = ctx.user_data.get("_pending_overflow")
+        if held:
+            # Never overwrite (or silently append to) rows already held —
+            # that would lose the earlier paid-for parse.
+            await update.message.reply_text(
+                f"⚠️ You already have {len(held)} row(s) held from a previous upload. "
+                f"Save or cancel your current draft first to release them — "
+                f"this upload was NOT kept.",
+                reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
+            )
+            ctx.user_data["bulk_parsed"] = _load_user_draft(uid)
+            return BULK_CONFIRM
         # Do NOT merge the new rows — hold them so the paid-for parse survives.
         ctx.user_data["_pending_overflow"] = _sort_bulk_rows(parsed)
         await update.message.reply_text(

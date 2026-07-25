@@ -159,6 +159,22 @@ class TestValidateParsedRow:
         assert norm["category"] == "Other"
         assert any("transaction type" in c for c in corr)
 
+    def test_income_category_is_not_promoted_to_type(self):
+        lists = {**LISTS, "categories": ["Groceries", "Income", "Other"]}
+        ok, _, norm, corr = validate_parsed_row(
+            _row(type="Expense", category="Income"), lists, today=TODAY)
+        assert ok
+        assert norm["type"] == "Expense"
+        assert norm["category"] == "Income"
+        assert corr == []
+
+    def test_unknown_income_category_rejected_not_promoted(self):
+        lists = {**LISTS, "categories": ["Groceries", "Other"]}
+        ok, reason, *_ = validate_parsed_row(
+            _row(type="Expense", category="Income"), lists, today=TODAY)
+        assert not ok
+        assert "Unknown category" in reason
+
     def test_txn_type_in_category_field_promoted_case_insensitive(self):
         lists = {**LISTS, "categories": ["Groceries", "Transport", "Salary", "Other"]}
         ok, _, norm, _ = validate_parsed_row(
