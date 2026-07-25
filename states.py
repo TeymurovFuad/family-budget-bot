@@ -4,7 +4,8 @@ Import from here in every handler module.
 """
 
 (ADD_VALUE, ADD_CURRENCY, ADD_TYPE, ADD_CATEGORY,
- ADD_PERSON, ADD_DESC, ADD_RECURRING, ADD_CONFIRM) = range(8)
+ ADD_PERSON,  # retired 2026-07-25 — person step removed; kept so numbering doesn't shift
+ ADD_DESC, ADD_RECURRING, ADD_CONFIRM) = range(8)
 ADD_DATE    = 8
 
 DELETE_PICK = 200

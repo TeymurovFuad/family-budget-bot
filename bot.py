@@ -13,7 +13,7 @@ Module layout
   handlers/
     misc.py          /start  /help  /setcurrency
     reports.py       /summary /week /budget /top /savings /report /rates /chart
-    add_conv.py      /add  (9-step conversation)
+    add_conv.py      /add  (8-step conversation)
     edit_conv.py     /edit conversation
     delete_conv.py   /delete conversation
     bulk_conv.py     /bulk conversation
@@ -41,7 +41,7 @@ from config import BOT_TOKEN, TIMEZONE, log
 from excel_ops import replay_recovery_queue
 from handlers.add_conv import (
     cmd_add, add_value, add_currency, add_type, add_category,
-    add_person, add_date, add_desc, add_skip_desc, add_recurring,
+    add_date, add_desc, add_skip_desc, add_recurring,
     add_confirm, add_cancel,
 )
 from handlers.bulk_conv import (
@@ -71,7 +71,7 @@ from scheduled import (
 )
 from states import (
     ADD_VALUE, ADD_CURRENCY, ADD_TYPE, ADD_CATEGORY,
-    ADD_PERSON, ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
+    ADD_DATE, ADD_DESC, ADD_RECURRING, ADD_CONFIRM,
     DELETE_PICK, SET_CCY,
     EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM,
     BULK_RECEIVE, BULK_CONFIRM,
@@ -187,7 +187,6 @@ def build_application() -> Application:
             ADD_CURRENCY:  [MessageHandler(filters.TEXT & ~filters.COMMAND, add_currency)],
             ADD_TYPE:      [MessageHandler(filters.TEXT & ~filters.COMMAND, add_type)],
             ADD_CATEGORY:  [MessageHandler(filters.TEXT & ~filters.COMMAND, add_category)],
-            ADD_PERSON:    [MessageHandler(filters.TEXT & ~filters.COMMAND, add_person)],
             ADD_DATE:      [MessageHandler(filters.TEXT & ~filters.COMMAND, add_date)],
             ADD_DESC:      [
                 CommandHandler("skip", add_skip_desc),

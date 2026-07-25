@@ -355,14 +355,14 @@ The **Lists** sheet in the Excel file controls all reference data. The bot reads
 | A | Month names (Jan … Dec) |
 | B | Transaction Type (Expense, Income, Savings) |
 | C | Category (unified list for all transaction types) |
-| D | Person |
+| D | Person _(legacy — the Person field is retired; the bot no longer uses this list)_ |
 | E | Year |
 | F | _(unused)_ |
 | G | _(unused)_ |
 | I | Currency code (e.g. `PLN`, `EUR`, `USD`) |
 | J | Exchange rate (PLN per 1 unit of the currency) |
 
-> **All lists (categories, currencies, persons, transaction types) are read live from Excel — add/remove values anytime without restarting the bot.**
+> **All lists (categories, currencies, transaction types) are read live from Excel — add/remove values anytime without restarting the bot.**
 > Col C is the single source of truth for categories — add any category here and it appears in the bot keyboard and Excel dropdown for all transaction types (Expense, Income, Savings).
 > To add a new currency: add a row in columns I:J and it will appear in the AI parser immediately.
 

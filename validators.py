@@ -11,9 +11,6 @@ import hashlib
 import re
 from datetime import date, datetime, timezone
 
-# Person values that mean "household / nobody specific".
-HOUSEHOLD_ALIASES = {"household", "nobody", "none", ""}
-
 # Quick-add / /add date sanity: how far back a date may be without confirmation.
 MAX_PAST_DAYS = 90
 
@@ -169,7 +166,7 @@ def validate_parsed_row(
     """
     Validate and normalize one parsed transaction row against the Lists sheet.
 
-    Ensures exact list values for type, category, currency and person, a
+    Ensures exact list values for type, category and currency, a
     positive numeric value, a sane date, and type↔category coherence.
     Unambiguous problems are auto-corrected (negative value → Expense,
     category Savings ⇒ type Savings) and reported in `corrections`.
@@ -179,7 +176,6 @@ def validate_parsed_row(
     txn_types = [str(t).strip() for t in lists.get("txn_types", []) if t is not None]
     categories = [str(c).strip() for c in lists.get("categories", []) if c is not None]
     currencies = [str(c).strip() for c in lists.get("currencies", []) if c is not None]
-    persons = [str(p).strip() for p in lists.get("persons", []) if p is not None]
     if not row:
         return False, "Could not parse a transaction.", {}, []
 
@@ -197,13 +193,11 @@ def validate_parsed_row(
     txn_type_raw = _normalize_str(row.get("type", ""))
     category_raw = _normalize_str(row.get("category", ""))
     currency_raw = _normalize_str(row.get("currency", "PLN")).upper()
-    person_raw = _normalize_str(row.get("person", ""))
     date_raw = _normalize_str(row.get("date", ""))
 
     txn_type_map = {t.lower(): t for t in txn_types}
     category_map = {c.lower(): c for c in categories}
     currency_map = {c.upper(): c for c in currencies}
-    person_map = {p.lower(): p for p in persons}
 
     # Signed amounts come from bank exports — negative means money out.
     if value < 0:
@@ -227,17 +221,10 @@ def validate_parsed_row(
     if currencies and currency_raw not in currency_map:
         return False, f"Unknown currency '{currency_raw}'. Use one of: {', '.join(currencies)}.", {}, []
 
-    if persons:
-        if person_raw.lower() in HOUSEHOLD_ALIASES:
-            normalized_person = ""
-        elif person_raw.lower() not in person_map:
-            return False, (
-                f"Unknown person '{person_raw}'. Use one of: {', '.join(persons)} or leave blank for household."
-            ), {}, []
-        else:
-            normalized_person = person_map[person_raw.lower()]
-    else:
-        normalized_person = "" if person_raw.lower() in HOUSEHOLD_ALIASES else person_raw
+    # Person field is retired — the household budgets as one unit. Whatever
+    # arrives here is normalized to "" (callers relocate names to description
+    # before validation).
+    normalized_person = ""
 
     parsed_date = None
     if date_raw:

@@ -60,7 +60,7 @@ from handlers.menu import (
 )
 from handlers.add_conv import (
     cmd_add, add_value, add_currency, add_type, add_category,
-    add_person, add_date, add_desc, add_skip_desc, add_recurring,
+    add_date, add_desc, add_skip_desc, add_recurring,
     add_confirm, add_cancel,
 )
 from handlers.edit_conv import (
@@ -489,11 +489,13 @@ class TestAddConvCategory:
         ctx.user_data["lists"] = SAMPLE_LISTS
         return ctx
 
-    async def test_valid_category_advances_to_person(self):
+    async def test_valid_category_advances_straight_to_date(self):
+        # Person step retired — category goes directly to the date prompt.
         ctx = self._make_ctx()
         upd = make_update("Groceries")
         result = await add_category(upd, ctx)
-        assert result == states.ADD_PERSON
+        assert result == states.ADD_DATE
+        assert ctx.user_data["state"].person == ""
 
     async def test_invalid_category_stays(self):
         ctx = self._make_ctx()
@@ -506,32 +508,6 @@ class TestAddConvCategory:
         upd = make_update("Transport")
         await add_category(upd, ctx)
         assert ctx.user_data["state"].category == "Transport"
-
-
-class TestAddConvPerson:
-    def _make_ctx(self):
-        from models import AddTransactionState
-        ctx = make_ctx()
-        ctx.user_data["state"] = AddTransactionState(
-            display_currency="PLN", rates=SAMPLE_RATES,
-            value=100.0, currency="PLN", transaction_type="Expense", category="Groceries"
-        )
-        ctx.user_data["lists"] = SAMPLE_LISTS
-        return ctx
-
-    async def test_person_name_stored(self):
-        ctx = self._make_ctx()
-        upd = make_update("Alice")
-        result = await add_person(upd, ctx)
-        assert result == states.ADD_DATE
-        assert ctx.user_data["state"].person == "Alice"
-
-    async def test_nobody_stores_empty_string(self):
-        ctx = self._make_ctx()
-        upd = make_update("— nobody specific —")
-        result = await add_person(upd, ctx)
-        assert result == states.ADD_DATE
-        assert ctx.user_data["state"].person == ""
 
 
 class TestAddConvDate:
@@ -869,12 +845,12 @@ class TestEditConvField:
             result = await edit_field(upd, ctx)
         assert result == states.EDIT_VALUE
 
-    async def test_valid_field_person_shows_keyboard(self):
+    async def test_person_no_longer_editable(self):
+        # Person field retired — picking it must be rejected like any unknown field.
         ctx = self._make_ctx()
         upd = make_update("Person")
-        with patch("handlers.edit_conv.load_reference_data", return_value=SAMPLE_LISTS):
-            result = await edit_field(upd, ctx)
-        assert result == states.EDIT_VALUE
+        result = await edit_field(upd, ctx)
+        assert result == states.EDIT_FIELD
 
     async def test_invalid_field_stays(self):
         ctx = self._make_ctx()
@@ -890,7 +866,7 @@ class TestEditConvField:
 
     def test_edit_field_map_has_all_expected_keys(self):
         assert set(EDIT_FIELD_MAP.keys()) == {
-            "Amount", "Currency", "Category", "Description", "Date", "Person"
+            "Amount", "Currency", "Category", "Description", "Date"
         }
 
 
@@ -1169,13 +1145,13 @@ class TestBulkConvReceive:
             result = await bulk_receive(upd, ctx)
         assert result == states.BULK_CONFIRM
 
-    def test_format_bulk_preview_includes_person_and_type(self):
+    def test_format_bulk_preview_includes_type_but_not_person(self):
         pages = _format_bulk_preview([{"date": "2024-06-15", "value": 50, "currency": "PLN",
                                        "type": "Expense", "category": "Groceries",
                                        "description": "shop", "person": "Alice"}])
         preview = "\n".join(pages)
         assert "Expense" in preview
-        assert "Alice" in preview
+        assert "person=" not in preview
 
     def test_format_bulk_preview_single_page_for_small_drafts(self):
         rows = [{"date": "2024-06-15", "value": 50, "currency": "PLN", "type": "Expense",
@@ -1444,7 +1420,8 @@ class TestQuickConvHandleQuickAdd:
         assert "❌" in sent or "❌" in sent  # specific reason surfaced
         assert "/add" in sent
 
-    async def test_parse_normalizes_known_person(self):
+    async def test_parse_blanks_known_person(self):
+        # Person field retired — even a known name is normalized to "".
         upd = make_update("50 PLN groceries for alice")
         ctx = make_ctx()
         parsed = {"value": 50, "currency": "PLN", "category": "Groceries",
@@ -1456,20 +1433,22 @@ class TestQuickConvHandleQuickAdd:
              patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             result = await handle_quick_add(upd, ctx)
         assert result == states.QUICK_CONFIRM
-        assert ctx.user_data["quick_parsed"]["person"] == "Alice"
+        assert ctx.user_data["quick_parsed"]["person"] == ""
 
-    async def test_parse_rejects_unknown_person_when_persons_exist(self):
+    async def test_parse_accepts_unknown_person_and_blanks_it(self):
+        # Person field retired — an unknown name no longer rejects the parse.
         upd = make_update("50 PLN groceries for carol")
         ctx = make_ctx()
         parsed = {"value": 50, "currency": "PLN", "category": "Groceries",
                   "description": "shop", "type": "Expense", "person": "Carol"}
         with patch("handlers.quick_conv.load_reference_data", return_value=SAMPLE_LISTS), \
-             patch("handlers.quick_conv.parse_quick", return_value=parsed):
+             patch("handlers.quick_conv.parse_quick", return_value=parsed), \
+             patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
+             patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
+             patch("handlers.quick_conv.format_base_as_currency", return_value="50 PLN"):
             result = await handle_quick_add(upd, ctx)
-        assert result is None
-        sent = upd.message.reply_text.call_args.args[0]
-        assert "❌" in sent or "❌" in sent  # specific reason surfaced
-        assert "/add" in sent
+        assert result == states.QUICK_CONFIRM
+        assert ctx.user_data["quick_parsed"]["person"] == ""
 
     async def test_parse_rejects_non_positive_value(self):
         upd = make_update("0 PLN groceries")
@@ -1696,7 +1675,7 @@ class TestAddFlowIntegration:
              patch("handlers.add_conv.load_reference_data", return_value=SAMPLE_LISTS), \
              patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
-             patch("handlers.add_conv.append_transaction", AsyncMock()), \
+             patch("handlers.add_conv.append_transaction", AsyncMock()) as mock_append, \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
              patch("handlers.add_conv._last_saved", {}), \
              patch("handlers.add_conv.sanitize_description", side_effect=lambda t: t.strip()):
@@ -1721,17 +1700,13 @@ class TestAddFlowIntegration:
             r = await add_type(upd, ctx)
             assert r == states.ADD_CATEGORY
 
-            # Step 5 — category
+            # Step 5 — category (person step retired — jumps straight to date)
             upd = make_update("Groceries")
             r = await add_category(upd, ctx)
-            assert r == states.ADD_PERSON
-
-            # Step 6 — person
-            upd = make_update("Alice")
-            r = await add_person(upd, ctx)
             assert r == states.ADD_DATE
+            assert ctx.user_data["state"].person == ""
 
-            # Step 7 — date
+            # Step 6 — date
             upd = make_update("today")
             r = await add_date(upd, ctx)
             assert r == states.ADD_DESC
@@ -1750,6 +1725,10 @@ class TestAddFlowIntegration:
             upd = make_update("✅ Save")
             r = await add_confirm(upd, ctx)
             assert r == ConversationHandler.END
+
+            # Person field is retired — the saved transaction always carries "".
+            saved_txn = mock_append.await_args.args[0]
+            assert saved_txn.person == ""
 
         # After full flow user_data must be cleared
         assert ctx.user_data == {}
@@ -1880,12 +1859,13 @@ class TestNormalizeParsedRows:
         assert fixed[0]["person"] == ""
         assert "Anna Example Landlord" in fixed[0]["description"]
 
-    def test_known_person_untouched(self):
+    def test_any_person_moved_to_description(self):
+        # Person field retired — even a known household name is relocated.
         from handlers.bulk_conv import _normalize_parsed_rows
         rows = [{"category": "Groceries", "person": "Alice", "type": "Expense", "description": "x"}]
         fixed, corr = _normalize_parsed_rows(rows, self.LISTS)
-        assert fixed[0]["person"] == "Alice"
-        assert corr == []
+        assert fixed[0]["person"] == ""
+        assert "Alice" in fixed[0]["description"]
 
     def test_unknown_type_defaults_to_expense(self):
         from handlers.bulk_conv import _normalize_parsed_rows

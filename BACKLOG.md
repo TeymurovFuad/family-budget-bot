@@ -178,6 +178,73 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Follow-up: person-retirement review notes (PR #41, 2026-07-25)
+
+- [ ] **Dead reads left for stage 2** — `AddTransactionState.person` is now
+      always "", and `data.py` still loads the Lists `persons` column that no
+      flow consumes. Both are deliberate stage-1 leftovers; fold their removal
+      into the schema-simplification PR alongside the Person column drop.
+      (`models.py`, `data.py`)
+- [ ] **`_normalize_parsed_rows` person-relocation message says "moved to
+      description"** — accurate, but the user can no longer see or edit a
+      person field, so the phrasing may confuse; consider "recipient noted in
+      description". Cosmetic. (`handlers/bulk_conv.py`)
+
+## Minimalism audit — agreed design (Designer review, 2026-07-25)
+
+Whole-workbook redundancy audit against comparable minimal budget apps
+(r/ynab usage discussions, Actual-vs-Firefly comparisons, GitHub Telegram
+budget bots). Verdict: the core — quick entry → categories → budget-vs-actual
+→ cycle unaccounted — matches exactly what succeeds elsewhere; all redundancy
+is peripheral. The cycle "unaccounted" metric is the bot's differentiator:
+promote it as the headline number, don't bury it among nine reports.
+
+**User decision 2026-07-25: the household budgets as one unit — the Person
+field is retired entirely** (no future per-person scenario). Two stages:
+
+- [x] **Retire Person, stage 1 (no schema change)** — remove Person from every
+      flow: /add stops asking (write ""), bulk drops the per-row `person=`
+      edit field and the planned ask-once-per-import item, /report drops the
+      by-person section, merchant map stops storing person defaults. Column
+      stays in MasterData, silently empty. Supersedes the UX-group "person
+      attribution" item. *(done: 2026-07-25 — /add, /edit, /delete, /bulk,
+      quick-add, /report, AI prompts and merchant map all person-free;
+      writers still stamp person="" so the column stays intact)*
+- [ ] **Retire Person, stage 2 (schema)** — drop the Person column itself in
+      the schema-simplification PR, together with the other cuts below.
+
+Remaining agreed cuts, in the order they pay off:
+
+- [ ] **Delete the goals columns from ListsSchema** (`goal_name`/`goal_alloc`/
+      `goal_base`) — declared in the schema, referenced nowhere else in the
+      codebase. Pure dead weight; delete the schema fields, leave workbook
+      cells alone. (`excel_schema.py`)
+- [ ] **Drop `IsDone`** — every writer hardcodes True, ~20 report filters
+      carry `& df["IsDone"]` that can never exclude anything, and the dead
+      field already caused one bug. Fold into the schema-simplification PR
+      (migration + filter sweep). (`excel_schema.py`, `models.py`, `data.py`,
+      `handlers/reports.py`)
+- [ ] **Collapse the report surface to two commands** — keep `/summary`
+      (period picker: this cycle / this month / last 7 days / range) and
+      `/budget`; fold `/top`, `/savings`, `/week`, `/report`, `/chart`,
+      `/range` content into sections/buttons of those two. Retires six
+      commands, closes the cycle-awareness gaps for /report and /top by
+      construction, shrinks the help/MarkdownV2/E2E surface. Do together
+      with the /summary picker UX PR (same screen).
+- [ ] **Schema-simplification PR scope (consolidated)** — one migration, four
+      cuts: derive Year/Month from Date (existing item), drop IsDone, drop
+      Person column (stage 2), drop goals columns; convert Monthly Summary
+      to dynamic formulas (existing "never updated" bug's option c) so the
+      PR #38 row-append machinery can be deleted. One script, one formula
+      sweep, four redundancies gone.
+- [ ] **Recurring detection from history replaces the /add question**
+      (existing UX item, elevated) — same merchant ±10% in ≥2 prior months
+      ⇒ auto-flag; /add stops asking, bulk stops hardcoding False.
+- [ ] **Quick-add primary, /add default-and-confirm** (existing UX item,
+      elevated) — after amount+category pre-fill everything, jump to confirm
+      card; 9 round-trips → 2. Entry friction is the #1 churn cause in
+      comparable apps.
+
 ## Follow-up: AI-categorization review notes (PR #40, 2026-07-25)
 
 - [ ] **Model must echo merchant names verbatim for the mapping to apply** —
@@ -579,9 +646,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: UX
 
-- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once
-      "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays.
-      /add: move person out of the mandatory flow (default household, edit from confirm card).
+- [x] **Person attribution per import** — *(superseded 2026-07-25 by "Retire Person,
+      stage 1": the household budgets as one unit, the Person field is retired)*
 - [ ] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.
@@ -957,6 +1023,12 @@ Help text examples updated to EUR in PR #32 (groceries example, setbudget limit 
 rates help). Remaining PLN references in business logic strings and any timezone-specific
 wording need a second pass — deferred to avoid scope creep in PR #32.
 
+- [ ] **AI quick-parse prompt says "a Polish household finance bot"** —
+      `ai_parser.py` `_build_quick_prompt` hardcodes the locale in a public-repo
+      prompt (found during PR #41 review). Replace with a neutral phrase
+      ("a household finance bot"); check `_build_parse_prompt` and the other
+      prompts for similar locale wording while there — same family as the
+      "zł/zl = PLN" alias item below.
 - [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
       note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
       setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm

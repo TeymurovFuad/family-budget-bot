@@ -1024,13 +1024,12 @@ _DRAFT_LIMIT_ENTRIES = 50
 def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict], list[str]]:
     """
     Enforce Lists reference data on AI output — the model drifts no matter what
-    the prompt says (invents 'Shopping' next to 'Gifts & Shopping', puts
-    transfer recipients into person). Auto-correct what's unambiguous, report
+    the prompt says (invents 'Shopping' next to 'Gifts & Shopping', emits a
+    legacy person field). Auto-correct what's unambiguous, report
     every correction so the user sees them in the preview.
     """
     categories = lists.get("categories") or []
     cat_by_lower = {c.lower(): c for c in categories}
-    persons = {str(p).strip() for p in (lists.get("persons") or [])}
     types = set(lists.get("txn_types") or ["Expense", "Income", "Savings"])
     corrections: list[str] = []
 
@@ -1055,9 +1054,9 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
             row["category"] = fixed or "Other"
             corrections.append(f"row {i}: category '{cat}' → '{row['category']}'")
 
-        # Person: must be a known household member — recipients go to description
+        # Person field is retired — any name the AI still emits belongs in the description
         per = str(row.get("person") or "").strip()
-        if per and per not in persons:
+        if per:
             desc = str(row.get("description") or "").strip()
             row["description"] = (f"{desc} — {per}" if desc else per)[:120]
             row["person"] = ""
@@ -1094,9 +1093,6 @@ def _apply_merchant_memory(parsed: list[dict]) -> list[str]:
             if remembered and remembered != str(row.get(field) or "").strip():
                 changed.append(f"{field} '{row.get(field) or ''}' → '{remembered}'")
                 row[field] = remembered
-        if entry.get("person") and not str(row.get("person") or "").strip():
-            row["person"] = entry["person"]
-            changed.append(f"person → '{entry['person']}'")
         if entry.get("is_recurring") and not row.get("is_recurring"):
             row["is_recurring"] = True
             changed.append("is_recurring → yes")
@@ -1231,9 +1227,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
     footer = "\n" + _bulk_footer(parsed)
     row_lines = []
     for i, t in enumerate(parsed, 1):
-        person = t.get("person") or ""
         txn_type = t.get("type") or ""
-        person_suffix = f" | person={_md_escape(person)}" if person else ""
         type_suffix = f" | type={_md_escape(txn_type)}" if txn_type else ""
         mem_suffix = " 🧠" if t.get("mem") else (" 🤖" if t.get("ai") else "")
         invalid = t.get("invalid") or ""
@@ -1261,7 +1255,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
         row_lines.append(
             f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
-            f"{mem_suffix}{type_suffix}{person_suffix}{invalid_suffix}"
+            f"{mem_suffix}{type_suffix}{invalid_suffix}"
             f"{dup_suffix}{loose_suffix}{identical_suffix}{dropped_suffix}"
         )
 
@@ -1423,7 +1417,7 @@ def _apply_bulk_edit(
     if not (0 <= idx < len(parsed)):
         return False, "invalid", []
     if field not in {"date", "value", "currency", "type", "category", "description",
-                     "person", "is_recurring"}:
+                     "is_recurring"}:
         return False, "invalid", []
 
     notes: list[str] = []
@@ -1450,7 +1444,7 @@ def _apply_bulk_edit(
         notes.extend(_revalidate_bulk_row(parsed[idx], lists, idx + 1))
     # A human correction to categorization is the strongest signal there is —
     # remember it so future imports of this merchant skip the AI's guess.
-    if field in {"category", "type", "person", "is_recurring"} and not parsed[idx].get("invalid"):
+    if field in {"category", "type", "is_recurring"} and not parsed[idx].get("invalid"):
         learned = merchant_map.learn_from_row(parsed[idx])
         if learned:
             notes.append(f"row {idx + 1}: remembered '{learned}' → "

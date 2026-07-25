@@ -92,14 +92,14 @@ class TestCoerceBool:
 class TestValidateParsedRow:
     def test_valid_row_normalized(self):
         ok, reason, norm, corr = validate_parsed_row(
-            _row(type="expense", category="groceries", currency="pln", person="alice"),
+            _row(type="expense", category="groceries", currency="pln"),
             LISTS, today=TODAY,
         )
         assert ok
         assert norm["type"] == "Expense"
         assert norm["category"] == "Groceries"
         assert norm["currency"] == "PLN"
-        assert norm["person"] == "Alice"
+        assert norm["person"] == ""
         assert norm["date"] == date(2026, 7, 20)
         assert corr == []
 
@@ -109,9 +109,11 @@ class TestValidateParsedRow:
         assert not ok
         assert "Grocries" in reason
 
-    def test_unknown_person_rejected(self):
-        ok, reason, *_ = validate_parsed_row(_row(person="Carol"), LISTS, today=TODAY)
-        assert not ok and "Carol" in reason
+    def test_person_always_normalized_to_empty(self):
+        # Person field retired — any value is accepted and blanked, never rejected.
+        ok, _, norm, _ = validate_parsed_row(_row(person="Carol"), LISTS, today=TODAY)
+        assert ok
+        assert norm["person"] == ""
 
     def test_unknown_currency_rejected(self):
         ok, reason, *_ = validate_parsed_row(_row(currency="GBP"), LISTS, today=TODAY)

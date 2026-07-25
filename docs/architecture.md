@@ -120,8 +120,7 @@ flowchart TD
     VALUE --> CCY["Choose currency\n(from Lists col I)"]
     CCY --> TYPE["Choose type\nExpense · Income · Savings"]
     TYPE --> CAT["Choose category\n(from Lists col C)"]
-    CAT --> PERSON["For whom?\n(from Lists col D)"]
-    PERSON --> DATE["Enter date\n(YYYY-MM-DD or 'today')"]
+    CAT --> DATE["Enter date\n(YYYY-MM-DD or 'today')"]
     DATE --> DESC["Short description\n(or /skip)"]
     DESC --> RECUR["Recurring?\nYes / No"]
     RECUR --> CONFIRM["📝 Confirm summary"]
@@ -147,7 +146,7 @@ flowchart TD
     CHUNK -->|yes| PARTS["ai_parser: split at date headers,\nparse in chunks, merge results\n(progress notice sent)"]
     CHUNK -->|no| ONE["ai_parser: single parse\n(salvages truncated JSON)"]
     PARTS --> NORM
-    ONE --> NORM["Normalize vs Lists sheet:\nfuzzy-map categories, unknown\npersons → description,\ncorrections reported"]
+    ONE --> NORM["Normalize vs Lists sheet:\nfuzzy-map categories, stray\nperson values → description,\ncorrections reported"]
     NORM --> PREVIEW["Paginated preview\n(sorted by date, stable row numbers)"]
     PREVIEW -->|"2 category=Transport"| EDIT["Apply edit,\npersist draft, re-preview"]
     EDIT --> PREVIEW
@@ -234,7 +233,7 @@ graph TD
     BOT["bot.py\nregisters handlers\nstarts polling"]
 
     BOT --> MENU_H["handlers/menu.py\nbottom nav + routing"]
-    BOT --> ADD_H["handlers/add_conv.py\n9-step /add flow"]
+    BOT --> ADD_H["handlers/add_conv.py\n8-step /add flow"]
     BOT --> EDIT_H["handlers/edit_conv.py\nedit last transaction"]
     BOT --> BULK_H["handlers/bulk_conv.py\n/bulk import flow\n+ per-user draft persistence"]
     BOT --> REP_H["handlers/reports.py\nall report commands + charts"]
@@ -286,7 +285,7 @@ gantt
 
 | Rule | Detail |
 |---|---|
-| **No hardcoded lists** | Categories, persons, currencies, types all read live from Lists sheet |
+| **No hardcoded lists** | Categories, currencies, types all read live from Lists sheet |
 | **Single category list** | Lists col C is used for all transaction types (Expense, Income, Savings) |
 | **_pln fallback** | If `Value (PLN)` formula cache is empty, recomputed from `Value × rate` |
 | **No restart for data changes** | Any Lists sheet edit takes effect on the next bot message |
