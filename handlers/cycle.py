@@ -352,8 +352,10 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
     keywords = cycle_detect_keywords()
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
-    in_category = category in keywords
-    in_description = any(
+    in_category = any(
+        re.search(r"\b" + re.escape(k) + r"\b", category) for k in keywords
+    )
+    in_description = not category and any(
         re.search(r"\b" + re.escape(k) + r"\b", description) for k in keywords
     )
     if not in_category and not in_description:
