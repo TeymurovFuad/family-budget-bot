@@ -274,7 +274,7 @@ class TestAppendTransactionsBatch:
         assert isinstance(formula, str)
         assert formula.startswith("=")
 
-    def test_batch_value_base_formula_references_i2_j100(self, excel_path):
+    def test_batch_value_base_formula_uses_open_ended_range(self, excel_path):
         transactions = [
             Transaction(
                 date=datetime.date(2024, 6, 1),
@@ -289,7 +289,9 @@ class TestAppendTransactionsBatch:
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         formula = ws.cell(2, headers["Value (base)"]).value
-        assert "$H$2:$I$100" in formula
+        # Range must reach Excel max row — never cap at $100
+        assert "$1048576" in formula
+        assert "$100" not in formula
 
     def test_batch_date_modified_is_datetime_not_string(self, excel_path):
         transactions = [
@@ -336,7 +338,7 @@ class TestReplayRecoveryQueue:
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         assert ws.cell(2, headers["Value"]).value == 42.0  # row 2, not row 501
 
-    def test_replay_uses_schema_vlookup_range(self, excel_path):
+    def test_replay_uses_open_ended_vlookup_range(self, excel_path):
         from excel_ops import replay_recovery_queue
         from file_storage import append_to_recovery_queue
 
@@ -351,8 +353,9 @@ class TestReplayRecoveryQueue:
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         formula = ws.cell(2, headers["Value (base)"]).value
-        assert "$H$2:$I$100" in formula
-        assert "$I$2:$J$100" not in formula
+        # Range must reach Excel max row — never cap at $100
+        assert "$1048576" in formula
+        assert "$100" not in formula
 
     def test_replay_empty_queue_is_noop(self, excel_path):
         from excel_ops import replay_recovery_queue
@@ -525,3 +528,149 @@ class TestFormulaInjectionGuard:
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         val = ws.cell(2, headers["Description"]).value
         assert not str(val).startswith("="), "description stored as live formula"
+
+
+# ── Monthly Summary auto-population ──────────────────────────────────────────
+
+
+class TestMonthlySummaryAutoPopulation:
+
+    def _ms_headers(self, wb):
+        ws = wb["Monthly Summary"]
+        return {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
+
+    def test_single_append_creates_monthly_summary_row(self, excel_path, sample_transaction):
+        # sample_transaction is Jun 2024
+        _do_append_transaction(sample_transaction)
+        wb = openpyxl.load_workbook(excel_path, data_only=False)
+        if "Monthly Summary" not in wb.sheetnames:
+            pytest.skip("Monthly Summary sheet not present in test workbook")
+        ws = wb["Monthly Summary"]
+        hdrs = self._ms_headers(wb)
+        found = any(
+            ws.cell(r, hdrs["Year"]).value == 2024
+            and ws.cell(r, hdrs["Month"]).value == "Jun"
+            for r in range(2, ws.max_row + 1)
+        )
+        assert found, "Monthly Summary row for Jun 2024 not created by single append"
+
+    def test_batch_append_creates_monthly_summary_rows(self, excel_path):
+        transactions = [
+            Transaction(date=datetime.date(2024, 1, 5), value=100.0, currency="PLN",
+                        transaction_type="Expense", category="Groceries"),
+            Transaction(date=datetime.date(2024, 3, 10), value=200.0, currency="PLN",
+                        transaction_type="Income", category="Salary"),
+        ]
+        append_transactions_batch(transactions)
+        wb = openpyxl.load_workbook(excel_path, data_only=False)
+        if "Monthly Summary" not in wb.sheetnames:
+            pytest.skip("Monthly Summary sheet not present in test workbook")
+        ws = wb["Monthly Summary"]
+        hdrs = self._ms_headers(wb)
+        months = {
+            (ws.cell(r, hdrs["Year"]).value, ws.cell(r, hdrs["Month"]).value)
+            for r in range(2, ws.max_row + 1)
+            if ws.cell(r, hdrs.get("Year", 1)).value is not None
+        }
+        assert (2024, "Jan") in months
+        assert (2024, "Mar") in months
+
+    def test_monthly_summary_row_uses_open_ended_sumifs(self, excel_path, sample_transaction):
+        _do_append_transaction(sample_transaction)
+        wb = openpyxl.load_workbook(excel_path, data_only=False)
+        if "Monthly Summary" not in wb.sheetnames:
+            pytest.skip("Monthly Summary sheet not present in test workbook")
+        ws = wb["Monthly Summary"]
+        hdrs = self._ms_headers(wb)
+        inc_col = hdrs.get("Income", 3)
+        for r in range(2, ws.max_row + 1):
+            formula = ws.cell(r, inc_col).value
+            if isinstance(formula, str) and formula.startswith("="):
+                assert "$100" not in formula, "Monthly Summary formula still uses $100 cap"
+                assert "MasterData" in formula
+                break
+
+    def test_duplicate_single_append_does_not_add_second_row(self, excel_path, sample_transaction):
+        _do_append_transaction(sample_transaction)
+        _do_append_transaction(sample_transaction)
+        wb = openpyxl.load_workbook(excel_path, data_only=False)
+        if "Monthly Summary" not in wb.sheetnames:
+            pytest.skip("Monthly Summary sheet not present in test workbook")
+        ws = wb["Monthly Summary"]
+        hdrs = self._ms_headers(wb)
+        count = sum(
+            1 for r in range(2, ws.max_row + 1)
+            if ws.cell(r, hdrs["Year"]).value == 2024
+            and ws.cell(r, hdrs["Month"]).value == "Jun"
+        )
+        assert count == 1, f"Expected 1 Jun-2024 row, found {count}"
+
+    def test_ensure_monthly_summary_rows_from_masterdata_backfills_all(self, excel_path):
+        from excel_schema import ensure_monthly_summary_rows_from_masterdata
+        transactions = [
+            Transaction(date=datetime.date(2024, m, 1), value=10.0, currency="PLN",
+                        transaction_type="Expense", category="Groceries")
+            for m in range(1, 4)
+        ]
+        append_transactions_batch(transactions)
+        wb = openpyxl.load_workbook(excel_path, data_only=False)
+        if "Monthly Summary" not in wb.sheetnames:
+            pytest.skip("Monthly Summary sheet not present in test workbook")
+        # Backfill returns 0 because batch already ensured the rows
+        added = ensure_monthly_summary_rows_from_masterdata(wb)
+        assert added == 0  # all rows already exist from the batch call
+
+
+# ── repair_dashboard_bounds ───────────────────────────────────────────────────
+
+
+class TestRepairDashboardBounds:
+
+    def test_repair_replaces_2000_bounds(self):
+        from openpyxl import Workbook
+        from excel_schema import repair_dashboard_bounds
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Dashboard"
+        ws.cell(1, 1).value = "=SUMIFS(MasterData!$L$2:$L$2000,MasterData!$E$2:$E$2000,\"Income\")"
+        n = repair_dashboard_bounds(wb)
+        assert n == 1
+        assert "$1048576" in ws.cell(1, 1).value
+        assert "$2000" not in ws.cell(1, 1).value
+
+    def test_repair_replaces_100_bounds_on_lists(self):
+        from openpyxl import Workbook
+        from excel_schema import repair_dashboard_bounds
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Dashboard"
+        ws.cell(1, 1).value = "=VLOOKUP(H11,Lists!$C$2:$D$100,2,0)"
+        repair_dashboard_bounds(wb)
+        assert "$1048576" in ws.cell(1, 1).value
+        assert "$100" not in ws.cell(1, 1).value
+
+    def test_repair_is_idempotent(self):
+        from openpyxl import Workbook
+        from excel_schema import repair_dashboard_bounds
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Dashboard"
+        ws.cell(1, 1).value = "=SUMIFS(MasterData!$L$2:$L$2000,MasterData!$E$2:$E$2000,\"Income\")"
+        repair_dashboard_bounds(wb)
+        n_second = repair_dashboard_bounds(wb)
+        assert n_second == 0  # nothing left to fix
+
+    def test_repair_does_not_touch_non_formula_cells(self):
+        from openpyxl import Workbook
+        from excel_schema import repair_dashboard_bounds
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws.cell(1, 1).value = "some text with 2000 in it"
+        ws.cell(1, 2).value = 2000
+        n = repair_dashboard_bounds(wb)
+        assert n == 0
