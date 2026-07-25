@@ -178,6 +178,29 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Follow-up: AI-categorization review notes (PR #40, 2026-07-25)
+
+- [ ] **Model must echo merchant names verbatim for the mapping to apply** —
+      lookup is exact-match on the merchant string; a model that trims spaces
+      or changes case silently loses that merchant (row falls back to Other,
+      no error). Normalize the lookup (casefold + strip) when matching
+      response keys back to targets. (`handlers/bulk_conv.py`
+      `_apply_ai_categorization`)
+- [ ] **Re-importing the same unknown merchants re-pays tokens** — deliberate
+      (AI guesses aren't persisted so wrong ones can't stick), but a repeat
+      import of an overlapping statement re-categorizes identical merchants.
+      Option: session-scoped cache, or persist guesses with a `provisional`
+      flag the map treats as weaker than user edits. Revisit after observing
+      real costs. (`ai_parser.py`, `merchant_map.py`)
+- [ ] **No cap on batch count for very diverse statements** — 1000 unique
+      merchants = 13 calls in one import; the session budget note says ~20.
+      Consider a max-batches guard with a "categorize the rest by editing"
+      message. (`ai_parser.py` `categorize_merchants`)
+- [ ] **🤖 message backticks render literally** — the `N category=...` hint is
+      sent without parse_mode (safe, but cosmetically wrong) — same class as
+      the PR #39 date-format prompt note; fix both together.
+      (`handlers/bulk_conv.py`)
+
 ## Follow-up: decimal-separator review notes (PR #39, 2026-07-25)
 
 - [ ] **Sanity check only fires for NEW proposals — the already-saved bad profile
