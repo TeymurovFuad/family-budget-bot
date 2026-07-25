@@ -39,7 +39,8 @@ def _do_append_transaction(transaction: Transaction) -> None:
         ws = wb["MasterData"]
         r = find_next_data_row(ws)
         write_transaction_row(ws, r, row, lists_currency_range(wb))
-        ensure_monthly_summary_row(wb, row.get("year"), row.get("month"))
+        if row.get("year") and row.get("month"):
+            ensure_monthly_summary_row(wb, row["year"], row["month"])
         atomic_save(wb, excel_path)
         log.info("Appended transaction row %d: %s", r, row)
 

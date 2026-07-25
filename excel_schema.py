@@ -216,11 +216,6 @@ def repair_dashboard_bounds(wb) -> int:
     """
     import re
 
-    # Pattern: SheetName!$COL$2:$COL$DIGITS — replace the end-row digit block
-    _pattern = re.compile(
-        r"((?:MasterData|Lists)!\\\$[A-Z]+\\\$2:\\\$[A-Z]+\\\$)\d+"
-    )
-    # Build the actual regex (no raw-string escaping confusion)
     pattern = re.compile(
         r"((MasterData|Lists)!\$[A-Z]+\$2:\$[A-Z]+\$)\d+"
     )
