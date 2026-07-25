@@ -178,6 +178,18 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
+## Follow-up: person-retirement review notes (PR #41, 2026-07-25)
+
+- [ ] **Dead reads left for stage 2** — `AddTransactionState.person` is now
+      always "", and `data.py` still loads the Lists `persons` column that no
+      flow consumes. Both are deliberate stage-1 leftovers; fold their removal
+      into the schema-simplification PR alongside the Person column drop.
+      (`models.py`, `data.py`)
+- [ ] **`_normalize_parsed_rows` person-relocation message says "moved to
+      description"** — accurate, but the user can no longer see or edit a
+      person field, so the phrasing may confuse; consider "recipient noted in
+      description". Cosmetic. (`handlers/bulk_conv.py`)
+
 ## Minimalism audit — agreed design (Designer review, 2026-07-25)
 
 Whole-workbook redundancy audit against comparable minimal budget apps
