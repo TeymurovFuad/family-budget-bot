@@ -1914,6 +1914,61 @@ class TestDataValidationFollowUp:
         first_msg = upd.message.reply_text.call_args_list[0].args[0]
         assert "🛡" in first_msg
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION — bulk draft-limit overflow buffer and formula-injection guard
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBulkOverflowBuffer:
+
+    async def test_cancel_releases_pending_overflow_as_new_draft(self):
+        from handlers.bulk_conv import _load_user_draft
+        held = [{"date": "2024-06-15", "value": 12.5, "currency": "PLN",
+                 "type": "Expense", "category": "Groceries", "description": "held row",
+                 "person": ""}]
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": "2024-06-01", "value": 9, "currency": "PLN",
+             "type": "Expense", "category": "Groceries", "description": "old", "person": ""},
+        ]
+        ctx.user_data["_pending_overflow"] = held
+        upd = make_update("cancel", user_id=99021)
+        result = await bulk_confirm(upd, ctx)
+        assert result == states.BULK_CONFIRM
+        assert "_pending_overflow" not in ctx.user_data
+        assert ctx.user_data["bulk_parsed"] == held
+        assert _load_user_draft(99021) == held
+        messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert any("held" in m for m in messages)
+
+    async def test_cancel_without_overflow_ends_conversation(self):
+        from telegram.ext import ConversationHandler
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = []
+        upd = make_update("cancel", user_id=99022)
+        result = await bulk_confirm(upd, ctx)
+        assert result == ConversationHandler.END
+
+
+class TestBulkFormulaInjectionGuard:
+
+    def test_leading_formula_chars_are_guarded(self):
+        from handlers.bulk_conv import _revalidate_bulk_row
+        row = {"date": "2024-06-15", "value": 10, "currency": "PLN",
+               "type": "Expense", "category": "Groceries",
+               "description": "=HYPERLINK(evil)", "person": ""}
+        notes = _revalidate_bulk_row(row, SAMPLE_LISTS, 1)
+        assert row["description"].startswith("'=")
+        assert any("formula" in n for n in notes)
+
+    def test_plain_description_untouched(self):
+        from handlers.bulk_conv import _revalidate_bulk_row
+        row = {"date": "2024-06-15", "value": 10, "currency": "PLN",
+               "type": "Expense", "category": "Groceries",
+               "description": "Grocery store", "person": ""}
+        _revalidate_bulk_row(row, SAMPLE_LISTS, 1)
+        assert row["description"] == "Grocery store"
+
     async def test_bulk_confirm_skips_invalid_rows_and_keeps_them_in_draft(self):
         from handlers.bulk_conv import _load_user_draft
         ctx = make_ctx()

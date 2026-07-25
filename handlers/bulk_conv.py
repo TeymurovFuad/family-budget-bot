@@ -1155,6 +1155,11 @@ def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
         row["category"] = "Other"
         notes.append(f"row {row_no}: empty category → 'Other'")
 
+    desc = str(row.get("description") or "")
+    if desc and desc[0] in ("=", "+", "-", "@"):
+        row["description"] = "'" + desc
+        notes.append(f"row {row_no}: description guarded against formula injection")
+
     ok, reason, normalized, corrections = validate_parsed_row(row, lists)
     if ok:
         row.pop("invalid", None)
@@ -1172,6 +1177,25 @@ def _validate_bulk_rows(parsed: list[dict], lists: dict) -> tuple[list[dict], li
     for i, row in enumerate(parsed, 1):
         corrections.extend(_revalidate_bulk_row(row, lists, i))
     return parsed, corrections
+
+
+async def _release_pending_overflow(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    Load rows held back by the draft limit as a fresh draft once the previous
+    one is saved or cancelled — the AI call that parsed them is already paid for.
+    """
+    overflow = ctx.user_data.pop("_pending_overflow", None)
+    if not overflow:
+        return None
+    uid = update.effective_user.id
+    ctx.user_data["bulk_parsed"] = overflow
+    _save_bulk_draft(uid, overflow)
+    log.info("User %s overflow rows loaded as new draft: %d", uid, len(overflow))
+    await update.message.reply_text(
+        f"📥 Loaded the {len(overflow)} row(s) held from your last upload as a new draft."
+    )
+    await _send_bulk_preview(update, overflow)
+    return BULK_CONFIRM
 
 
 def _draft_limit_reached(user_id: int) -> bool:
@@ -1671,11 +1695,13 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         log.info("User %s bulk normalize: %d corrections", uid, len(corrections))
 
     if _draft_limit_reached(uid):
-        # Do NOT merge the new rows — but never discard them silently either.
+        # Do NOT merge the new rows — hold them so the paid-for parse survives.
+        ctx.user_data["_pending_overflow"] = _sort_bulk_rows(parsed)
         await update.message.reply_text(
             f"⚠️ Your draft is full ({_DRAFT_LIMIT_ENTRIES}+ entries), so the {len(parsed)} "
-            f"row(s) I just parsed were NOT added. Send `save` to store the existing draft "
-            f"or `cancel` to discard it — then re-send this input.",
+            f"row(s) I just parsed were NOT added — they are held aside. Send `save` to "
+            f"store the existing draft or `cancel` to discard it, and I'll load the held "
+            f"rows as a fresh draft.",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
         )
@@ -1721,6 +1747,9 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "Cancelled — draft discarded.", reply_markup=ReplyKeyboardRemove()
         )
+        next_state = await _release_pending_overflow(update, ctx)
+        if next_state is not None:
+            return next_state
         return ConversationHandler.END
 
     if reason == "edited":
@@ -1862,4 +1891,8 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "reply with edits (e.g. `1 value=12.50`) and send `save` again to retry them."
         )
     await update.message.reply_text(msg, reply_markup=ReplyKeyboardRemove())
+    if not write_failed and not failed_items:
+        next_state = await _release_pending_overflow(update, ctx)
+        if next_state is not None:
+            return next_state
     return ConversationHandler.END
