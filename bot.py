@@ -58,6 +58,7 @@ from handlers.menu import cmd_menu, handle_menu_buttons, MENU_BUTTON_FILTER
 from handlers.misc import (
     cmd_help, cmd_setcurrency, cmd_export, setcurrency_pick,
     cmd_setbudget, setbudget_pick, setbudget_amount,
+    cmd_keywords, keywords_callback, keywords_add_word,
 )
 from handlers.quick_conv import handle_quick_add, quick_confirm
 from handlers.reports import (
@@ -79,6 +80,7 @@ from states import (
     BULK_PROFILE_FIX_SETTING,
     QUICK_CONFIRM,
     SET_BUDGET_PICK, SET_BUDGET_AMOUNT,
+    KW_PICK, KW_ADD,
 )
 
 
@@ -111,6 +113,7 @@ BOT_COMMANDS = [
     BotCommand("setcurrency", "Change the display currency"),
     BotCommand("setbudget",   "Set the monthly budget for a category (owner only)"),
     BotCommand("cycle",       "Show or start a budget cycle (owner only, needs BUDGET_CYCLE=1)"),
+    BotCommand("keywords",    "Manage salary keywords for cycle detection (owner only)"),
     BotCommand("menu",        "Show the button menu"),
     BotCommand("help",        "List all commands with what they do"),
     BotCommand("start",       "Welcome message and main menu"),
@@ -191,6 +194,19 @@ def build_application() -> Application:
         states={
             SET_BUDGET_PICK:   [CallbackQueryHandler(setbudget_pick, pattern="^setbudget:")],
             SET_BUDGET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, setbudget_amount)],
+        },
+        fallbacks=[CommandHandler("cancel", add_cancel)],
+    ))
+
+    # ── /keywords conversation ────────────────────────────────────────────────
+    app.add_handler(ConversationHandler(
+        entry_points=[CommandHandler("keywords", cmd_keywords)],
+        states={
+            KW_PICK: [CallbackQueryHandler(keywords_callback, pattern="^kw:")],
+            KW_ADD:  [
+                CallbackQueryHandler(keywords_callback, pattern="^kw:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, keywords_add_word),
+            ],
         },
         fallbacks=[CommandHandler("cancel", add_cancel)],
     ))

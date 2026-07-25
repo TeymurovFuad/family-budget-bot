@@ -25,3 +25,5 @@ BULK_PROFILE_FIX_SETTING = 407  # user chose "Fix settings" → date_format text
 QUICK_CONFIRM = 500
 SET_BUDGET_PICK   = 600
 SET_BUDGET_AMOUNT = 601
+KW_PICK = 700
+KW_ADD  = 701

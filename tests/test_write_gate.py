@@ -62,7 +62,10 @@ from handlers.add_conv import cmd_add
 from handlers.bulk_conv import cmd_bulk
 from handlers.delete_conv import cmd_delete
 from handlers.edit_conv import cmd_edit
-from handlers.misc import cmd_setcurrency, cmd_setbudget, cmd_help, setbudget_pick, setbudget_amount
+from handlers.misc import (
+    cmd_setcurrency, cmd_setbudget, cmd_help, cmd_keywords,
+    setbudget_pick, setbudget_amount,
+)
 from handlers.quick_conv import handle_quick_add
 
 PRIMARY_UID = 111
@@ -147,6 +150,7 @@ WRITE_ENTRY_POINTS = [
     ("cmd_edit", cmd_edit),
     ("cmd_setcurrency", cmd_setcurrency),
     ("cmd_setbudget", cmd_setbudget),
+    ("cmd_keywords", cmd_keywords),
     ("handle_quick_add", handle_quick_add),
 ]
 
