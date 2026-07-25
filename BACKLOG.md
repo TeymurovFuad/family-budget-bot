@@ -10,26 +10,28 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-25 — PRs through #35 merged; #36 and #37 open, reviewed PASS, awaiting owner squash-merge)*
+> *(Last updated: 2026-07-25 evening — PRs through #41 merged)*
 
 ### PR state at last update
-- **PRs #1–#35 merged.** #35 redesigned `/cycle detect` (salary-event driven,
-  Confirm all / Review one-by-one UX, no calendar windows).
-- **PR #36 (open, reviewed PASS twice)**: cycle detect matches salary in
-  Description via keyword list — `CYCLE_DETECT_KEYWORDS` .env setting,
-  `/cycle detect <word> ...` ad-hoc words, word-boundary contains matching,
-  `/cycle list` + `/cycle remove YYYY-MM-DD` commands, detailed `/cycle help`,
-  DOCUMENTATION.md updated. 42 tests.
-- **PR #37 (open, reviewed PASS twice)**: /help was silently dead — unescaped
-  `=` in MarkdownV2 (BadRequest, user saw nothing; found via journalctl).
-  /start first-name now escaped too. New offline MarkdownV2 validator test.
-- **User state 2026-07-25**: cleared MasterData + Monthly Summary after a bad
-  1400-row import (amounts ×100 from wrong profile decimal separator, all
-  categories "Other"). Will re-import AFTER the statement-import fixes land.
-  User's bank salary titles: "wynagrodzenie" / "salary" / both — set
-  `CYCLE_DETECT_KEYWORDS=wynagrodzenie` in the VM .env after #36 deploys.
-- **Next open work**: see "Next up" — formulas-survive-growth PR first, then
-  statement-import correctness (decimal separator + categorization).
+- **PRs #1–#41 merged.** This session shipped:
+  - **PR #39**: decimal-separator fix — profile list shows the separator,
+    "Fix settings" button (separator / date format / sign convention) in the
+    confirm flow, `validate_proposal_against_samples` sanity check.
+  - **PR #40**: statement AI categorization — `ai_parser.categorize_merchants`
+    (compact unique-merchant call, batched 80), 🤖 preview marker; AI guesses
+    never persisted to merchant memory.
+  - **PR #41**: Person field retired from all flows (household budgets as one
+    unit — user decision). /add is 8 steps; column stays until stage 2.
+    Carries the "Minimalism audit — agreed design" section (Designer review):
+    goals-columns cut, IsDone drop, report-surface collapse to /summary +
+    /budget, consolidated schema-simplification scope.
+- **User state 2026-07-25**: MasterData + Monthly Summary still cleared;
+  **the 1400-row re-import is now unblocked**. VM deploy checklist:
+  (1) pull + restart bot, (2) run `scripts/fix_formula_bounds.py`,
+  (3) delete the corrupt statement profile (`/bulk profile` → Delete) so the
+  fixed proposal flow reruns, (4) set `CYCLE_DETECT_KEYWORDS=wynagrodzenie`
+  in the VM .env, (5) re-upload the statement — expect 🤖 categorization.
+- **Next open work**: see "Next up" — /summary picker UX is now the top item.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -47,20 +49,9 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. **Formulas must survive data growth PR** — agreed 2026-07-25, TOP priority:
-     the user is about to re-import 1400+ historical rows and both failure
-     modes bite immediately. One PR, two fixes:
-     (a) Monthly Summary gets rows for every Year/Month present in MasterData —
-         either bot-appended on save or converted to open-ended dynamic
-         formulas needing no per-month rows (preferred; decide at
-         implementation). See "Monthly Summary sheet is never updated" bug.
-     (b) Kill every fixed row bound in written formulas — `$100`-style VLOOKUP
-         ranges in Value (base), `lists_currency_range` cap, Dashboard SUMIFS
-         bounds. Open-ended ranges or named ranges derived from actual data.
-         Absorbs the "lists_currency_range caps at row 100" item below.
-  2. ~~**Statement-import decimal-separator fix**~~ — ✅ done (2026-07-25, PR in review).
-     **AI categorization for statement rows** still open — see "Statement imports
-     categorize everything as 'Other'" bug below.
+  1. ~~**Formulas must survive data growth PR**~~ — ✅ merged as PR #38 (2026-07-25).
+  2. ~~**Statement-import correctness pair**~~ — ✅ both merged: decimal
+     separator (PR #39) + AI categorization (PR #40).
   3. **`/summary` picker UX PR** — with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
