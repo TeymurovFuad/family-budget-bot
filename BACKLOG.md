@@ -1023,6 +1023,12 @@ Help text examples updated to EUR in PR #32 (groceries example, setbudget limit 
 rates help). Remaining PLN references in business logic strings and any timezone-specific
 wording need a second pass — deferred to avoid scope creep in PR #32.
 
+- [ ] **AI quick-parse prompt says "a Polish household finance bot"** —
+      `ai_parser.py` `_build_quick_prompt` hardcodes the locale in a public-repo
+      prompt (found during PR #41 review). Replace with a neutral phrase
+      ("a household finance bot"); check `_build_parse_prompt` and the other
+      prompts for similar locale wording while there — same family as the
+      "zł/zl = PLN" alias item below.
 - [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
       note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
       setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm
