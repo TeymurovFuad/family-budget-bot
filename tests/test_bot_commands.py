@@ -51,10 +51,29 @@ asyncio.run(bot.register_commands(fake_app))
 call_args = fake_app.bot.set_my_commands.await_args
 set_my_commands_arg = [c.command for c in call_args.args[0]]
 
+error_handler_registered = bot.error_handler in app.error_handlers
+
+update = MagicMock()
+update.effective_chat.id = 42
+ctx = MagicMock()
+ctx.error = RuntimeError("boom")
+ctx.bot.send_message = AsyncMock()
+asyncio.run(bot.error_handler(update, ctx))
+reply_kwargs = ctx.bot.send_message.await_args.kwargs
+
+ctx_none = MagicMock()
+ctx_none.error = RuntimeError("boom")
+ctx_none.bot.send_message = AsyncMock()
+asyncio.run(bot.error_handler(None, ctx_none))
+none_update_sent = ctx_none.bot.send_message.await_count
+
 print(json.dumps({
     "registered": sorted(registered),
     "menu": [{"command": c.command, "description": c.description} for c in bot.BOT_COMMANDS],
     "set_my_commands_arg": set_my_commands_arg,
+    "error_handler_registered": error_handler_registered,
+    "error_reply_kwargs": {k: str(v) for k, v in reply_kwargs.items()},
+    "none_update_sent": none_update_sent,
 }))
 """
 
@@ -113,3 +132,18 @@ def test_register_commands_publishes_full_menu():
     """register_commands must call bot.set_my_commands with BOT_COMMANDS."""
     data = _inspect_bot()
     assert data["set_my_commands_arg"] == [c["command"] for c in data["menu"]]
+
+
+def test_error_handler_registered_on_application():
+    assert _inspect_bot()["error_handler_registered"]
+
+
+def test_error_handler_replies_plain_text():
+    kwargs = _inspect_bot()["error_reply_kwargs"]
+    assert kwargs["chat_id"] == "42"
+    assert kwargs["text"] == "Something went wrong. Please try again."
+    assert "parse_mode" not in kwargs
+
+
+def test_error_handler_tolerates_update_none():
+    assert _inspect_bot()["none_update_sent"] == 0

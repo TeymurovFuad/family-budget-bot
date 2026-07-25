@@ -117,6 +117,21 @@ BOT_COMMANDS = [
 ]
 
 
+async def error_handler(update, context) -> None:
+    log.exception("Unhandled exception while processing update %s", update,
+                  exc_info=context.error)
+    chat = getattr(update, "effective_chat", None)
+    if chat is None:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="Something went wrong. Please try again.",
+        )
+    except Exception:
+        log.exception("Failed to send error notification to chat %s", chat.id)
+
+
 async def register_commands(app: Application) -> None:
     """post_init hook: publish the command menu so Telegram shows it on '/'."""
     await app.bot.set_my_commands(BOT_COMMANDS)
@@ -127,6 +142,7 @@ def build_application() -> Application:
     """Build the Application and wire every handler. Split from main() so tests
     can inspect the registered handlers without starting the bot."""
     app = Application.builder().token(BOT_TOKEN).post_init(register_commands).build()
+    app.add_error_handler(error_handler)
 
     # ── command handlers ──────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_menu))
