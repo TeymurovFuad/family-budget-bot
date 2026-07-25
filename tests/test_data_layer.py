@@ -643,9 +643,9 @@ class TestDoAppendTransactionExhaustive:
         ws = wb["MasterData"]
         headers = {ws.cell(1, c).value: c for c in range(1, ws.max_column + 1)}
         formula = ws.cell(2, headers["Value (base)"]).value
-        # Range is built dynamically from Lists Currency/Rate column positions
-        assert "$H$2:$I$100" in formula, (
-            f"VLOOKUP range must be $H$2:$I$100, got: {formula!r}"
+        # Range must be open-ended (Excel max row), not a fixed cap
+        assert "$H$2:$I$1048576" in formula, (
+            f"VLOOKUP range must be open-ended $H$2:$I$1048576, got: {formula!r}"
         )
 
     def test_isdone_written_as_bool_true_not_string(self, excel_path):

@@ -255,6 +255,12 @@ def _repair_template_workbook(path: Path) -> None:
         ensure_cycles_sheet(wb)
         changed = True
 
+    from excel_schema import repair_dashboard_bounds
+    n = repair_dashboard_bounds(wb)
+    if n:
+        log.info("_repair_template_workbook: updated %d formula cell(s) with open-ended bounds", n)
+        changed = True
+
     if changed:
         wb.save(path)
 
@@ -406,6 +412,12 @@ def create_blank_excel(path: Path) -> None:
         ws_li.cell(i, 9, rate)   # Rate to base
 
     ws_db = wb.create_sheet("Dashboard")
+
+    ws_ms = wb.create_sheet("Monthly Summary")
+    for c_idx, hdr in enumerate(
+        ["Year", "Month", "Income", "Expenses", "Savings", "Net", "Savings Rate %"], 1
+    ):
+        ws_ms.cell(1, c_idx, hdr)
 
     from cycles import ensure_cycles_sheet
     ensure_cycles_sheet(wb)
@@ -716,7 +728,10 @@ def append_transactions_batch(transactions: list) -> None:
     if not transactions:
         return
 
-    from excel_schema import find_next_data_row, lists_currency_range, write_transaction_row
+    from excel_schema import (
+        find_next_data_row, lists_currency_range, write_transaction_row,
+        ensure_monthly_summary_rows_from_masterdata,
+    )
 
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
@@ -728,6 +743,9 @@ def append_transactions_batch(transactions: list) -> None:
             write_transaction_row(ws, r, transaction.to_row(), lu_range)
             r += 1
 
+        added = ensure_monthly_summary_rows_from_masterdata(wb)
+        if added:
+            log.info("Batch-appended: ensured %d Monthly Summary row(s)", added)
         atomic_save(wb, excel_path)
         log.info("Batch-appended %d transactions to MasterData", len(transactions))
 

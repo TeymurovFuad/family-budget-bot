@@ -8,7 +8,13 @@ import asyncio
 
 from config import log
 from log_decorators import log_call
-from excel_schema import find_next_data_row, lists_currency_range, write_transaction_row
+from excel_schema import (
+    find_next_data_row,
+    lists_currency_range,
+    write_transaction_row,
+    ensure_monthly_summary_row,
+    ensure_monthly_summary_rows_from_masterdata,
+)
 from file_storage import (
     ExcelFileContext,
     append_transactions_batch,
@@ -33,6 +39,8 @@ def _do_append_transaction(transaction: Transaction) -> None:
         ws = wb["MasterData"]
         r = find_next_data_row(ws)
         write_transaction_row(ws, r, row, lists_currency_range(wb))
+        if row.get("year") and row.get("month"):
+            ensure_monthly_summary_row(wb, row["year"], row["month"])
         atomic_save(wb, excel_path)
         log.info("Appended transaction row %d: %s", r, row)
 
@@ -112,6 +120,9 @@ def replay_recovery_queue() -> None:
                 except Exception as e:
                     log.error("Recovery queue: failed to re-apply row %s: %s", row, e)
                     failed.append(row)
+            added = ensure_monthly_summary_rows_from_masterdata(wb)
+            if added:
+                log.info("Recovery queue: ensured %d Monthly Summary row(s)", added)
             atomic_save(wb, excel_path)
     except Exception as e:
         log.error("Recovery queue: replay aborted, re-queueing all rows: %s", e)
