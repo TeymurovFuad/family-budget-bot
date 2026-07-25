@@ -939,3 +939,64 @@ class TestProposeMappingSplit:
         assert SIGN_DEBIT_CREDIT_SPLIT in prompt
         assert "debit" in prompt.lower()
         assert "credit" in prompt.lower()
+
+
+class TestValidateProposalAgainstSamples:
+    """Tests for validate_proposal_against_samples."""
+
+    def _proposal(self, sep: str) -> dict:
+        return {"decimal_separator": sep}
+
+    def test_dot_amounts_contradict_comma_proposal(self):
+        """Dot-decimal amounts should warn when proposal says comma."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal(","),
+            [["2026-01-01", "79.99", "PLN"], ["2026-01-02", "1,234.56", "PLN"]],
+        )
+        assert len(warnings) == 1
+        assert "79.99" in warnings[0] or "dot" in warnings[0].lower()
+
+    def test_comma_amounts_contradict_dot_proposal(self):
+        """Comma-decimal amounts should warn when proposal says dot."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal("."),
+            [["2026-01-01", "79,99", "PLN"]],
+        )
+        assert len(warnings) == 1
+        assert "comma" in warnings[0].lower() or "79,99" in warnings[0]
+
+    def test_consistent_dot_proposal_no_warning(self):
+        """No warning when dot amounts match dot proposal."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal("."),
+            [["2026-01-01", "79.99", "PLN"], ["2026-01-02", "1,234.56", "PLN"]],
+        )
+        assert warnings == []
+
+    def test_consistent_comma_proposal_no_warning(self):
+        """No warning when comma amounts match comma proposal."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal(","),
+            [["2026-01-01", "79,99", "EUR"]],
+        )
+        assert warnings == []
+
+    def test_no_amount_cells_no_warning(self):
+        """No warning when no cells match either amount pattern."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal(","),
+            [["2026-01-01", "MERCHANT NAME", "EUR"]],
+        )
+        assert warnings == []
+
+    def test_mixed_evidence_no_warning(self):
+        """When both dot and comma amounts appear, evidence is ambiguous — no warning."""
+        warnings = sp.validate_proposal_against_samples(
+            self._proposal(","),
+            [["2026-01-01", "79.99", "EUR"], ["2026-01-02", "80,00", "EUR"]],
+        )
+        assert warnings == []
+
+    def test_empty_rows_no_warning(self):
+        warnings = sp.validate_proposal_against_samples(self._proposal("."), [])
+        assert warnings == []

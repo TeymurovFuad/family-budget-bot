@@ -46,7 +46,7 @@ from handlers.add_conv import (
 )
 from handlers.bulk_conv import (
     cmd_bulk, bulk_receive, bulk_confirm, bulk_timeout,
-    bulk_profile_callback, bulk_profile_name,
+    bulk_profile_callback, bulk_profile_name, bulk_profile_fix_setting,
     bulk_profile_list_callback,
 )
 from handlers.cycle import cmd_cycle, handle_cycle_callback, handle_detect_callback
@@ -76,6 +76,7 @@ from states import (
     EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM,
     BULK_RECEIVE, BULK_CONFIRM,
     BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME, BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD,
+    BULK_PROFILE_FIX_SETTING,
     QUICK_CONFIRM,
     SET_BUDGET_PICK, SET_BUDGET_AMOUNT,
 )
@@ -236,6 +237,10 @@ def build_application() -> Application:
             BULK_PROFILE_CONFIRM: [CallbackQueryHandler(bulk_profile_callback)],
             BULK_PROFILE_FIX_COL: [CallbackQueryHandler(bulk_profile_callback)],
             BULK_PROFILE_FIX_FIELD: [CallbackQueryHandler(bulk_profile_callback)],
+            BULK_PROFILE_FIX_SETTING: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, bulk_profile_fix_setting),
+                CallbackQueryHandler(bulk_profile_callback),
+            ],
             BULK_PROFILE_NAME: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, bulk_profile_name),
             ],

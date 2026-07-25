@@ -58,9 +58,9 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
          ranges in Value (base), `lists_currency_range` cap, Dashboard SUMIFS
          bounds. Open-ended ranges or named ranges derived from actual data.
          Absorbs the "lists_currency_range caps at row 100" item below.
-  2. **Statement-import correctness pair** (before the user re-imports):
-     decimal-separator fix flow + AI categorization for statement rows — see
-     "Bugs (confirmed live, 2026-07-25)".
+  2. ~~**Statement-import decimal-separator fix**~~ — ✅ done (2026-07-25, PR in review).
+     **AI categorization for statement rows** still open — see "Statement imports
+     categorize everything as 'Other'" bug below.
   3. **`/summary` picker UX PR** — with `BUDGET_CYCLE=1`
      the calendar view is currently unreachable from bare `/summary` (flag-on
      removes it entirely until the picker ships). Design in "/summary picker
@@ -136,17 +136,14 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       (unaccounted math), and the live salary prompt
       (`maybe_prompt_cycle_start`).
 
-- [ ] **Statement profile saved with wrong decimal separator corrupts every
-      amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for
-      a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400
-      rows imported with 100× inflated values. Three compounding gaps:
-      (a) profile list (`/bulk profile`) doesn't show the separator;
-      (b) debit/credit-split proposal message omits the separator entirely;
-      (c) "Fix a column" can only remap columns — separator, date format, and
-      sign convention cannot be corrected in the confirm flow.
-      Also add a sanity check: sample amount values like `79.99` (2 digits
-      after ".") contradict comma-decimal — validate proposal against samples
-      before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
+- [x] **Statement profile saved with wrong decimal separator corrupts every
+      amount (79.99 → 7999)** — fixed: (a) `/bulk profile list` now shows
+      the decimal separator; (b) debit/credit-split proposal message now
+      includes the separator; (c) new "Fix settings" button lets users correct
+      separator, date format, and sign convention in the confirm flow;
+      (d) `validate_proposal_against_samples` warns when sample amounts
+      contradict the proposed separator before saving.
+      (`statement_profiles.py`, `handlers/bulk_conv.py`)
 
 - [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
       returns no category; `_normalize_parsed_rows` defaults empties to
@@ -179,6 +176,25 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       sync; (c) convert the sheet to dynamic formulas (SUMPRODUCT over open
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
+
+## Follow-up: decimal-separator review notes (PR #39, 2026-07-25)
+
+- [ ] **Sanity check only fires for NEW proposals — the already-saved bad profile
+      is never re-validated** — `validate_proposal_against_samples` runs in the
+      new-format path; a profile already saved with the wrong separator (the
+      live incident) still parses silently on fingerprint match. Run the same
+      check against the first rows at match time and warn before parsing.
+      The user's actual corrupt profile must be deleted by hand
+      (`/bulk profile` → Delete) before re-importing. (`handlers/bulk_conv.py`)
+- [ ] **Typed date_format is not validated** — `bulk_profile_fix_setting`
+      accepts any text as a strptime pattern; a typo (e.g. `%d.%m.%y` vs `%Y`)
+      saves fine and only surfaces as skipped rows at parse time. Try the
+      pattern against a sample date cell before accepting. (`handlers/bulk_conv.py`)
+- [ ] **Backticks in the date-format prompt render literally** — the
+      `fix_settings:date_fmt` message uses `` ` `` without parse_mode
+      (deliberately safe given the MarkdownV2 bug history, but cosmetically
+      wrong). Either drop the backticks or send with parse_mode and escapes.
+      (`handlers/bulk_conv.py`)
 
 ## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
 
