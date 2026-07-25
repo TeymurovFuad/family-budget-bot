@@ -145,13 +145,14 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       contradict the proposed separator before saving.
       (`statement_profiles.py`, `handlers/bulk_conv.py`)
 
-- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
-      returns no category; `_normalize_parsed_rows` defaults empties to
-      "Other"; merchant memory only helps for known merchants (empty on first
-      import). The AI-categorization step for unknown merchants (BACKLOG
-      "known format" design: "AI only for unknown merchants") was never wired
-      into the statement path. 1400 rows imported as Other.
-      (`handlers/bulk_conv.py` `_finish_profile_parse`)
+- [x] **Statement imports categorize everything as 'Other'** — fixed: new
+      `ai_parser.categorize_merchants()` makes one compact call (unique
+      merchant names → categories, batched at 80) after merchant memory in
+      `_finish_profile_parse`; only exact Lists matches are applied, rows get
+      a 🤖 preview marker, and AI guesses are NOT persisted to merchant
+      memory (only user preview edits teach the map). This completes the
+      token-economy "split extraction from categorization" design for
+      statement imports. (`ai_parser.py`, `handlers/bulk_conv.py`)
 
 - [x] **Deployed bot stops replying to commands (file uploads still work)** —
       root cause found in VM logs: /help replied with MarkdownV2 containing an
@@ -176,6 +177,29 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       sync; (c) convert the sheet to dynamic formulas (SUMPRODUCT over open
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
+
+## Follow-up: AI-categorization review notes (PR #40, 2026-07-25)
+
+- [ ] **Model must echo merchant names verbatim for the mapping to apply** —
+      lookup is exact-match on the merchant string; a model that trims spaces
+      or changes case silently loses that merchant (row falls back to Other,
+      no error). Normalize the lookup (casefold + strip) when matching
+      response keys back to targets. (`handlers/bulk_conv.py`
+      `_apply_ai_categorization`)
+- [ ] **Re-importing the same unknown merchants re-pays tokens** — deliberate
+      (AI guesses aren't persisted so wrong ones can't stick), but a repeat
+      import of an overlapping statement re-categorizes identical merchants.
+      Option: session-scoped cache, or persist guesses with a `provisional`
+      flag the map treats as weaker than user edits. Revisit after observing
+      real costs. (`ai_parser.py`, `merchant_map.py`)
+- [ ] **No cap on batch count for very diverse statements** — 1000 unique
+      merchants = 13 calls in one import; the session budget note says ~20.
+      Consider a max-batches guard with a "categorize the rest by editing"
+      message. (`ai_parser.py` `categorize_merchants`)
+- [ ] **🤖 message backticks render literally** — the `N category=...` hint is
+      sent without parse_mode (safe, but cosmetically wrong) — same class as
+      the PR #39 date-format prompt note; fix both together.
+      (`handlers/bulk_conv.py`)
 
 ## Follow-up: decimal-separator review notes (PR #39, 2026-07-25)
 
