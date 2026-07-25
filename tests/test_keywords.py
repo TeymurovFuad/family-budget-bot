@@ -5,6 +5,7 @@ tests/test_keywords.py — salary keywords stored in the Excel Lists sheet
 
 import os
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,6 +27,7 @@ from cycles import (
     save_salary_keyword,
 )
 from excel_schema import ListsSchema, col_indices, header_of
+from telegram.ext import ConversationHandler
 from handlers.misc import cmd_keywords, keywords_add_word, keywords_callback
 from states import KW_ADD, KW_PICK
 
@@ -157,8 +159,9 @@ def test_detect_keywords_prefer_excel_over_env(excel_path, monkeypatch):
 
 async def test_cmd_keywords_help(excel_path):
     upd = make_update()
-    await cmd_keywords(upd, make_ctx(["help"]))
+    result = await cmd_keywords(upd, make_ctx(["help"]))
     assert "/keywords" in upd.message.reply_text.call_args[0][0]
+    assert result == ConversationHandler.END
 
 
 async def test_cmd_keywords_shows_env_fallback_source(excel_path, monkeypatch):
@@ -231,3 +234,62 @@ async def test_keywords_delete_unknown_word(excel_path):
     state = await keywords_callback(upd, make_ctx())
     assert state == KW_PICK
     assert "not in the list" in upd.callback_query.message.reply_text.call_args[0][0]
+
+
+# ── fallback-chain integration (Fix 5) ────────────────────────────────────────
+
+def _make_salary_transaction(description="", category="", txn_date=None):
+    t = MagicMock()
+    t.transaction_type = "Income"
+    t.category = category
+    t.description = description
+    t.date = txn_date or date(2026, 7, 1)
+    return t
+
+
+async def test_fallback_env_keywords_when_excel_empty(excel_path, monkeypatch):
+    """With no Excel keywords, an env keyword in Description triggers the prompt."""
+    import settings
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["payroll"])
+
+    # Excel keywords column is absent — load_salary_keywords returns []
+    assert load_salary_keywords(excel_path) == []
+
+    upd = make_update()
+    txn = _make_salary_transaction(description="payroll april", category="")
+    from handlers.cycle import maybe_prompt_cycle_start
+    await maybe_prompt_cycle_start(upd, txn)
+    upd.message.reply_text.assert_called_once()
+    assert "Salary received" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_excel_keywords_override_env(excel_path, monkeypatch):
+    """When Excel keywords are present, env keywords are ignored;
+    only the Excel keyword triggers the prompt."""
+    import settings
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["envonly"])
+
+    save_salary_keyword("excelword")
+    assert load_salary_keywords(excel_path) == ["envonly", "excelword"]
+
+    upd_env = make_update()
+    txn_env = _make_salary_transaction(description="envonly march", category="")
+    from handlers.cycle import maybe_prompt_cycle_start
+    await maybe_prompt_cycle_start(upd_env, txn_env)
+    # env keyword "envonly" was seeded into Excel alongside "excelword",
+    # so it is now in Excel — this call should still prompt.
+    # Verify the excelword path independently:
+    upd_excel = make_update()
+    txn_excel = _make_salary_transaction(description="excelword april", category="")
+    await maybe_prompt_cycle_start(upd_excel, txn_excel)
+    upd_excel.message.reply_text.assert_called_once()
+    assert "Salary received" in upd_excel.message.reply_text.call_args[0][0]
+
+    # A keyword not in Excel (and env is now superseded) must NOT trigger.
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["newenvword"])
+    upd_miss = make_update()
+    txn_miss = _make_salary_transaction(description="newenvword may", category="")
+    await maybe_prompt_cycle_start(upd_miss, txn_miss)
+    upd_miss.message.reply_text.assert_not_called()

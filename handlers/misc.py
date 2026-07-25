@@ -290,7 +290,7 @@ async def cmd_keywords(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🔑 */keywords* — Manage salary keywords \\(owner only\\)\n\n"
             "These words mark an Income transaction as a salary for budget\\-cycle "
-            "detection \\(matched in Category, or Description when Category is empty\\)\\.\n\n"
+            "detection \\(matched in Category or Description\\)\\.\n\n"
             "Tap ➖ next to a keyword to remove it, or ➕ to add one\\. "
             "Keywords are stored in the Excel Lists sheet; until the first one is "
             "added there, the `CYCLE_DETECT_KEYWORDS` \\.env value is used\\.\n"
@@ -330,6 +330,12 @@ async def keywords_add_word(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     word = (update.message.text or "").strip().lower()
     if not word:
         await update.message.reply_text("❌ Keyword cannot be empty. Send a word or /cancel:")
+        return KW_ADD
+
+    if len(word.encode()) > 57:
+        await update.message.reply_text(
+            "❌ Keyword too long (max 57 characters). Send a shorter word or /cancel:"
+        )
         return KW_ADD
 
     added = await async_save_salary_keyword(word)
