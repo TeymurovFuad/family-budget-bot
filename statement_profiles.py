@@ -565,6 +565,43 @@ def validate_profile_mapping(profile: dict) -> list[str]:
     return errors
 
 
+def validate_proposal_against_samples(proposal: dict, sample_rows: list[list]) -> list[str]:
+    """
+    Sanity-check the proposed decimal_separator against raw sample cell values.
+    Returns warning strings (empty list = consistent).
+
+    Heuristic: if cells like "79.99" (dot decimal, 1-2 decimal digits) appear but
+    the proposal says comma-decimal (or vice versa), that's a contradiction.
+    Only fires when evidence is unambiguous (one pattern present, the other absent).
+    """
+    decimal_sep = proposal.get("decimal_separator") or "."
+    dot_re = re.compile(r"^-?\d[\d,]*\.\d{1,2}$")   # e.g. 79.99, 1,234.56
+    comma_re = re.compile(r"^-?\d[\d.]*,\d{1,2}$")  # e.g. 79,99, 1.234,56
+
+    dot_count = 0
+    comma_count = 0
+    for row in sample_rows:
+        for cell in row:
+            s = str(cell).strip()
+            if dot_re.match(s):
+                dot_count += 1
+            elif comma_re.match(s):
+                comma_count += 1
+
+    warnings: list[str] = []
+    if decimal_sep == "," and dot_count > 0 and comma_count == 0:
+        warnings.append(
+            f"⚠️ Decimal separator set to comma, but {dot_count} sample value(s) use a dot "
+            f"(e.g. '79.99'). This would corrupt amounts — use 'Fix settings' to correct."
+        )
+    elif decimal_sep == "." and comma_count > 0 and dot_count == 0:
+        warnings.append(
+            f"⚠️ Decimal separator set to dot, but {comma_count} sample value(s) use a comma "
+            f"(e.g. '79,99'). This would corrupt amounts — use 'Fix settings' to correct."
+        )
+    return warnings
+
+
 def propose_mapping(
     headers: list[str],
     sample_rows: list[list],

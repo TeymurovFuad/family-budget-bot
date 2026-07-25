@@ -29,7 +29,7 @@ import statement_profiles as sp
 from states import (
     BULK_RECEIVE, BULK_CONFIRM,
     BULK_STATEMENT, BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME,
-    BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD,
+    BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD, BULK_PROFILE_FIX_SETTING,
 )
 from validators import (
     clean_merchant_description,
@@ -71,7 +71,9 @@ async def _cmd_bulk_profile_list(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         name = p.get("name") or "?"
         fp_count = len(p.get("fingerprint") or [])
         sign = p.get("sign_convention") or "?"
-        lines.append(f"• {name} ({fp_count} columns, {sign})")
+        dec = p.get("decimal_separator") or "."
+        dec_word = "comma decimal" if dec == "," else "dot decimal"
+        lines.append(f"• {name} ({fp_count} columns, {sign}, {dec_word})")
         safe = sp.profile_safe_name(name)
         cb = f"profile_del:{safe}"
         if len(cb.encode()) <= 64:
@@ -280,6 +282,7 @@ def _format_profile_confirm_message(proposal: dict) -> str:
         if debit_col and credit_col:
             lines.append(
                 f"  ✅ amount    → split: '{debit_col}' (expense) + '{credit_col}' (income)"
+                f", {sep_word} decimal"
             )
         elif debit_col:
             lines.append(f"  ❌ amount    → debit '{debit_col}' mapped — credit column missing (required)")
@@ -330,11 +333,37 @@ def _format_profile_confirm_message(proposal: dict) -> str:
 
 
 def _profile_confirm_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Looks right", callback_data="profile_ok"),
+         InlineKeyboardButton("Cancel", callback_data="profile_cancel")],
+        [InlineKeyboardButton("Fix a column", callback_data="profile_fix"),
+         InlineKeyboardButton("Fix settings", callback_data="profile_fix_settings")],
+    ])
+
+
+def _settings_pick_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Decimal separator", callback_data="fix_settings:decimal")],
+        [InlineKeyboardButton("Date format", callback_data="fix_settings:date_fmt")],
+        [InlineKeyboardButton("Sign convention", callback_data="fix_settings:sign")],
+        [InlineKeyboardButton("↩ Back", callback_data="fix_settings:back")],
+    ])
+
+
+def _decimal_sep_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("Looks right", callback_data="profile_ok"),
-        InlineKeyboardButton("Fix a column", callback_data="profile_fix"),
-        InlineKeyboardButton("Cancel", callback_data="profile_cancel"),
+        InlineKeyboardButton("Dot  (1,234.56)", callback_data="fix_sep:."),
+        InlineKeyboardButton("Comma  (1.234,56)", callback_data="fix_sep:,"),
     ]])
+
+
+def _sign_convention_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Negative = expense  (−45.00)", callback_data="fix_sign:negative_expense")],
+        [InlineKeyboardButton("Positive = expense  (45.00)", callback_data="fix_sign:positive_expense")],
+        [InlineKeyboardButton("Always expense", callback_data="fix_sign:always_expense")],
+        [InlineKeyboardButton("Debit / Credit split columns", callback_data="fix_sign:debit_credit_split")],
+    ])
 
 
 def _column_pick_keyboard(headers: list[str]) -> InlineKeyboardMarkup:
@@ -462,10 +491,9 @@ async def bulk_profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
 
     if data == "profile_cancel":
-        ctx.user_data.pop("_stmt_proposal", None)
-        ctx.user_data.pop("_stmt_file_bytes", None)
-        ctx.user_data.pop("_stmt_filename", None)
-        ctx.user_data.pop("_stmt_headers", None)
+        for key in ("_stmt_proposal", "_stmt_file_bytes", "_stmt_filename", "_stmt_headers",
+                    "_stmt_fix_col", "_stmt_fix_setting"):
+            ctx.user_data.pop(key, None)
         await query.edit_message_text("Statement import cancelled.")
         return ConversationHandler.END
 
@@ -492,6 +520,73 @@ async def bulk_profile_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reply_markup=_column_pick_keyboard(headers),
         )
         return BULK_PROFILE_FIX_COL
+
+    if data == "profile_fix_settings":
+        await query.edit_message_text(
+            "Which setting do you want to correct?",
+            reply_markup=_settings_pick_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data == "fix_settings:back":
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        await query.edit_message_text(
+            _format_profile_confirm_message(proposal),
+            reply_markup=_profile_confirm_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data == "fix_settings:decimal":
+        await query.edit_message_text(
+            "Which decimal separator does this bank use?",
+            reply_markup=_decimal_sep_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data.startswith("fix_sep:"):
+        sep = data[len("fix_sep:"):]
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        proposal["decimal_separator"] = sep
+        ctx.user_data["_stmt_proposal"] = proposal
+        await query.edit_message_text(
+            _format_profile_confirm_message(proposal),
+            reply_markup=_profile_confirm_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data == "fix_settings:sign":
+        await query.edit_message_text(
+            "How does this bank express expense amounts?",
+            reply_markup=_sign_convention_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data.startswith("fix_sign:"):
+        sign = data[len("fix_sign:"):]
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        proposal["sign_convention"] = sign
+        # Keep column_map consistent with the new sign convention.
+        col_map = proposal.setdefault("column_map", {})
+        if sign == sp.SIGN_DEBIT_CREDIT_SPLIT:
+            col_map.pop("amount", None)
+        else:
+            col_map.pop("debit", None)
+            col_map.pop("credit", None)
+        ctx.user_data["_stmt_proposal"] = proposal
+        await query.edit_message_text(
+            _format_profile_confirm_message(proposal),
+            reply_markup=_profile_confirm_keyboard(),
+        )
+        return BULK_PROFILE_CONFIRM
+
+    if data == "fix_settings:date_fmt":
+        proposal = ctx.user_data.get("_stmt_proposal") or {}
+        current = proposal.get("date_format") or "?"
+        await query.edit_message_text(
+            f"Current date format: `{current}`\n\n"
+            "Type the correct strptime pattern, e.g. `%d.%m.%Y` or `%Y-%m-%d`.",
+        )
+        return BULK_PROFILE_FIX_SETTING
 
     if data.startswith("fix_col:"):
         col = data[len("fix_col:"):]
@@ -577,11 +672,28 @@ async def bulk_profile_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Profile '{name}' saved — using it now.")
 
     # Clean up temp state.
-    for key in ("_stmt_proposal", "_stmt_file_bytes", "_stmt_filename", "_stmt_headers", "_stmt_fix_col"):
+    for key in ("_stmt_proposal", "_stmt_file_bytes", "_stmt_filename", "_stmt_headers", "_stmt_fix_col", "_stmt_fix_setting"):
         ctx.user_data.pop(key, None)
 
     return await _finish_profile_parse(update, ctx, file_bytes, filename, profile, name)
 
+
+@auth
+async def bulk_profile_fix_setting(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Receive typed date_format from user and apply it to the proposal."""
+    raw = (update.message.text or "").strip()
+    if not raw:
+        await update.message.reply_text("Please type a strptime date pattern, e.g. `%d.%m.%Y`.")
+        return BULK_PROFILE_FIX_SETTING
+
+    proposal = ctx.user_data.get("_stmt_proposal") or {}
+    proposal["date_format"] = raw
+    ctx.user_data["_stmt_proposal"] = proposal
+    await update.message.reply_text(
+        _format_profile_confirm_message(proposal),
+        reply_markup=_profile_confirm_keyboard(),
+    )
+    return BULK_PROFILE_CONFIRM
 
 
 async def _announce_parse_plan(update: Update, text: str) -> None:
@@ -1432,8 +1544,12 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         ctx.user_data["_stmt_filename"] = filename
                         ctx.user_data["_stmt_headers"] = headers
                         ctx.user_data["lists"] = lists
+                        sep_warnings = sp.validate_proposal_against_samples(proposal, sample_rows)
+                        confirm_text = _format_profile_confirm_message(proposal)
+                        if sep_warnings:
+                            confirm_text += "\n\n" + "\n".join(sep_warnings)
                         await update.message.reply_text(
-                            _format_profile_confirm_message(proposal),
+                            confirm_text,
                             reply_markup=_profile_confirm_keyboard(),
                         )
                         return BULK_PROFILE_CONFIRM

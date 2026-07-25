@@ -20,6 +20,7 @@ BULK_PROFILE_CONFIRM = 403  # AI proposed mapping — awaiting user confirmation
 BULK_PROFILE_NAME = 404     # user confirmed mapping — awaiting profile name
 BULK_PROFILE_FIX_COL = 405  # user chose "Fix a column" — awaiting column pick
 BULK_PROFILE_FIX_FIELD = 406  # user picked column — awaiting field assignment
+BULK_PROFILE_FIX_SETTING = 407  # user chose "Fix settings" → date_format text input
 QUICK_CONFIRM = 500
 SET_BUDGET_PICK   = 600
 SET_BUDGET_AMOUNT = 601
