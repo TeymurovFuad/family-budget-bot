@@ -114,6 +114,21 @@ def test_save_blank_is_rejected(excel_path):
     assert save_salary_keyword("   ") is False
 
 
+def test_save_overlong_keyword_is_rejected(excel_path):
+    assert save_salary_keyword("x" * (cycles.MAX_SALARY_KEYWORD_LENGTH + 1)) is False
+    assert load_salary_keywords(excel_path) == []
+
+
+def test_no_reseed_after_user_empties_the_list(excel_path, monkeypatch):
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["envword"])
+    save_salary_keyword("payroll")
+    delete_salary_keyword("envword")
+    delete_salary_keyword("payroll")
+    assert load_salary_keywords(excel_path) == []
+    assert save_salary_keyword("bonus") is True
+    assert load_salary_keywords(excel_path) == ["bonus"]
+
+
 def test_delete_removes_only_column_cells(excel_path, monkeypatch):
     monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", [])
     save_salary_keyword("payroll")
@@ -204,6 +219,14 @@ async def test_keywords_add_flow(excel_path, monkeypatch):
     assert load_salary_keywords(excel_path) == ["envword", "premia"]
     text = msg.message.reply_text.call_args[0][0]
     assert "Added 'premia'" in text
+
+
+async def test_keywords_add_overlong_word_reprompts(excel_path):
+    msg = make_update("x" * (cycles.MAX_SALARY_KEYWORD_LENGTH + 1))
+    state = await keywords_add_word(msg, make_ctx())
+    assert state == KW_ADD
+    assert "too long" in msg.message.reply_text.call_args[0][0]
+    assert load_salary_keywords(excel_path) == []
 
 
 async def test_keywords_add_duplicate_reports_noop(excel_path, monkeypatch):

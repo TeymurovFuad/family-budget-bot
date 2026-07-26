@@ -18,6 +18,7 @@ from validators import parse_amount
 from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT, KW_PICK, KW_ADD
 import settings
 from cycles import (
+    MAX_SALARY_KEYWORD_LENGTH,
     async_delete_salary_keyword, async_save_salary_keyword, load_salary_keywords,
 )
 
@@ -330,6 +331,12 @@ async def keywords_add_word(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     word = (update.message.text or "").strip().lower()
     if not word:
         await update.message.reply_text("❌ Keyword cannot be empty. Send a word or /cancel:")
+        return KW_ADD
+    if len(word) > MAX_SALARY_KEYWORD_LENGTH:
+        await update.message.reply_text(
+            f"❌ Keyword is too long (max {MAX_SALARY_KEYWORD_LENGTH} characters). "
+            "Send a shorter word or /cancel:"
+        )
         return KW_ADD
 
     if len(word.encode()) > 57:

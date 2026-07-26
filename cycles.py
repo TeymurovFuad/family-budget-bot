@@ -195,12 +195,7 @@ def load_salary_keywords(excel_path=None) -> list[str]:
         kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
         if not kw_col:
             return []
-        words: list[str] = []
-        for row in range(2, ws.max_row + 1):
-            w = str(ws.cell(row, kw_col).value or "").strip().lower()
-            if w and w not in words:
-                words.append(w)
-        return words
+        return _keyword_column_words(ws, kw_col)
     except Exception as e:
         log.warning("Could not load salary keywords from Lists sheet: %s", e)
         return []
@@ -222,28 +217,33 @@ def _rewrite_keyword_column(ws, kw_col, words: list[str]) -> None:
         ws.cell(row, kw_col).value = None
 
 
+MAX_SALARY_KEYWORD_LENGTH = 50  # Telegram callback_data limit is 64 bytes; "kw:del:" takes 7
+
+
 def save_salary_keyword(keyword: str) -> bool:
     """
-    Append one keyword to the Lists sheet "Salary Keywords" column, creating
-    the column on first use. The very first write seeds the column with the
-    current .env keywords so they are not silently dropped.
-    Returns False (no write) when the keyword is already stored.
+    Append one keyword to the Lists sheet "Salary Keywords" column. The very
+    first write ever (column header not yet present) creates the column and
+    seeds it with the current .env keywords so they are not silently dropped;
+    a list the user has emptied via /keywords stays empty.
+    Returns False (no write) when the keyword is already stored or invalid.
     """
     from openpyxl import load_workbook
 
     keyword = str(keyword or "").strip().lower()
-    if not keyword:
+    if not keyword or len(keyword) > MAX_SALARY_KEYWORD_LENGTH:
         return False
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = wb[LISTS_SHEET_NAME]
         kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
-        if kw_col is None:
+        first_write = kw_col is None
+        if first_write:
             kw_col = ws.max_column + 1
             ws.cell(1, kw_col, header_of(ListsSchema, "salary_keyword"))
         words = _keyword_column_words(ws, kw_col)
         seeded = False
-        if not words:
+        if first_write:
             for w in settings.CYCLE_DETECT_KEYWORDS:
                 w = str(w or "").strip().lower()
                 if w and w not in words:
