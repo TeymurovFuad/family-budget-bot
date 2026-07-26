@@ -2,14 +2,16 @@
 
 import asyncio
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
 
 import settings
-from config import TIMEZONE, auth_write, log
-from data import load_data
+from config import ALLOWED_USERS, auth, auth_write, get_display_currency, log
+from data import load_data, load_rates, now_utc
+from formatters import format_base_as_currency
 from log_decorators import log_call
 from cycles import (
     async_record_cycle_start, async_remove_cycle_start, current_cycle_start,
@@ -39,8 +41,9 @@ _CYCLE_USAGE = (
     "Category equals the salary category, or whose Description contains "
     "any search word (default: salary; extend permanently via /keywords, "
     "or per-scan with `/cycle detect <word>`).\n\n"
-    "*Reports:* with cycles enabled, /summary and /budget cover the "
-    "current cycle (last boundary → today) instead of the calendar month."
+    "*Reports:* with cycles enabled, /summary, /budget, /report, /top and "
+    "budget alerts cover the current cycle (last boundary → today) instead "
+    "of the calendar month."
 )
 
 
@@ -53,7 +56,18 @@ def _day_month(d: date) -> str:
     return f"{d.day} {d.strftime('%b')}"
 
 
-@auth_write
+async def _deny_non_owner(update: Update) -> bool:
+    """True (and replies) when the caller is not the bot owner."""
+    if update.effective_user.id == ALLOWED_USERS[0]:
+        return False
+    await update.message.reply_text(
+        "⛔ Only the bot owner can make changes. "
+        "You can view reports and data, but not add, edit, or delete."
+    )
+    return True
+
+
+@auth
 @log_call()
 async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not settings.BUDGET_CYCLE:
@@ -63,7 +77,7 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    today = datetime.now(TIMEZONE).date()
+    today = now_utc().date()
     args = ctx.args or []
 
     if not args:
@@ -77,7 +91,7 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             start, label = current
             await update.message.reply_text(
-                f"💰 Current cycle: *{label}* — started {start.isoformat()}, "
+                f"💰 Current cycle: *{escape_markdown(label)}* — started {start.isoformat()}, "
                 f"day {(today - start).days + 1}.",
                 parse_mode="Markdown",
             )
@@ -100,12 +114,14 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 else None
             )
             span = f"{start.isoformat()} → {end.isoformat()}" if end else f"{start.isoformat()} → today"
-            lines.append(f"• *{label}* — {span}")
+            lines.append(f"• *{escape_markdown(label)}* — {span}")
         lines.append("\nRemove one with `/cycle remove YYYY-MM-DD`.")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
         return
 
     if args[0].lower() == "remove":
+        if await _deny_non_owner(update):
+            return
         if len(args) < 2:
             await update.message.reply_text(
                 "Usage: `/cycle remove YYYY-MM-DD` — see dates with `/cycle list`.",
@@ -137,6 +153,9 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(_CYCLE_USAGE, parse_mode="Markdown")
         return
 
+    if await _deny_non_owner(update):
+        return
+
     if len(args) >= 2:
         try:
             start = date.fromisoformat(args[1])
@@ -154,8 +173,9 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     recorded = await async_record_cycle_start(start)
     if recorded:
+        label = dict(load_cycles()).get(start, cycle_label(start))
         await update.message.reply_text(
-            f"✅ New budget cycle *{cycle_label(start)}* started from {start.isoformat()}.",
+            f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
             parse_mode="Markdown",
         )
     else:
@@ -173,6 +193,12 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
+    # Clear any state left over from a previous detect session.
+    ctx.user_data.pop("detect_candidates", None)
+    ctx.user_data.pop("detect_queue", None)
+    ctx.user_data.pop("detect_total", None)
+    ctx.user_data.pop("detect_recorded", None)
+
     extra_keywords = list((ctx.args or [])[1:])
     keywords = cycle_detect_keywords(extra_keywords)
     await update.message.reply_text(
@@ -181,7 +207,9 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     )
 
     loop = asyncio.get_running_loop()
-    df, cycles = await loop.run_in_executor(None, lambda: (load_data(), load_cycles()))
+    df, rates, cycles = await loop.run_in_executor(
+        None, lambda: (load_data(), load_rates(), load_cycles())
+    )
     candidates = await loop.run_in_executor(
         None, lambda: detect_cycle_candidates(df, cycles, extra_keywords)
     )
@@ -195,15 +223,25 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
+    ccy = get_display_currency(update.effective_user.id)
+
+    def _fmt_amount(a: float) -> str:
+        return format_base_as_currency(a, ccy, rates)
+
     ctx.user_data["detect_candidates"] = [
-        {"date_str": c["date"].isoformat(), "amounts": c["amounts"], "unambiguous": c["unambiguous"]}
+        {
+            "date_str": c["date"].isoformat(),
+            "amounts": c["amounts"],
+            "amounts_fmt": [_fmt_amount(a) for a in c["amounts"]],
+            "unambiguous": c["unambiguous"],
+        }
         for c in candidates
     ]
 
     n = len(candidates)
     lines = []
     for c in candidates:
-        amounts_str = " \\+ ".join(_esc(f"{a:,.0f}") for a in c["amounts"])
+        amounts_str = " \\+ ".join(_esc(_fmt_amount(a)) for a in c["amounts"])
         flag = " ⚠️" if not c["unambiguous"] else ""
         lines.append(f"• {_esc(c['date'].isoformat())} — {amounts_str}{flag}")
 
@@ -229,14 +267,15 @@ async def _send_detect_prompt(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     idx = total - len(queue) + 1
 
     d = _esc(entry["date_str"])
+    amounts_fmt = entry.get("amounts_fmt") or [f"{a:,.0f}" for a in entry["amounts"]]
     if entry["unambiguous"]:
-        amounts_str = _esc(f"{entry['amounts'][0]:,.0f}")
+        amounts_str = _esc(amounts_fmt[0])
         text = f"💰 *{idx} of {total}* — {d}\nSalary · {amounts_str}\n\nDoes this start a new budget cycle?"
     else:
-        amounts_str = " \\+ ".join(_esc(f"{a:,.0f}") for a in entry["amounts"])
+        amounts_str = " \\+ ".join(_esc(a) for a in amounts_fmt)
         text = (
             f"💰 *{idx} of {total}* — {d}\n"
-            f"{len(entry['amounts'])} salary payments: {amounts_str}\n\n"
+            f"{len(amounts_fmt)} salary payments: {amounts_str}\n\n"
             "Does this date start a new budget cycle?"
         )
 
@@ -258,6 +297,7 @@ async def _advance_detect_queue(message, ctx: ContextTypes.DEFAULT_TYPE) -> None
     else:
         ctx.user_data.pop("detect_queue", None)
         ctx.user_data.pop("detect_total", None)
+        ctx.user_data.pop("detect_recorded", None)
         await message.reply_text(
             "✅ Backfill complete\\! All boundaries have been reviewed\\.",
             parse_mode="MarkdownV2",
@@ -296,6 +336,7 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         candidates = ctx.user_data.pop("detect_candidates", None) or []
         ctx.user_data["detect_queue"] = list(candidates)
         ctx.user_data["detect_total"] = len(candidates)
+        ctx.user_data["detect_recorded"] = 0
         await query.edit_message_reply_markup(reply_markup=None)
         await _send_detect_prompt(query.message, ctx)
         return
@@ -308,7 +349,8 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
     if data.startswith("detect:pick:"):
         date_str = data[len("detect:pick:"):]
         start = date.fromisoformat(date_str)
-        await async_record_cycle_start(start)
+        if await async_record_cycle_start(start):
+            ctx.user_data["detect_recorded"] = ctx.user_data.get("detect_recorded", 0) + 1
         await query.edit_message_text(
             f"✅ Recorded — cycle started {_esc(date_str)}\\.",
             parse_mode="MarkdownV2",
@@ -326,9 +368,10 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         return
 
     if data == "detect:stop":
-        recorded = ctx.user_data.get("detect_total", 0) - len(ctx.user_data.get("detect_queue", []))
+        recorded = ctx.user_data.get("detect_recorded", 0)
         ctx.user_data.pop("detect_queue", None)
         ctx.user_data.pop("detect_total", None)
+        ctx.user_data.pop("detect_recorded", None)
         ctx.user_data.pop("detect_candidates", None)
         await query.edit_message_text(
             _esc(f"🛑 Stopped. Recorded {recorded} {'boundary' if recorded == 1 else 'boundaries'} so far."),
@@ -360,7 +403,7 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
     )
     if not in_category and not in_description:
         return
-    today = datetime.now(TIMEZONE).date()
+    today = now_utc().date()
     if not should_prompt_new_cycle(today):
         return
     proposed = transaction.date or today
@@ -392,8 +435,9 @@ async def handle_cycle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         recorded = await async_record_cycle_start(start)
         if recorded:
+            label = dict(load_cycles()).get(start, cycle_label(start))
             await query.message.reply_text(
-                f"✅ New budget cycle *{cycle_label(start)}* started from {start.isoformat()}.",
+                f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
                 parse_mode="Markdown",
             )
         else:
