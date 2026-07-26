@@ -58,12 +58,18 @@ def _day_month(d: date) -> str:
 
 async def _deny_non_owner(update: Update) -> bool:
     """True (and replies) when the caller is not the bot owner."""
+    # TODO: consolidate into config.auth_owner decorator when multiple-owner
+    # support is added.
     if update.effective_user.id == ALLOWED_USERS[0]:
         return False
-    await update.message.reply_text(
-        "⛔ Only the bot owner can make changes. "
-        "You can view reports and data, but not add, edit, or delete."
-    )
+    msg = update.message or (update.callback_query and update.callback_query.message)
+    if msg:
+        await msg.reply_text(
+            "⛔ Only the bot owner can make changes. "
+            "You can view reports and data, but not add, edit, or delete."
+        )
+    if update.callback_query:
+        await update.callback_query.answer("⛔ Owner only", show_alert=True)
     return True
 
 
@@ -171,9 +177,8 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         start = today
 
-    recorded = await async_record_cycle_start(start)
-    if recorded:
-        label = dict(load_cycles()).get(start, cycle_label(start))
+    label = await async_record_cycle_start(start)
+    if label:
         await update.message.reply_text(
             f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
             parse_mode="Markdown",
@@ -347,6 +352,11 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         return
 
     if data.startswith("detect:pick:"):
+        if update.effective_user.id != ALLOWED_USERS[0]:
+            await query.answer(
+                "⛔ Only the bot owner can record cycle boundaries.", show_alert=True
+            )
+            return
         date_str = data[len("detect:pick:"):]
         start = date.fromisoformat(date_str)
         if await async_record_cycle_start(start):
@@ -433,9 +443,8 @@ async def handle_cycle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             await query.message.reply_text("❌ Could not read the proposed date.")
             return
-        recorded = await async_record_cycle_start(start)
-        if recorded:
-            label = dict(load_cycles()).get(start, cycle_label(start))
+        label = await async_record_cycle_start(start)
+        if label:
             await query.message.reply_text(
                 f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
                 parse_mode="Markdown",

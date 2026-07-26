@@ -545,7 +545,7 @@ you have logged more spending and savings than salary in this cycle, which
 usually indicates untracked income from a previous cycle being spent, or a
 mis-categorised refund logged as a new income row.
 
-### Cycle-scoped /report, /top and budget alerts
+### Cycle-scoped /report, /top, and budget alerts
 
 When `BUDGET_CYCLE=1` and a boundary exists, `/report` and `/top` also cover
 the current cycle instead of the calendar month — `/report` compares category

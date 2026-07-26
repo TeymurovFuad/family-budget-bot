@@ -363,7 +363,7 @@ class TestSummaryHandler:
         from handlers.reports import handle_summary_callback
         import handlers.reports as reports
         _patch_report_data(monkeypatch, _sample_df())
-        monkeypatch.setattr("cycles.load_cycles", lambda: CYCLES)
+        monkeypatch.setattr("handlers.reports.load_cycles", lambda: CYCLES)
         upd = make_callback_update("sum:cyc:0")
         await handle_summary_callback(upd, make_ctx())
         kb = upd.callback_query.message.edit_text.call_args.kwargs["reply_markup"]
@@ -373,7 +373,7 @@ class TestSummaryHandler:
     async def test_cycle_pick_renders_cycle_report(self, monkeypatch):
         from handlers.reports import handle_summary_callback
         _patch_report_data(monkeypatch, _sample_df())
-        monkeypatch.setattr("cycles.load_cycles", lambda: CYCLES)
+        monkeypatch.setattr("handlers.reports.load_cycles", lambda: CYCLES)
         upd = make_callback_update("sum:cs:2026-06-25")
         await handle_summary_callback(upd, make_ctx())
         text = upd.callback_query.message.reply_text.call_args[0][0]
@@ -382,7 +382,7 @@ class TestSummaryHandler:
     async def test_last_cycle_button(self, monkeypatch):
         from handlers.reports import handle_summary_callback
         _patch_report_data(monkeypatch, _sample_df())
-        monkeypatch.setattr("cycles.load_cycles", lambda: CYCLES)
+        monkeypatch.setattr("handlers.reports.load_cycles", lambda: CYCLES)
         upd = make_callback_update("sum:lc")
         await handle_summary_callback(upd, make_ctx())
         text = upd.callback_query.message.reply_text.call_args[0][0]

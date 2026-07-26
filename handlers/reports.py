@@ -15,6 +15,7 @@ from telegram.helpers import escape_markdown
 
 import settings
 from config import auth, get_display_currency, SAVINGS_TARGET, log
+from cycles import load_cycles, current_cycle_start, cycle_totals
 from log_decorators import log_call
 from data import (
     load_data, load_rates, load_budgets, load_reference_data,
@@ -31,7 +32,6 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
     """(start, today, label) for the current cycle, or None → calendar fallback."""
     if not settings.BUDGET_CYCLE:
         return None
-    from cycles import current_cycle_start
     today = now_utc().date()
     current = current_cycle_start(today)
     if current is None:
@@ -43,7 +43,6 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
 async def _send_cycle_summary(msg, ccy: str, df, rates,
                               start: date, end: date, label: str) -> None:
     """msg is anything with reply_text — update.message or query.message."""
-    from cycles import cycle_totals
     totals  = cycle_totals(df, start, end)
     income  = totals["income"]
     expense = totals["expense"]
@@ -164,7 +163,6 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # Typed argument → render the report directly, no buttons.
         cycles = None
         if settings.BUDGET_CYCLE:
-            from cycles import load_cycles
             cycles = load_cycles()
         resolution = parse_summary_args(ctx.args, today, cycles)
         if resolution is None:
@@ -218,7 +216,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action in ("tc", "lc"):
-        from cycles import load_cycles
         cycles = [c for c in load_cycles() if c[0] <= today]
         need = 1 if action == "tc" else 2
         if len(cycles) < need:
@@ -285,7 +282,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action == "cyc":
-        from cycles import load_cycles
         cycles = [c for c in load_cycles() if c[0] <= today]
         if not cycles:
             await msg.reply_text("❌ No cycles recorded yet.")
@@ -296,7 +292,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action == "cs":
-        from cycles import load_cycles
         start = date.fromisoformat(parts[2])
         cycles = [c for c in load_cycles() if c[0] <= today]
         for i, (c_start, label) in enumerate(cycles):
@@ -434,7 +429,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🏆 */top* — Top 5 expenses\n\n"
             "Shows the 5 biggest expenses this month, sorted by amount\\.\n"
-            "With budget cycles enabled, covers the current cycle instead\\.",
+            "With budget cycles enabled, covers the current cycle instead of the calendar month\\.",
             parse_mode="MarkdownV2",
         )
         return
@@ -578,7 +573,6 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if cycle is not None:
         # Compare against the previous cycle (boundary before this one → day
         # before this cycle's start); no previous cycle → no deltas.
-        from cycles import load_cycles
         prev_label = "previous cycle"
         prior = [c for c in load_cycles() if c[0] < start]
         if prior:

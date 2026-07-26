@@ -92,11 +92,11 @@ def load_cycles() -> list[tuple[date, str]]:
         return []
 
 
-def record_cycle_start(start: date) -> bool:
+def record_cycle_start(start: date) -> str | None:
     """
     Append one boundary row to the Cycles sheet.
-    Returns False (no write) if that start date is already recorded —
-    boundaries are written once, never recomputed.
+    Returns the recorded cycle label, or None (no write) if that start date
+    is already recorded — boundaries are written once, never recomputed.
     """
     from openpyxl import load_workbook
 
@@ -115,7 +115,7 @@ def record_cycle_start(start: date) -> bool:
             if existing is None:
                 continue
             if existing == start:
-                return False
+                return None
             existing_dates.add(existing)
             next_row = row + 1
         label = _dedup_cycle_label(start, existing_dates)
@@ -123,10 +123,11 @@ def record_cycle_start(start: date) -> bool:
         ws.cell(next_row, label_col, label)
         atomic_save(wb, excel_path)
         log.info("Recorded cycle boundary %s (%s)", start, label)
-        return True
+        return label
 
 
-async def async_record_cycle_start(start: date) -> bool:
+async def async_record_cycle_start(start: date) -> str | None:
+    """Async wrapper — returns the recorded label, or None if already recorded."""
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
         return await loop.run_in_executor(None, record_cycle_start, start)

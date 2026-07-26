@@ -65,7 +65,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/setcurrency — change the display currency\n"
         "/keywords — view, add or remove the salary keywords used for cycle detection \\(owner only\\)\n"
         "/setbudget — set the monthly budget limit for a category \\(owner only\\)\n"
-        "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(changes owner only, needs `BUDGET_CYCLE=1`\\)\n"
+        "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(changes are owner only, needs `BUDGET_CYCLE=1`\\)\n"
         "/menu — show the button menu\n"
         "/start — welcome message and main menu\n"
         "/help — this list\n\n"
