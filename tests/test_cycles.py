@@ -93,15 +93,15 @@ def test_ensure_cycles_sheet_creates_headers():
 
 def test_record_and_load_cycles(excel_path):
     assert load_cycles() == []
-    assert record_cycle_start(date(2026, 6, 25)) is True
-    assert record_cycle_start(date(2026, 7, 23)) is True
+    assert record_cycle_start(date(2026, 6, 25)) == "Jun 2026"
+    assert record_cycle_start(date(2026, 7, 23)) == "Jul 2026"
     got = load_cycles()
     assert got == [(date(2026, 6, 25), "Jun 2026"), (date(2026, 7, 23), "Jul 2026")]
 
 
 def test_record_duplicate_boundary_is_noop(excel_path):
-    assert record_cycle_start(date(2026, 7, 23)) is True
-    assert record_cycle_start(date(2026, 7, 23)) is False
+    assert record_cycle_start(date(2026, 7, 23)) == "Jul 2026"
+    assert record_cycle_start(date(2026, 7, 23)) is None
     assert len(load_cycles()) == 1
 
 
@@ -211,7 +211,7 @@ def test_remove_cycle_start_roundtrip(excel_path):
     assert cycles.remove_cycle_start(date(2026, 6, 25)) is True
     assert cycles.remove_cycle_start(date(2026, 6, 25)) is False
     assert load_cycles() == []
-    assert record_cycle_start(date(2026, 6, 26)) is True
+    assert record_cycle_start(date(2026, 6, 26)) == "Jun 2026"
 
 
 # ── detect_cycle_candidates ────────────────────────────────────────────────────

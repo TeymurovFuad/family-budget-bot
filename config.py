@@ -90,6 +90,8 @@ def auth_write(func):
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
         if uid not in ALLOWED_USERS:
+            if update.callback_query:
+                await update.callback_query.answer("⛔ Not authorized.", show_alert=True)
             msg = update.message or (update.callback_query and update.callback_query.message)
             if msg:
                 await msg.reply_text(
@@ -99,6 +101,10 @@ def auth_write(func):
                 )
             return
         if uid != ALLOWED_USERS[0]:
+            if update.callback_query:
+                await update.callback_query.answer(
+                    "⛔ Only the bot owner can make changes.", show_alert=True
+                )
             msg = update.message or (update.callback_query and update.callback_query.message)
             if msg:
                 await msg.reply_text(

@@ -11,9 +11,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.helpers import escape_markdown
 
 import settings
 from config import auth, get_display_currency, SAVINGS_TARGET, log
+from cycles import load_cycles, current_cycle_start, cycle_totals
 from log_decorators import log_call
 from data import (
     load_data, load_rates, load_budgets, load_reference_data,
@@ -30,7 +32,6 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
     """(start, today, label) for the current cycle, or None → calendar fallback."""
     if not settings.BUDGET_CYCLE:
         return None
-    from cycles import current_cycle_start
     today = now_utc().date()
     current = current_cycle_start(today)
     if current is None:
@@ -42,7 +43,6 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
 async def _send_cycle_summary(msg, ccy: str, df, rates,
                               start: date, end: date, label: str) -> None:
     """msg is anything with reply_text — update.message or query.message."""
-    from cycles import cycle_totals
     totals  = cycle_totals(df, start, end)
     income  = totals["income"]
     expense = totals["expense"]
@@ -58,7 +58,7 @@ async def _send_cycle_summary(msg, ccy: str, df, rates,
                 else f"⚠️ *Net:* {format_base_as_currency(net, ccy, rates)}")
 
     await msg.reply_text(
-        f"📊 *Cycle {label} — Summary* ({ccy})\n"
+        f"📊 *Cycle {escape_markdown(label)} — Summary* ({ccy})\n"
         f"_{start.isoformat()} → {'today' if end == now_utc().date() else end.isoformat()}, day {days_elapsed}_\n\n"
         f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
         f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
@@ -163,7 +163,6 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # Typed argument → render the report directly, no buttons.
         cycles = None
         if settings.BUDGET_CYCLE:
-            from cycles import load_cycles
             cycles = load_cycles()
         resolution = parse_summary_args(ctx.args, today, cycles)
         if resolution is None:
@@ -217,7 +216,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action in ("tc", "lc"):
-        from cycles import load_cycles
         cycles = [c for c in load_cycles() if c[0] <= today]
         need = 1 if action == "tc" else 2
         if len(cycles) < need:
@@ -284,7 +282,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action == "cyc":
-        from cycles import load_cycles
         cycles = [c for c in load_cycles() if c[0] <= today]
         if not cycles:
             await msg.reply_text("❌ No cycles recorded yet.")
@@ -295,7 +292,6 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         return
 
     if action == "cs":
-        from cycles import load_cycles
         start = date.fromisoformat(parts[2])
         cycles = [c for c in load_cycles() if c[0] <= today]
         for i, (c_start, label) in enumerate(cycles):
@@ -387,7 +383,8 @@ async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         dates = pd.to_datetime(df["Date"], errors="coerce")
         sub = df[dates.notna() & (dates.dt.date >= start) & (dates.dt.date <= end)
                  & (df["Type"] == "Expense") & df["IsDone"]]
-        title = f"📋 *Budget vs Actual — Cycle {label}* ({ccy})\n_{start.isoformat()} → today_\n"
+        title = (f"📋 *Budget vs Actual — Cycle {escape_markdown(label)}* ({ccy})\n"
+                 f"_{start.isoformat()} → today_\n")
     else:
         sub = df[(df["Year"] == year) & (df["Month"] == month)
                  & (df["Type"] == "Expense") & df["IsDone"]]
@@ -431,7 +428,8 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if ctx.args and ctx.args[0].lower() == "help":
         await update.message.reply_text(
             "🏆 */top* — Top 5 expenses\n\n"
-            "Shows the 5 biggest expenses this month, sorted by amount\\.",
+            "Shows the 5 biggest expenses this month, sorted by amount\\.\n"
+            "With budget cycles enabled, covers the current cycle instead of the calendar month\\.",
             parse_mode="MarkdownV2",
         )
         return
@@ -445,14 +443,26 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
 
-    sub = (df[(df["Year"] == year) & (df["Month"] == month)
-              & (df["Type"] == "Expense") & df["IsDone"]]
-           .sort_values("_base", ascending=False).head(5))
+    cycle = _current_cycle_bounds()
+    if cycle is not None:
+        start, end, label = cycle
+        dates = pd.to_datetime(df["Date"], errors="coerce")
+        sub = (df[dates.notna() & (dates.dt.date >= start) & (dates.dt.date <= end)
+                  & (df["Type"] == "Expense") & df["IsDone"]]
+               .sort_values("_base", ascending=False).head(5))
+        empty_msg = "No expenses found this cycle."
+        title = f"🏆 *Top 5 expenses — Cycle {escape_markdown(label)}* ({ccy})\n"
+    else:
+        sub = (df[(df["Year"] == year) & (df["Month"] == month)
+                  & (df["Type"] == "Expense") & df["IsDone"]]
+               .sort_values("_base", ascending=False).head(5))
+        empty_msg = "No expenses found this month."
+        title = f"🏆 *Top 5 expenses — {month} {year}* ({ccy})\n"
 
     if sub.empty:
-        await update.message.reply_text("No expenses found this month."); return
+        await update.message.reply_text(empty_msg); return
 
-    lines = [f"🏆 *Top 5 expenses — {month} {year}* ({ccy})\n"]
+    lines = [title]
     for i, (_, row) in enumerate(sub.iterrows(), 1):
         desc     = row.get("Description", "") or ""
         cat      = row.get("Category", "?")
@@ -523,6 +533,8 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "📑 */report* — Full monthly report\n\n"
             "Income, expenses \\(fixed vs variable\\), savings, net, and savings rate\\.\n"
             "Breaks down spend by category with month\\-over\\-month deltas\\.\n"
+            "With budget cycles enabled, covers the current cycle with "
+            "cycle\\-over\\-cycle deltas\\.\n"
             "Over\\-budget categories are flagged 🔴\\.",
             parse_mode="MarkdownV2",
         )
@@ -538,7 +550,17 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
 
-    sub      = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
+    cycle = _current_cycle_bounds()
+    if cycle is not None:
+        start, end, label = cycle
+        dates = pd.to_datetime(df["Date"], errors="coerce")
+        sub = df[dates.notna() & (dates.dt.date >= start) & (dates.dt.date <= end)
+                 & df["IsDone"]]
+        header = (f"📑 *Cycle Report — {escape_markdown(label)}* ({ccy})\n"
+                  f"_{start.isoformat()} → today_")
+    else:
+        sub = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
+        header = f"📑 *Monthly Report — {month} {year}* ({ccy})"
     income   = sub[sub["Type"] == "Income"]["_base"].sum()
     expense  = sub[sub["Type"] == "Expense"]["_base"].sum()
     savings  = sub[sub["Type"] == "Savings"]["_base"].sum()
@@ -548,18 +570,32 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     recur    = sub[(sub["Type"] == "Expense") & sub["IsRecurring"].fillna(False).astype(bool)]["_base"].sum()
     discret  = expense - recur
 
-    now             = now_utc()
-    prev_month_num  = now.month - 1 if now.month > 1 else 12
-    prev_year       = year if now.month > 1 else year - 1
-    prev_month_name = month_name(prev_month_num)
-    prev_sub        = df[(df["Year"] == prev_year) & (df["Month"] == prev_month_name) & df["IsDone"]]
-    prev_by_cat     = prev_sub[prev_sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
+    if cycle is not None:
+        # Compare against the previous cycle (boundary before this one → day
+        # before this cycle's start); no previous cycle → no deltas.
+        prev_label = "previous cycle"
+        prior = [c for c in load_cycles() if c[0] < start]
+        if prior:
+            p_start = prior[-1][0]
+            p_end   = start - timedelta(days=1)
+            dates   = pd.to_datetime(df["Date"], errors="coerce")
+            prev_sub = df[dates.notna() & (dates.dt.date >= p_start)
+                          & (dates.dt.date <= p_end) & df["IsDone"]]
+        else:
+            prev_sub = df.iloc[0:0]
+    else:
+        now             = now_utc()
+        prev_month_num  = now.month - 1 if now.month > 1 else 12
+        prev_year       = year if now.month > 1 else year - 1
+        prev_label      = month_name(prev_month_num)
+        prev_sub        = df[(df["Year"] == prev_year) & (df["Month"] == prev_label) & df["IsDone"]]
+    prev_by_cat = prev_sub[prev_sub["Type"] == "Expense"].groupby("Category")["_base"].sum()
 
     by_input_ccy = sub[sub["Type"] == "Expense"].groupby("Currency")["Value"].sum()
     multi_ccy    = len(by_input_ccy) > 1
 
     lines = [
-        f"📑 *Monthly Report — {month} {year}* ({ccy})",
+        header,
         "━━━━━━━━━━━━━━━━━━━",
         f"💰 Income:      `{format_base_as_currency(income, ccy, rates)}`",
         f"💸 Expenses:    `{format_base_as_currency(expense, ccy, rates)}`",
@@ -569,7 +605,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"📈 Net:         `{format_base_as_currency(net, ccy, rates)}`",
         f"📊 Savings rate: *{rate:.0%}* {savings_emoji(rate)}",
         "",
-        f"━━━ By Category (vs {prev_month_name}) ━━━",
+        f"━━━ By Category (vs {prev_label}) ━━━",
     ]
     for cat, amt in by_cat.sort_values(ascending=False).items():
         budget_base = budgets.get(cat, 0)
@@ -974,12 +1010,21 @@ async def check_budget_alert(update, category: str, ccy: str, rates: dict) -> No
         budget  = budgets.get(category)
         if not budget:
             return
-        now  = now_utc()
-        year, month = now.year, month_name(now.month)
-        spent_base = df[
-            (df["Year"] == year) & (df["Month"] == month) &
-            (df["Category"] == category) & (df["Type"] == "Expense") & df["IsDone"]
-        ]["_base"].sum()
+        cycle = _current_cycle_bounds()
+        if cycle is not None:
+            start, end, _label = cycle
+            dates = pd.to_datetime(df["Date"], errors="coerce")
+            spent_base = df[
+                dates.notna() & (dates.dt.date >= start) & (dates.dt.date <= end) &
+                (df["Category"] == category) & (df["Type"] == "Expense") & df["IsDone"]
+            ]["_base"].sum()
+        else:
+            now  = now_utc()
+            year, month = now.year, month_name(now.month)
+            spent_base = df[
+                (df["Year"] == year) & (df["Month"] == month) &
+                (df["Category"] == category) & (df["Type"] == "Expense") & df["IsDone"]
+            ]["_base"].sum()
         pct = spent_base / budget if budget > 0 else 0
         if pct >= 1.0:
             await update.message.reply_text(

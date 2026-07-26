@@ -229,9 +229,9 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/summary` | Opens a period picker (quick buttons, history drill-down); or pass a period/range directly, e.g. `/summary aug 2025` or `/summary aug 2025 - jan 2026` |
 | `/week` | Last 7 days spending by category |
 | `/budget` | All 17 categories with budget vs actual and progress bars |
-| `/top` | The 5 biggest expenses this month |
+| `/top` | The 5 biggest expenses this month (current cycle when `BUDGET_CYCLE=1`) |
 | `/savings` | Savings rate for each of the last 6 months |
-| `/report` | Full report: fixed vs variable, by category |
+| `/report` | Full report: fixed vs variable, by category (cycle-scoped when `BUDGET_CYCLE=1`) |
 | `/chart` | Spending by category rendered as a chart image |
 | `/range` | Report for a custom date range (preset buttons or typed dates) |
 | `/rates` | Exchange rates (`/rates refresh` fetches live rates) |
@@ -244,12 +244,13 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/keywords` | View, add or remove the salary keywords used for cycle detection — owner only |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
 | `/export` | Download the live Excel workbook as a Telegram document |
-| `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a boundary; `/cycle detect [word ...]` backfills history; `/cycle list` shows all boundaries; `/cycle remove YYYY-MM-DD` deletes one — **owner only**, needs `BUDGET_CYCLE=1` |
+| `/cycle` | Show the current budget cycle (any allowed user); `/cycle started [YYYY-MM-DD]` records a boundary; `/cycle detect [word ...]` backfills history; `/cycle list` shows all boundaries; `/cycle remove YYYY-MM-DD` deletes one — **changes are owner only**, needs `BUDGET_CYCLE=1` |
 
-`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/keywords`, `/setbudget`, `/cycle`, and
-quick-add (typed transactions) are **owner-only** — only the first ID listed in
+`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/keywords`, `/setbudget`,
+the `/cycle` write subcommands (`started`, `remove`), and quick-add (typed
+transactions) are **owner-only** — only the first ID listed in
 `ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
-read/report commands.
+read/report commands, including viewing the current cycle with bare `/cycle`.
 
 Every command accepts `help` as a subcommand (e.g. `/add help`, `/bulk help`,
 `/summary help`, `/cycle help`) and returns a one-screen usage card.
@@ -420,9 +421,12 @@ identical to the default calendar mode.
 /cycle remove YYYY-MM-DD      delete a wrongly recorded boundary
 ```
 
-`/cycle` is **owner-only** — only the first ID in `ALLOWED_TELEGRAM_IDS` can
-call it. Future dates are rejected, and recording the same start date twice is
-a no-op — boundaries are written once and never recomputed.
+Bare `/cycle`, `/cycle list`, and `/cycle detect` (the scan itself) are
+available to every allowed user; `/cycle started` and `/cycle remove` — and
+the detect confirmation buttons that actually write boundaries — are
+**owner-only** (the first ID in `ALLOWED_TELEGRAM_IDS`). Future dates are
+rejected, and recording the same start date twice is a no-op — boundaries are
+written once and never recomputed.
 
 **Fixing a wrong boundary:** `/cycle list` shows every recorded date;
 `/cycle remove YYYY-MM-DD` deletes the wrong one; `/cycle started` with the
@@ -448,7 +452,8 @@ metric.
 
 The boundary is written immediately to the `Cycles` sheet in the workbook with
 a label such as "Jul 2026". Labels always include the year so multi-year
-history is unambiguous. The sheet is part of the template and is auto-created
+history is unambiguous; a second boundary within the same calendar month gets
+an index suffix ("Jul 2026 #2") so every cycle label stays unique. The sheet is part of the template and is auto-created
 on first use for existing workbooks.
 
 A **Cycle Dashboard** sheet is created automatically when the first cycle
@@ -540,9 +545,16 @@ you have logged more spending and savings than salary in this cycle, which
 usually indicates untracked income from a previous cycle being spent, or a
 mis-categorised refund logged as a new income row.
 
+### Cycle-scoped /report, /top, and budget alerts
+
+When `BUDGET_CYCLE=1` and a boundary exists, `/report` and `/top` also cover
+the current cycle instead of the calendar month — `/report` compares category
+spend against the previous cycle, and the after-save budget alerts use the
+same cycle window as `/budget`, so their percentages always agree.
+
 ### What does not change
 
-All other calendar-mode commands (`/week`, `/report`, `/range`, etc.)
+All other calendar-mode commands (`/week`, `/range`, etc.)
 and the existing Dashboard sheet continue to work exactly as before.
 Cycles are purely additive. Setting `BUDGET_CYCLE=0` at any point leaves
 the `Cycles` sheet in the workbook untouched and simply stops the feature

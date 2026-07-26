@@ -34,6 +34,20 @@ def cycle_label(start: date) -> str:
     return start.strftime("%b %Y")
 
 
+def _dedup_cycle_label(start: date, existing_dates) -> str:
+    """
+    Ledger label for a boundary, unique within its calendar month: the first
+    boundary in a month keeps the plain label ('Jul 2026'); further ones get
+    an index suffix ('Jul 2026 #2').
+    """
+    same_month = sum(
+        1 for d in existing_dates
+        if d != start and (d.year, d.month) == (start.year, start.month)
+    )
+    base = cycle_label(start)
+    return base if same_month == 0 else f"{base} #{same_month + 1}"
+
+
 def ensure_cycles_sheet(wb):
     """Return the Cycles worksheet, creating it with headers if missing."""
     if CYCLES_SHEET_NAME in wb.sheetnames:
@@ -78,11 +92,11 @@ def load_cycles() -> list[tuple[date, str]]:
         return []
 
 
-def record_cycle_start(start: date) -> bool:
+def record_cycle_start(start: date) -> str | None:
     """
     Append one boundary row to the Cycles sheet.
-    Returns False (no write) if that start date is already recorded —
-    boundaries are written once, never recomputed.
+    Returns the recorded cycle label, or None (no write) if that start date
+    is already recorded — boundaries are written once, never recomputed.
     """
     from openpyxl import load_workbook
 
@@ -95,21 +109,25 @@ def record_cycle_start(start: date) -> bool:
         start_col = idx["start_date"]
         label_col = idx["label"]
         next_row = 2
+        existing_dates: set[date] = set()
         for row in range(2, ws.max_row + 1):
             existing = to_date(ws.cell(row, start_col).value)
             if existing is None:
                 continue
             if existing == start:
-                return False
+                return None
+            existing_dates.add(existing)
             next_row = row + 1
+        label = _dedup_cycle_label(start, existing_dates)
         ws.cell(next_row, start_col, start)
-        ws.cell(next_row, label_col, cycle_label(start))
+        ws.cell(next_row, label_col, label)
         atomic_save(wb, excel_path)
-        log.info("Recorded cycle boundary %s (%s)", start, cycle_label(start))
-        return True
+        log.info("Recorded cycle boundary %s (%s)", start, label)
+        return label
 
 
-async def async_record_cycle_start(start: date) -> bool:
+async def async_record_cycle_start(start: date) -> str | None:
+    """Async wrapper — returns the recorded label, or None if already recorded."""
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
         return await loop.run_in_executor(None, record_cycle_start, start)
@@ -406,12 +424,13 @@ def record_cycle_starts_batch(starts: list[date]) -> int:
         for start in starts:
             if start in existing:
                 continue
+            label = _dedup_cycle_label(start, existing)
             ws.cell(next_row, start_col, start)
-            ws.cell(next_row, label_col, cycle_label(start))
+            ws.cell(next_row, label_col, label)
             existing.add(start)
             next_row += 1
             count += 1
-            log.info("Batch-recorded cycle boundary %s (%s)", start, cycle_label(start))
+            log.info("Batch-recorded cycle boundary %s (%s)", start, label)
 
         if count:
             atomic_save(wb, excel_path)
