@@ -343,7 +343,7 @@ async def test_cmd_cycle_detect_warns_extra_keywords_not_saved(excel_path, monke
     await cmd_cycle(upd, make_ctx(["detect", "bonuspay"]))
 
     texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
-    assert any("not saved" in t and "/keywords" in t for t in texts), texts
+    assert any("this scan only" in t and "/keywords" in t for t in texts), texts
 
 
 async def test_cmd_cycle_detect_no_warning_without_extra_keywords(excel_path, monkeypatch):

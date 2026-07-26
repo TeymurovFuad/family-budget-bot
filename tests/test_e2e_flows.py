@@ -26,7 +26,6 @@ asyncio_mode = auto (pytest.ini) — no @pytest.mark.asyncio needed.
 """
 
 import os
-import re
 import sys
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -872,20 +871,7 @@ class TestCycleFlow:
 # /help and per-command help subcommands — MarkdownV2 validity
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Telegram MarkdownV2 reserved chars that must be escaped in plain text
-# ('*' and '_' excluded — legitimately used as markup).
-_RESERVED = set("[]()~>#+-=|{}.!")
-
-
-def _find_unescaped_reserved(text: str) -> list[str]:
-    problems = []
-    without_escapes = re.sub(r"\\.", "", text)
-    without_code = re.sub(r"`[^`]*`", "", without_escapes)
-    for i, ch in enumerate(without_code):
-        if ch in _RESERVED:
-            context = without_code[max(0, i - 25):i + 25].replace("\n", "⏎")
-            problems.append(f"unescaped {ch!r} near: …{context}…")
-    return problems
+from tests.mdv2_helpers import assert_valid_markdown_v2
 
 
 class TestHelpFlow:
@@ -896,8 +882,7 @@ class TestHelpFlow:
         upd.message.reply_text.assert_awaited_once()
         call = upd.message.reply_text.call_args
         assert call.kwargs.get("parse_mode") == "MarkdownV2"
-        problems = _find_unescaped_reserved(call.args[0])
-        assert not problems, "MarkdownV2 violations in /help:\n" + "\n".join(problems)
+        assert_valid_markdown_v2(call.args[0], source="/help")
 
     async def test_help_lists_all_major_commands(self):
         with patch("handlers.misc.get_display_currency", return_value="PLN"):
@@ -923,7 +908,6 @@ class TestHelpFlow:
         upd.message.reply_text.assert_awaited_once()
         call = upd.message.reply_text.call_args
         assert call.kwargs.get("parse_mode") == "MarkdownV2"
-        problems = _find_unescaped_reserved(call.args[0])
-        assert not problems, "MarkdownV2 violations:\n" + "\n".join(problems)
+        assert_valid_markdown_v2(call.args[0], source=handler_name + " help")
         # Conversation entry points must end, not enter the flow.
         assert result in (ConversationHandler.END, None)

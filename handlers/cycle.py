@@ -256,8 +256,8 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     )
     if extra_keywords:
         text += (
-            "\n\n⚠️ Keywords used in this scan are not saved\\. "
-            "Add them via /keywords to make them permanent\\."
+            "\n\n⚠️ These keywords apply to this scan only\\. "
+            "Use /keywords to save them permanently\\."
         )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirm all", callback_data="detect:confirm_all")],
