@@ -102,6 +102,8 @@ def record_cycle_start(start: date) -> bool:
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = ensure_cycles_sheet(wb)
+        from cycle_dashboard import ensure_cycle_dashboard
+        ensure_cycle_dashboard(wb)
         idx = col_indices(ws, CyclesSchema)
         start_col = idx["start_date"]
         label_col = idx["label"]
@@ -398,6 +400,8 @@ def record_cycle_starts_batch(starts: list[date]) -> int:
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = ensure_cycles_sheet(wb)
+        from cycle_dashboard import ensure_cycle_dashboard
+        ensure_cycle_dashboard(wb)
         idx = col_indices(ws, CyclesSchema)
         start_col = idx["start_date"]
         label_col = idx["label"]
