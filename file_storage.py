@@ -800,6 +800,16 @@ def update_transaction_field(row_idx: int, field: str, value, expected: dict | N
         if col_idx is None:
             raise ValueError(f"Column '{field}' not found")
         ws.cell(row_idx, col_idx, value)
+        if field == "Date" and hasattr(value, "year") and hasattr(value, "month"):
+            # Reports filter on Year/Month — recompute them in the same save
+            # so a re-dated row doesn't keep counting in its old month.
+            from models import MONTH_NAMES
+            year_col = headers.get("Year")
+            month_col = headers.get("Month")
+            if year_col is not None:
+                ws.cell(row_idx, year_col, value.year)
+            if month_col is not None:
+                ws.cell(row_idx, month_col, MONTH_NAMES[value.month - 1])
         atomic_save(wb, excel_path)
         log.info("Updated MasterData row %d column '%s'", row_idx, field)
 

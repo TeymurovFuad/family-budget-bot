@@ -25,7 +25,7 @@ _TRUE_WORDS = {"yes", "y", "true", "1"}
 _FALSE_WORDS = {"no", "n", "false", "0"}
 
 
-def parse_amount(raw) -> float:
+def parse_amount(raw, notes: list | None = None) -> float:
     """
     Parse a human-entered amount into a signed float rounded to 2 decimals.
 
@@ -33,12 +33,19 @@ def parse_amount(raw) -> float:
     `1,234.56`, `-45.00`. Rule: when both `.` and `,` appear, the LAST
     separator is the decimal mark; a separator repeated more than once is a
     thousands separator. Raises ValueError when no number can be extracted.
+
+    A lone separator with exactly 3 trailing digits ("1,234") is genuinely
+    ambiguous — it is read as a decimal mark; if `notes` is given, a warning
+    is appended so the caller can surface the reinterpretation.
     """
     s = str(raw or "").strip()
     negative = s.lstrip().startswith("-")
     s = re.sub(r"[^\d.,]", "", s)
     if not s.strip(".,"):
         raise ValueError(f"not a number: {raw!r}")
+
+    # "1,234" could mean 1.23 (decimal) or 1234 (thousands) — we pick decimal.
+    ambiguous = bool(re.fullmatch(r"\d+[.,]\d{3}", s))
 
     if "." in s and "," in s:
         decimal_sep = "." if s.rfind(".") > s.rfind(",") else ","
@@ -50,7 +57,13 @@ def parse_amount(raw) -> float:
         s = s.replace(".", "")
 
     value = float(s)
-    return round(-value if negative else value, 2)
+    result = round(-value if negative else value, 2)
+    if ambiguous and notes is not None:
+        notes.append(
+            f"amount '{str(raw).strip()}' read as {result:.2f} — if the separator was a "
+            f"thousands mark (you meant {s.replace('.', '')}), resend it without the separator"
+        )
+    return result
 
 
 def coerce_bool(raw) -> bool:
@@ -183,7 +196,7 @@ def validate_parsed_row(
 
     value = row.get("value")
     try:
-        value = value if isinstance(value, (int, float)) else parse_amount(value)
+        value = value if isinstance(value, (int, float)) else parse_amount(value, notes=corrections)
         value = float(value)
     except (TypeError, ValueError):
         return False, "Transaction value must be a positive number.", {}, []

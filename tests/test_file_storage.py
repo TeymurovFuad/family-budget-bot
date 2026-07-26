@@ -349,3 +349,36 @@ def test_repair_template_keeps_validation_ranges(tmp_path, monkeypatch):
     assert sqrefs, "validations were dropped entirely"
     end_row = int(sqrefs[0].split(":F")[1])
     assert end_row >= 500, f"validation range collapsed: {sqrefs}"
+
+
+# ── update_transaction_field — Year/Month sync on date edit ──────────────────
+
+
+class TestDateEditSyncsYearMonth:
+    def _seed_row(self, excel_path):
+        from datetime import date
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        ws.cell(2, 1, date(2024, 5, 12))   # Date
+        ws.cell(2, 2, 2024)                # Year
+        ws.cell(2, 3, "May")               # Month
+        ws.cell(2, 4, 45.0)                # Value
+        ws.cell(2, 8, "shop")              # Description
+        wb.save(excel_path)
+
+    def test_date_edit_recomputes_year_and_month(self, excel_path):
+        from datetime import date
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(2, "Date", date(2023, 12, 31))
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 2).value == 2023
+        assert ws.cell(2, 3).value == "Dec"
+
+    def test_non_date_edit_leaves_year_month_untouched(self, excel_path):
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(2, "Value", 99.0)
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 2).value == 2024
+        assert ws.cell(2, 3).value == "May"

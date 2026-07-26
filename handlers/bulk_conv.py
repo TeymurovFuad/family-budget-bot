@@ -847,6 +847,7 @@ def _flag_master_duplicates(rows: list[dict]) -> dict:
     summary = {
         "flagged": 0, "skip_groups": [], "single_skips": [],
         "identical_groups": [], "loose_matches": [],
+        "total_rows": len(rows),
     }
     if not rows:
         return summary
@@ -975,10 +976,9 @@ def _format_dedup_messages(summary: dict) -> list[str]:
             f"if any of these are the same payment.{more}"
         )
         # Mass loose-match hint — bank likely reformatted descriptions between
-        # exports; offer the one-command bulk override.
-        total_new = sum(
-            len(g) for g in summary["identical_groups"]
-        ) + len(loose) + sum(e["skip_n"] for e in summary["skip_groups"] + summary["single_skips"])
+        # exports; offer the one-command bulk override. Denominator is the
+        # rows the strict pass left as NEW (strict-dup skips excluded).
+        total_new = summary.get("total_rows", 0) - summary.get("flagged", 0)
         if len(loose) >= 3 and total_new and len(loose) >= total_new // 2:
             lines.append(
                 "Most rows in this batch loose-matched an existing entry (likely a "
@@ -997,8 +997,9 @@ def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int
     payments on the same day, or the same photo re-sent). They are annotated
     as an identical group in the preview instead (see _flag_master_duplicates),
     and MasterData-level dedup still applies once they're actually saved.
-    Returns (merged draft, 0) — the second element is kept for API
-    compatibility with callers that used to report a skip count.
+    Returns (merged draft, pre-merge row count) — the second element lets
+    callers report how many rows came from a previous draft without a
+    second disk read.
     """
     previous = _load_user_draft(user_id)
     if not isinstance(previous, list):
@@ -1014,7 +1015,7 @@ def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int
         item.setdefault("status", "pending")
     _save_bulk_draft(user_id, merged)
     log.info("User %s bulk draft updated: %d pending entries", user_id, len(merged))
-    return merged, 0
+    return merged, len(normalized_previous)
 
 
 # Maximum rows a pending draft may hold before new imports are refused.
@@ -1202,7 +1203,7 @@ def _draft_limit_reached(user_id: int) -> bool:
     previous = _load_user_draft(user_id)
     if not isinstance(previous, list):
         return False
-    return len(previous) > _DRAFT_LIMIT_ENTRIES
+    return len(previous) >= _DRAFT_LIMIT_ENTRIES
 
 
 # Telegram hard limit is 4096 chars; leave headroom for the header/footer.
@@ -1227,10 +1228,13 @@ def _bulk_footer(parsed: list[dict]) -> str:
 
     dup_rows = [i for i, t in enumerate(parsed, 1) if t.get("dup") and not t.get("dup_keep")]
     if dup_rows:
-        example = _fmt_row_numbers(dup_rows)
+        if len(dup_rows) == 1:
+            hints = f"`keep {dup_rows[0]}` or `keep all flagged`"
+        else:
+            hints = f"`keep {dup_rows[0]}`, `keep {_fmt_row_numbers(dup_rows)}`, or `keep all flagged`"
         lines.append(
             f"↺ {len(dup_rows)} row(s) skipped as already imported — "
-            f"`keep {dup_rows[0]}`, `keep {example}`, or `keep all flagged` to save them anyway."
+            f"{hints} to save them anyway."
         )
 
     loose_rows = [i for i, t in enumerate(parsed, 1) if t.get("loose_dup")]
@@ -1323,13 +1327,16 @@ _RANGE_TOKEN_RE = re.compile(r"^(\d+)(?:-(\d+))?$")
 _ROW_COMMAND_RE = re.compile(r"^(drop|keep)\s+(.+)$", re.IGNORECASE)
 
 
-def _parse_row_targets(args: str, n: int) -> list[int] | None:
+def _parse_row_targets(args: str, n: int) -> tuple[list[int], list[int]] | None:
     """
-    Parse space-separated row targets ('4', '4 6', '4-6 9 12') into a sorted
-    list of 0-based indices, bounds-checked against n rows. Returns None if
-    nothing valid parses (caller reports "invalid").
+    Parse space-separated row targets ('4', '4 6', '4-6 9 12') into
+    (sorted 0-based indices, sorted out-of-bounds 1-based numbers),
+    bounds-checked against n rows. Returns None on a malformed token;
+    indices may be empty when every requested number is out of bounds
+    (caller reports "invalid" consistently instead of silently ignoring).
     """
     idxs: set[int] = set()
+    oob: set[int] = set()
     for tok in args.split():
         m = _RANGE_TOKEN_RE.match(tok)
         if not m:
@@ -1341,7 +1348,9 @@ def _parse_row_targets(args: str, n: int) -> list[int] | None:
         for v in range(a, b + 1):
             if 1 <= v <= n:
                 idxs.add(v - 1)
-    return sorted(idxs) if idxs else None
+            else:
+                oob.add(v)
+    return sorted(idxs), sorted(oob)
 
 
 def _apply_row_command(text: str, parsed: list[dict]) -> tuple[bool, str, list[str]] | None:
@@ -1366,6 +1375,7 @@ def _apply_row_command(text: str, parsed: list[dict]) -> tuple[bool, str, list[s
     args = m.group(2).strip().lower()
     n = len(parsed)
 
+    oob: list[int] = []
     if args == "all flagged":
         if verb == "keep":
             idxs = [i for i, r in enumerate(parsed) if r.get("dup") and not r.get("dup_keep")]
@@ -1376,11 +1386,18 @@ def _apply_row_command(text: str, parsed: list[dict]) -> tuple[bool, str, list[s
     elif args == "all":
         idxs = list(range(n))
     else:
-        idxs = _parse_row_targets(args, n)
-        if idxs is None:
+        targets = _parse_row_targets(args, n)
+        if targets is None or not targets[0]:
+            # Malformed, or every requested row is out of bounds — error
+            # consistently instead of silently doing nothing.
             return False, "invalid", []
+        idxs, oob = targets
 
     notes: list[str] = []
+    if oob:
+        notes.append(
+            f"row(s) {_fmt_row_numbers(oob)} out of range (draft has {n} rows) — ignored"
+        )
     for i in idxs:
         row = parsed[i]
         if verb == "keep":
@@ -1446,10 +1463,12 @@ def _apply_bulk_edit(
 
     notes: list[str] = []
     if field == "value":
+        amount_notes: list[str] = []
         try:
-            value = parse_amount(value)
+            value = parse_amount(value, notes=amount_notes)
         except ValueError:
             return False, "invalid", []
+        notes.extend(f"row {idx + 1}: {n}" for n in amount_notes)
         if value < 0:
             # Signed bank-export amount: negative means money out.
             parsed[idx]["type"] = "Expense"
@@ -1721,11 +1740,9 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return BULK_CONFIRM
 
     parsed = _sort_bulk_rows(parsed)
-    pre_merge_len = len(_load_user_draft(uid))
-    draft_rows, _ = _merge_bulk_draft(uid, parsed)
+    draft_rows, merged_in = _merge_bulk_draft(uid, parsed)
     ctx.user_data["bulk_parsed"] = draft_rows
     log.info("User %s bulk parse completed: %d items (src=%s)", update.effective_user.id, len(parsed), src)
-    merged_in = pre_merge_len
     if merged_in > 0:
         await update.message.reply_text(
             f"ℹ️ {merged_in} row(s) from a previous draft were merged in. "
@@ -1750,7 +1767,10 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = _sort_bulk_rows(ctx.user_data.get("bulk_parsed", []))
     text = update.message.text.strip()
-    lists = ctx.user_data.get("lists") or {}
+    # After a bot restart user_data is empty — reload reference data instead
+    # of skipping revalidation, so a typo'd category can't slip through.
+    lists = ctx.user_data.get("lists") or load_reference_data()
+    ctx.user_data["lists"] = lists
     action, reason, edit_notes = _apply_bulk_edit(text, parsed, lists)
 
     if reason == "cancel":
