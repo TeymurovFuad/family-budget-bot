@@ -448,16 +448,17 @@ def _patch_report_data(monkeypatch, df):
 
 
 async def test_summary_cycle_scoped_with_unaccounted(excel_path, monkeypatch):
-    from handlers.reports import cmd_summary
+    """'This cycle' quick button renders the cycle report with unaccounted."""
+    from handlers.reports import handle_summary_callback
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
     record_cycle_start(date(2026, 6, 25))
     df = _cycle_df()
     df["Year"] = 2026
     df["Month"] = "Jul"
     _patch_report_data(monkeypatch, df)
-    upd = make_update()
-    await cmd_summary(upd, make_ctx())
-    text = upd.message.reply_text.call_args[0][0]
+    upd = make_callback_update("sum:tc")
+    await handle_summary_callback(upd, make_ctx())
+    text = upd.callback_query.message.reply_text.call_args[0][0]
     assert "Cycle Jun 2026" in text
     assert "Unaccounted" in text
     assert "Salary received" in text
@@ -465,24 +466,26 @@ async def test_summary_cycle_scoped_with_unaccounted(excel_path, monkeypatch):
 
 
 async def test_summary_falls_back_to_calendar_without_boundary(excel_path, monkeypatch):
+    """No boundary recorded → 'This month' quick button gives the calendar report."""
     from data import current_year_and_month
-    from handlers.reports import cmd_summary
+    from handlers.reports import handle_summary_callback
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
     year, month = current_year_and_month()
     df = _cycle_df()
     df["Year"] = year
     df["Month"] = month
     _patch_report_data(monkeypatch, df)
-    upd = make_update()
-    await cmd_summary(upd, make_ctx())
-    text = upd.message.reply_text.call_args[0][0]
+    upd = make_callback_update("sum:tm")
+    await handle_summary_callback(upd, make_ctx())
+    text = upd.callback_query.message.reply_text.call_args[0][0]
     assert f"{month} {year} — Summary" in text
     assert "Unaccounted" not in text
 
 
 async def test_summary_flag_off_is_calendar(excel_path, monkeypatch):
+    """Flag off — bare /summary shows the picker without any cycle buttons."""
     from data import current_year_and_month
-    from handlers.reports import cmd_summary
+    from handlers.reports import cmd_summary, handle_summary_callback
     monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
     record_cycle_start(date(2026, 6, 25))
     year, month = current_year_and_month()
@@ -490,9 +493,17 @@ async def test_summary_flag_off_is_calendar(excel_path, monkeypatch):
     df["Year"] = year
     df["Month"] = month
     _patch_report_data(monkeypatch, df)
+
     upd = make_update()
     await cmd_summary(upd, make_ctx())
-    assert f"{month} {year} — Summary" in upd.message.reply_text.call_args[0][0]
+    keyboard = upd.message.reply_text.call_args.kwargs["reply_markup"]
+    labels = [b.text for row in keyboard.inline_keyboard for b in row]
+    assert "This month" in labels and "Last month" in labels
+    assert "This cycle" not in labels and "💰 Cycle" not in labels
+
+    upd2 = make_callback_update("sum:tm")
+    await handle_summary_callback(upd2, make_ctx())
+    assert f"{month} {year} — Summary" in upd2.callback_query.message.reply_text.call_args[0][0]
 
 
 async def test_budget_bars_cycle_scoped(excel_path, monkeypatch):

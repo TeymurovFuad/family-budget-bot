@@ -65,6 +65,7 @@ from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
     cmd_savings, cmd_report, cmd_rates, cmd_chart,
     cmd_range, handle_range_callback, handle_range_text,
+    handle_summary_callback,
 )
 from scheduled import (
     send_weekly_report, send_monthly_summary,
@@ -168,6 +169,7 @@ def build_application() -> Application:
 
     # ── range report inline callback ──────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_range_callback, pattern="^range:"))
+    app.add_handler(CallbackQueryHandler(handle_summary_callback, pattern="^sum:"))
 
     # ── budget-cycle boundary confirmation callback ───────────────────────────
     app.add_handler(CallbackQueryHandler(handle_cycle_callback, pattern="^cycle:"))
