@@ -534,10 +534,9 @@ class TestEditFlow:
             ["1", "Amount", "42.5", "Yes"], update_field_mock=field_mock)
         assert state == ConversationHandler.END
         field_mock.assert_called_once()
-        row_idx, col, new_val, expected = field_mock.call_args.args
+        row_idx, field_updates, _, expected = field_mock.call_args.args
         assert row_idx == 7
-        assert col == "Value"
-        assert new_val == 42.5
+        assert field_updates == {"Value": 42.5}
         assert expected["Description"] == "milk"
         assert "Updated" in all_replies(*updates)
 
@@ -546,10 +545,9 @@ class TestEditFlow:
         state, _, _ = await self._drive(
             ["2", "Category", "Groceries", "Yes"], update_field_mock=field_mock)
         assert state == ConversationHandler.END
-        row_idx, col, new_val, _ = field_mock.call_args.args
+        row_idx, updates, _, _ = field_mock.call_args.args
         assert row_idx == 8
-        assert col == "Category"
-        assert new_val == "Groceries"
+        assert updates == {"Category": "Groceries"}
 
     async def test_edit_stale_row_guard(self):
         field_mock = MagicMock(side_effect=RowMovedError("row moved"))
