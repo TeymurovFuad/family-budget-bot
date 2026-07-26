@@ -351,10 +351,13 @@ def test_repair_template_keeps_validation_ranges(tmp_path, monkeypatch):
     assert end_row >= 500, f"validation range collapsed: {sqrefs}"
 
 
-# ── update_transaction_field — Year/Month sync on date edit ──────────────────
+# ── update_transaction_field — multi-field dict updates ──────────────────────
+# Year/Month sync on date edits is domain logic that lives in the edit
+# handler (handlers/edit_conv.py); the storage layer just writes whatever
+# fields it is given — atomically, in one save, when passed a dict.
 
 
-class TestDateEditSyncsYearMonth:
+class TestMultiFieldUpdate:
     def _seed_row(self, excel_path):
         from datetime import date
         wb = openpyxl.load_workbook(excel_path)
@@ -366,14 +369,27 @@ class TestDateEditSyncsYearMonth:
         ws.cell(2, 8, "shop")              # Description
         wb.save(excel_path)
 
-    def test_date_edit_recomputes_year_and_month(self, excel_path):
+    def test_dict_updates_all_fields_in_one_write(self, excel_path):
+        from datetime import date
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(
+            2, {"Date": date(2023, 12, 31), "Year": 2023, "Month": "Dec"}
+        )
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 1).value.strftime("%Y-%m-%d") == "2023-12-31"
+        assert ws.cell(2, 2).value == 2023
+        assert ws.cell(2, 3).value == "Dec"
+
+    def test_date_only_edit_does_not_touch_year_month(self, excel_path):
+        """Storage stays generic: writing Date alone must not rewrite Year/Month."""
         from datetime import date
         self._seed_row(excel_path)
         file_storage.update_transaction_field(2, "Date", date(2023, 12, 31))
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["MasterData"]
-        assert ws.cell(2, 2).value == 2023
-        assert ws.cell(2, 3).value == "Dec"
+        assert ws.cell(2, 2).value == 2024
+        assert ws.cell(2, 3).value == "May"
 
     def test_non_date_edit_leaves_year_month_untouched(self, excel_path):
         self._seed_row(excel_path)

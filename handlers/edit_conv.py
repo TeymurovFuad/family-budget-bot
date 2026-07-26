@@ -11,6 +11,7 @@ from log_decorators import log_call
 from data import load_rates, load_reference_data, now_utc
 from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, RowMovedError, _excel_write_lock
 from formatters import format_base_as_currency, format_amount, sanitize_description
+from models import MONTH_NAMES
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
 
 EDIT_FIELD_MAP = {
@@ -163,10 +164,22 @@ async def edit_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     excel_col = EDIT_FIELD_MAP[field]
     expected  = {"Date": txn.get("Date"), "Value": txn.get("Value"), "Description": txn.get("Description")}
 
+    # Reports filter on Year/Month — when the Date changes, recompute both in
+    # the same atomic write so a re-dated row doesn't keep counting in its old
+    # month. This domain rule lives here, not in the storage layer.
+    if excel_col == "Date" and hasattr(new_value, "year") and hasattr(new_value, "month"):
+        updates = {
+            "Date": new_value,
+            "Year": new_value.year,
+            "Month": MONTH_NAMES[new_value.month - 1],
+        }
+    else:
+        updates = {excel_col: new_value}
+
     try:
         async with _excel_write_lock:
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, update_transaction_field, row_idx, excel_col, new_value, expected)
+            await loop.run_in_executor(None, update_transaction_field, row_idx, updates, None, expected)
         await update.message.reply_text("✅ Updated.", reply_markup=ReplyKeyboardRemove())
     except RowMovedError:
         log.warning("Edit aborted, row %d moved before it could be applied", row_idx)

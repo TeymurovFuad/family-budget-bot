@@ -1463,9 +1463,8 @@ def _apply_bulk_edit(
 
     notes: list[str] = []
     if field == "value":
-        amount_notes: list[str] = []
         try:
-            value = parse_amount(value, notes=amount_notes)
+            value, amount_notes = parse_amount(value)
         except ValueError:
             return False, "invalid", []
         notes.extend(f"row {idx + 1}: {n}" for n in amount_notes)
@@ -1770,6 +1769,9 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # After a bot restart user_data is empty — reload reference data instead
     # of skipping revalidation, so a typo'd category can't slip through.
     lists = ctx.user_data.get("lists") or load_reference_data()
+    if not lists.get("categories"):
+        await update.message.reply_text("❌ Can't read your Excel file. Check it's accessible and try again.")
+        return BULK_CONFIRM
     ctx.user_data["lists"] = lists
     action, reason, edit_notes = _apply_bulk_edit(text, parsed, lists)
 

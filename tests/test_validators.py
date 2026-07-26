@@ -63,7 +63,8 @@ class TestParseAmount:
         ("10.567", 10.57),                  # rounded to 2 decimals
     ])
     def test_parses(self, raw, expected):
-        assert parse_amount(raw) == expected
+        value, warnings = parse_amount(raw)
+        assert value == expected
 
     @pytest.mark.parametrize("raw", ["", "abc", None, "-", ",", "PLN"])
     def test_rejects_non_numbers(self, raw):
@@ -375,30 +376,27 @@ class TestApplyBulkEditValidation:
 
 class TestParseAmountAmbiguityNote:
     def test_lone_comma_three_trailing_digits_warns(self):
-        notes = []
-        assert parse_amount("1,234", notes) == 1.23
+        value, notes = parse_amount("1,234")
+        assert value == 1.23
         assert len(notes) == 1
         assert "1,234" in notes[0] and "1.23" in notes[0] and "1234" in notes[0]
 
     def test_lone_dot_three_trailing_digits_warns(self):
-        notes = []
-        assert parse_amount("1.234", notes) == 1.23
+        value, notes = parse_amount("1.234")
+        assert value == 1.23
         assert len(notes) == 1
 
     def test_two_decimals_no_warning(self):
-        notes = []
-        assert parse_amount("1,23", notes) == 1.23
+        value, notes = parse_amount("1,23")
+        assert value == 1.23
         assert notes == []
 
     def test_repeated_separator_no_warning(self):
-        notes = []
-        assert parse_amount("1,234,567", notes) == 1234567.0
+        value, notes = parse_amount("1,234,567")
+        assert value == 1234567.0
         assert notes == []
 
     def test_both_separators_no_warning(self):
-        notes = []
-        assert parse_amount("1,234.567", notes) == 1234.57
+        value, notes = parse_amount("1,234.567")
+        assert value == 1234.57
         assert notes == []
-
-    def test_no_notes_list_still_parses(self):
-        assert parse_amount("1,234") == 1.23

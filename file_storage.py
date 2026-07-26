@@ -799,9 +799,14 @@ def delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
         log.info("Deleted MasterData row %d", row_idx)
 
 
-def update_transaction_field(row_idx: int, field: str, value, expected: dict | None = None) -> None:
+def update_transaction_field(row_idx: int, field, value=None, expected: dict | None = None) -> None:
     """
-    Update a single field of a MasterData row.
+    Update one or more fields of a MasterData row in a single save.
+
+    `field` is either a column name (with `value` as the new cell value) or a
+    dict of {column name: value} pairs applied atomically in one write. This
+    function is purely generic — any domain logic (e.g. keeping Year/Month in
+    sync with Date) belongs to the caller.
 
     If `expected` is given, the row is re-verified under the write lock
     before applying the change (see delete_transaction_row). Raises
@@ -817,20 +822,12 @@ def update_transaction_field(row_idx: int, field: str, value, expected: dict | N
             raise RowMovedError(
                 f"Row {row_idx} no longer matches the selected transaction — it may have moved."
             )
-        col_idx = headers.get(field)
-        if col_idx is None:
-            raise ValueError(f"Column '{field}' not found")
-        ws.cell(row_idx, col_idx, value)
-        if field == "Date" and hasattr(value, "year") and hasattr(value, "month"):
-            # Reports filter on Year/Month — recompute them in the same save
-            # so a re-dated row doesn't keep counting in its old month.
-            from models import MONTH_NAMES
-            year_col = headers.get("Year")
-            month_col = headers.get("Month")
-            if year_col is not None:
-                ws.cell(row_idx, year_col, value.year)
-            if month_col is not None:
-                ws.cell(row_idx, month_col, MONTH_NAMES[value.month - 1])
+        updates = field if isinstance(field, dict) else {field: value}
+        for col_name, col_value in updates.items():
+            col_idx = headers.get(col_name)
+            if col_idx is None:
+                raise ValueError(f"Column '{col_name}' not found")
+            ws.cell(row_idx, col_idx, col_value)
         atomic_save(wb, excel_path)
-        log.info("Updated MasterData row %d column '%s'", row_idx, field)
+        log.info("Updated MasterData row %d columns %s", row_idx, list(updates))
 

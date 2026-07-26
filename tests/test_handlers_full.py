@@ -994,6 +994,22 @@ class TestEditConvConfirm:
         assert expected_snapshot["Value"] == SAMPLE_TXN["Value"]
         assert expected_snapshot["Description"] == SAMPLE_TXN["Description"]
 
+    async def test_date_edit_syncs_year_and_month_in_one_write(self):
+        """
+        Reports filter on Year/Month — a Date edit must pass all three fields
+        to update_transaction_field in a single dict (one atomic save), since
+        the storage layer no longer special-cases Date.
+        """
+        from datetime import date
+        ctx = self._make_ctx(field="Date", new_value=date(2023, 12, 31))
+        upd = make_update("Yes")
+        mock_update_field = MagicMock()
+        with patch("handlers.edit_conv.update_transaction_field", mock_update_field), \
+             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+            await edit_confirm(upd, ctx)
+        args = mock_update_field.call_args.args
+        assert args[1] == {"Date": date(2023, 12, 31), "Year": 2023, "Month": "Dec"}
+
     async def test_row_moved_error_reports_friendly_message_and_ends(self):
         ctx = self._make_ctx()
         upd = make_update("Yes")

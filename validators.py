@@ -25,9 +25,12 @@ _TRUE_WORDS = {"yes", "y", "true", "1"}
 _FALSE_WORDS = {"no", "n", "false", "0"}
 
 
-def parse_amount(raw, notes: list | None = None) -> float:
+def parse_amount(raw) -> tuple[float, list[str]]:
     """
     Parse a human-entered amount into a signed float rounded to 2 decimals.
+
+    Returns (value, warnings) — warnings is an empty list when the input was
+    unambiguous.
 
     Handles thousands/decimal separator ambiguity: `1 234,56`, `1.234,56`,
     `1,234.56`, `-45.00`. Rule: when both `.` and `,` appear, the LAST
@@ -35,9 +38,10 @@ def parse_amount(raw, notes: list | None = None) -> float:
     thousands separator. Raises ValueError when no number can be extracted.
 
     A lone separator with exactly 3 trailing digits ("1,234") is genuinely
-    ambiguous — it is read as a decimal mark; if `notes` is given, a warning
-    is appended so the caller can surface the reinterpretation.
+    ambiguous — it is read as a decimal mark and a warning is returned so the
+    caller can surface the reinterpretation.
     """
+    warnings: list[str] = []
     s = str(raw or "").strip()
     negative = s.lstrip().startswith("-")
     s = re.sub(r"[^\d.,]", "", s)
@@ -58,12 +62,12 @@ def parse_amount(raw, notes: list | None = None) -> float:
 
     value = float(s)
     result = round(-value if negative else value, 2)
-    if ambiguous and notes is not None:
-        notes.append(
+    if ambiguous:
+        warnings.append(
             f"amount '{str(raw).strip()}' read as {result:.2f} — if the separator was a "
             f"thousands mark (you meant {s.replace('.', '')}), resend it without the separator"
         )
-    return result
+    return result, warnings
 
 
 def coerce_bool(raw) -> bool:
@@ -124,7 +128,7 @@ def _normalize_dedup_value(value) -> str:
     raw-string keys").
     """
     try:
-        return f"{parse_amount(value):.2f}"
+        return f"{parse_amount(value)[0]:.2f}"
     except (TypeError, ValueError):
         return _normalize_str(value)
 
@@ -196,7 +200,9 @@ def validate_parsed_row(
 
     value = row.get("value")
     try:
-        value = value if isinstance(value, (int, float)) else parse_amount(value, notes=corrections)
+        if not isinstance(value, (int, float)):
+            value, amount_warnings = parse_amount(value)
+            corrections.extend(amount_warnings)
         value = float(value)
     except (TypeError, ValueError):
         return False, "Transaction value must be a positive number.", {}, []

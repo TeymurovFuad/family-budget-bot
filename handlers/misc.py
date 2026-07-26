@@ -246,7 +246,7 @@ async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     old_value = ctx.user_data.get("setbudget_current", 0)
 
     try:
-        new_value = parse_amount(update.message.text)
+        new_value, _ = parse_amount(update.message.text)
         if new_value < 0:
             raise ValueError
     except (ValueError, TypeError):
