@@ -488,7 +488,7 @@ def create_workbook_from_template(dest: Path) -> None:
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
+    tmp = dest.with_name(dest.stem + "._setup_tmp.xlsx")
     try:
         create_blank_excel(tmp)
         _replace_with_retry(tmp, dest)
