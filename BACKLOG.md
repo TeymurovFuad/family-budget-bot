@@ -37,10 +37,10 @@ Must ship before the user re-imports 1,400 historical rows.
 Cycles is half-done: /summary and /budget are cycle-scoped, reports aren't, picker is missing.
 
 **Report gaps:**
-- [ ] `/report` still calendar-based *(cycle-aware report gaps)*
-- [ ] `/top` still calendar-based *(cycle-aware report gaps)*
+- [x] `/report` still calendar-based *(fixed PR #47)*
+- [x] `/top` still calendar-based *(fixed PR #47)*
 - [ ] `/savings` still calendar-based *(cycle-aware report gaps)*
-- [ ] `check_budget_alert` still calendar-scoped *(cycle-aware report gaps / PR #30 review)*
+- [x] `check_budget_alert` still calendar-scoped *(fixed PR #47)*
 
 **/summary picker UX (5 items from agreed design):**
 - [x] free-form args *(done PR #45)*
@@ -153,45 +153,38 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-26 — PRs through #46 merged)*
+> *(Last updated: 2026-07-27 — PRs through #50 merged; Run 3 Wave 1 complete)*
 
 ### PR state at last update
-- **PRs #1–#46 merged.**
-- **PR #46 merged 2026-07-26**: Cycle Dashboard sheet — cycle-selector dropdown (B2,
-  fed from Cycles ledger), SUMIFS filtered by Date >= cycle start AND Date < next start
-  (MINIFS order-independent next-boundary lookup), open-ended last cycle falls back to
-  TODAY()+1. Summary block: Salary · Income · Expenses · Savings · Unaccounted · Cycle
-  Days. Category table mirrors Dashboard with shared Lists budget column (no pro-rating).
-  `cycle_dashboard.py` (`ensure_cycle_dashboard`, `sync_cycle_dashboard_categories`),
-  `scripts/sync_cycle_dashboard.py` (--dry-run flag), bot wiring in
-  `record_cycle_start`/`record_cycle_starts_batch`, template updated. `to_date` moved
-  from `cycles.py` to `excel_schema.py` as public function. DOCUMENTATION.md Sheets
-  table and Budget Cycles section updated. 7 new tests, 1082 total passing.
-- **PR #45 merged 2026-07-26**: /summary picker UX — free-form arg parsing,
-  three-zone bare /summary keyboard (This/Last cycle + This/Last month quick
-  row, Calendar/Cycle drill-down), ledger-first month resolution, range
-  support (free-form + button walk), year overflow paging. 41 new tests,
-  1116 total passing. DOCUMENTATION.md and /help updated.
-- **PR #43 merged 2026-07-26**: salary-mask hardening (blank-Category gate +
-  word-boundary matching), Savings type recognition in quick-add, bulk
-  draft-overflow holding buffer, global PTB error handler, formula-injection
-  sanitization in edit/bulk paths. Review follow-ups queued in
-  "PR #43 review notes (2026-07-25)" below.
-- **PRs #39–#42 merged 2026-07-25**: statement decimal-separator fix (#39),
-  AI categorization for statement imports (#40), Person field retired (#41),
-  handoff docs (#42). The statement-import correctness pair is done — the
-  re-import is unblocked.
-- **PR #38 merged 2026-07-25**: open-ended formula ranges + Monthly Summary
-  auto-population. `lists_currency_range` now uses `$1048576`; Dashboard
-  SUMIFS/VLOOKUP bounds rewritten via `repair_dashboard_bounds`; bot appends
-  Monthly Summary SUMIFS rows on every write (single, batch, recovery replay).
-  `scripts/fix_formula_bounds.py` repairs live workbooks in one pass.
-- **User state 2026-07-25**: MasterData + Monthly Summary cleared (headers
-  only). Ready to re-import 1400 historical rows once the server is updated
-  and `fix_formula_bounds.py` is run.
-  User's bank salary titles: "wynagrodzenie" / "salary" / both — managed via
-  the `/keywords` command (persisted to Excel, PR #44); no .env entry needed.
-- **Next open work**: E2E test coverage PR — no end-to-end flow tests exist for any command (confirmed gap 2026-07-24).
+- **PRs #1–#50 merged.**
+- **PR #50 merged 2026-07-27**: /setup onboarding — 7-step ConversationHandler
+  (`handlers/setup_conv.py`): creates workbook from template, category add/rename,
+  budget-per-category, currency setup, summary + rate fetch. Category types persisted
+  to Lists sheet. `file_storage.create_workbook_from_template` (atomic, _replace_with_retry).
+  `excel_schema.py`: shared `write_category_sumif_row/block`, `sync_dashboard_categories`.
+  `states.py` SETUP_* range. Error guards: _load_existing_state try/except, ValueError
+  on malformed callback, falsy message guard, non-owner /start with missing workbook.
+  28 new tests; 1151 total passing.
+- **PR #49 merged 2026-07-27**: Tests and code quality — `tests/mdv2_helpers.py`
+  (assert_valid_markdown_v2, assert_markup_balanced); `tests/test_e2e_flows.py`
+  (60 E2E tests across all major commands); `tests/test_help_markdown.py` rewritten
+  with all 17 help subcommands parametrized; `tests/test_repair_scripts.py` (new).
+  fix_import_errors.py rule chaining + .bak write-once; rename_category.py formula
+  + draft rewrite; one-time migration scripts deleted; magic-number constants renamed.
+  1239 total passing.
+- **PR #48 merged 2026-07-27**: Bug fixes — bulk/dedup: _save_bulk_draft after edit,
+  _parse_row_targets returns (list,list), _bulk_footer fixed, denominator fixed, single
+  file read per receive, bulk_confirm guard. validators.parse_amount returns (float,
+  list[str]). update_transaction_field accepts dict (Year/Month sync moved to
+  edit_conv). Stale row-index re-verify in edit+delete. /export generic error + 50MB
+  guard. Empty-categories guard in quick_conv. handle_range_text group=-1 per-chat.
+  .bak skip for temp files; quarantine one-retry. +16 tests; 1152 total passing.
+- **PR #47 merged 2026-07-27**: Cycle-aware reports — /report, /top, check_budget_alert
+  use _current_cycle_bounds() when BUDGET_CYCLE=1. auth_write answers callback before
+  returning on denial. _deny_non_owner null-safe. detect:pick ownership check. deferred
+  imports hoisted. /help wording fixes. async_record_cycle_start returns str|None.
+  detect amounts show display currency. _dedup_cycle_label appends #2/#3 for same-month.
+- **PRs #1–#46**: see previous session notes above.
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -205,33 +198,32 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 - **Worktree isolation**: always give each parallel file-editing agent its own
   `git worktree add` — shared worktrees caused branch entanglement this session.
   See `.claude/memories/orchestrator-memory.md` "Parallel agent isolation".
+- **PR chaining not usable in fork workflow**: base branches must exist on upstream
+  (`TeymurovFuad/family-budget-bot`); feature branches only exist on the fork. Use
+  sequential merge + immediate rebase-per-merge instead.
+- **Rebase test strategy**: no conflicts → skip tests; conflicts resolved → run only
+  the affected modules, not the full suite.
 - **DeepSeek tokens are paid** — budget ~20 live API calls per debug session;
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  1. ~~**Formulas must survive data growth PR**~~ — ✅ merged as PR #38 (2026-07-25).
-  2. ~~**Statement-import correctness pair**~~ — ✅ merged as PRs #39 + #40
-     (2026-07-25); Run 1 fix batch merged as PR #43 (2026-07-26).
-  3. ~~**/summary picker UX PR**~~ — ✅ merged as PR #45 (2026-07-26).
-  3. ~~**Cycle Dashboard sheet + sync check**~~ — ✅ merged as PR #46 (2026-07-26).
-  4. **E2E test coverage PR** — no end-to-end flow tests exist for any command.
-     Gap confirmed 2026-07-24. Separate PR after #32 merges. Cover golden path
-     + key edge cases for: /add, /bulk (file + text), /edit, /delete, /summary,
-     /report, /cycle, /cycle detect, and all help subcommands.
-  5. **Cycle-aware `/report` and `/top`** — both are still calendar-scoped when
-     `BUDGET_CYCLE=1`; they should use `_current_cycle_bounds()` like `/summary`
-     and `/budget` do. Found 2026-07-24. See "cycle-aware report gaps" below.
-  6. **Cleanup note**: file_storage.py carries two dead imports
-     (`CyclesSchema`, `header_of` usage from the removed #23 cycle helpers)
-     left over from the PR #30 consolidation — fold into the next cleanup.
-  7. **Smaller items**: code-clarity sweep (300-line hard cap — `file_storage.py`
-     and `bulk_conv.py` are known offenders); dedup v2 follow-up findings (5
-     items in "dedup review notes (PR #16, 2026-07-23)"); PR #18 review
-     backlog items ("bank-statement profiles review notes (PR #18)" below);
-     UX group (person attribution — check overlap with dedup v2 grammar
-     before implementing); token-economy and infra/performance groups.
-  8. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to
-     match the "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
+  1. ~~Run 3 Wave 1 (PRs #47–#50)~~ — ✅ merged 2026-07-27.
+  2. **Run 3 Wave 2 — infra/performance**: reference-data TTL cache, JSONL recovery
+     queue, split file_storage, typed DeepSeek model, lost-update protection,
+     _load_bulk_drafts read single user. See "Follow-up PR: infra & performance".
+  3. **Run 3 Wave 2 — token economy**: compact AI output format, extraction/categorization
+     split, local fast-path for quick-add, dedup-before-parse, prompt caching, off-peak
+     batching. See "Follow-up PR: token economy".
+  4. **Run 3 Wave 2 — UX**: person attribution per import, recurring detection, /add
+     default-and-confirm, bulk drop/skip UX, quick-add one-tap recovery, report chunking.
+  5. **Run 3 Wave 2 — statement profile design**: profile contents spec, first-upload AI
+     flow, known-format zero-token path, bank-redesign handling, PR #18 dead-code findings.
+  6. **Remaining open items**: schema simplification (Year/Month formula derive), draft+log
+     lifecycle (archival, retention, audit line), code-clarity sweep (300-line cap),
+     currency neutrality sweep, cycle follow-ups (lazy backfill on report, none-this-month,
+     candidate window, past/entire-period walk, before-first-boundary bucket, multi-salary picker).
+  7. **Optional**: rename `Żabka` fixture in `tests/test_merchant_map.py` to match the
+     "Old Tbilisi" doc-example rename (PR #14) — tiny, deferred.
 
 ### Recent context
 - PR #30 (budget cycles core) squash-merged 2026-07-24 after a rebase that
@@ -504,9 +496,7 @@ approach described here is exactly Cycles W1–W4.
 - [x] **[PR #3] Draft-limit path discards just-parsed input** *(fixed in PR #43 — overflow holding buffer)* — `handlers/bulk_conv.py` `bulk_receive`:
       when `_draft_limit_reached` fires, the freshly parsed rows (already paid for with an AI call)
       are dropped without warning. Keep them in a holding buffer or warn explicitly.
-- [ ] **[PR #3] Preview edits not persisted to draft file** — `bulk_confirm` `reason == "edited"`
-      updates `ctx.user_data` only; restart/timeout re-merges pre-edit values from disk.
-      Call `_save_bulk_draft` after each edit.
+- [x] **[PR #3] Preview edits not persisted to draft file** *(fixed PR #48 — _save_bulk_draft called after each edit)*
 - [ ] **[PR #3] Recovery replay writes Date as text string** — `append_to_recovery_queue` JSON-serializes
       dates with `default=str`; `replay_recovery_queue` writes the string verbatim into the Date cell.
       Rehydrate with `date.fromisoformat` (+ coerce value/is_recurring) before `write_transaction_row`.
@@ -656,26 +646,22 @@ reasoning in the preview, and offers a one-command override.
 
 Four non-blocking findings from the PR #16 adversarial review — safe to merge as-is, queued as follow-up:
 
-- [ ] **`_parse_row_targets` inconsistent OOB feedback** — `keep 1 5` on a 1-row draft silently
-      drops the out-of-range `5` rather than reporting it; a lone out-of-range token does error.
-      Unified: any target list with at least one valid index silently ignores OOB extras, but
-      a list with zero valid indices should error consistently.
-      (`handlers/bulk_conv.py` `_parse_row_targets`)
+- [x] **`_parse_row_targets` inconsistent OOB feedback** *(fixed PR #48 — returns (valid_list, error_list); OOB reported consistently)*
 - [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message
       phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited
       BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never
       improvised"). Deliberate re-alignment pass, not urgent.
-- [ ] **`_bulk_footer` redundant suggestion for single-flagged-row case** — when exactly one row
+- [x] **`_bulk_footer` redundant suggestion for single-flagged-row case** *(fixed PR #48)* — when exactly one row
       is dup-flagged the footer renders e.g. `keep 3`, `keep 3`, or `keep all flagged` — the first
       example duplicates the second.
       (`handlers/bulk_conv.py` `_bulk_footer`)
-- [ ] **`_format_dedup_messages` mass-loose-match-hint denominator is wrong** — it folds
+- [x] **`_format_dedup_messages` mass-loose-match-hint denominator is wrong** *(fixed PR #48 — denominator is strict-pass-new rows only)* — it folds
       already-skipped strict-dup counts into `total_new` (the denominator for the "most rows
       loose-matched" ratio), undercounting it in mixed strict+loose batches — exactly the
       bank-reformatted-descriptions scenario the hint exists for. Fix: denominator should be
       rows the strict pass left as new.
       (`handlers/bulk_conv.py` `_format_dedup_messages`)
-- [ ] **`bulk_receive` reads the draft file twice** — `pre_merge_len = len(_load_user_draft(uid))`
+- [x] **`bulk_receive` reads the draft file twice** *(fixed PR #48 — single file read per receive)* — `pre_merge_len = len(_load_user_draft(uid))`
       is called immediately before `_merge_bulk_draft`, which calls `_load_user_draft` internally
       as its first step. On local backend this is negligible; on GCS/S3 it's two network downloads
       for the same file. Fix: have `_merge_bulk_draft` return the pre-merge count alongside
@@ -715,8 +701,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: infra & performance
 
-- [ ] **.bak leak on remote backends** — `atomic_save` writes `.bak` next to the temp download on
-      GCS/S3; nothing cleans it. Skip the backup for temp files, or register in `_temp_files`.
+- [x] **.bak leak on remote backends** *(fixed PR #48 — .bak skipped for temp files)*
 - [ ] **Reference-data TTL cache** — every message triggers 2-4 full workbook reads
       (`load_reference_data` = `load_lists` + `load_rates`, two full parses of the same file).
       60-300s module-level cache in data.py, invalidated by writes in excel_ops.
@@ -867,10 +852,7 @@ Found by BOTH reviewers independently — highest confidence:
 - [ ] **Partial bulk save loses failed rows** — bulk_conv.py:425-448: rows failing Transaction
       construction go to `errors`, the rest save, then `_delete_bulk_draft` removes EVERYTHING.
       Fix: keep only failed rows in the draft after a partial save and tell the user how to fix/retry.
-- [ ] **Stale row-index race in /delete and /edit** — row_idx captured at pick time, applied minutes
-      later; interleaved deletes shift rows → wrong transaction silently deleted/edited
-      (delete_conv.py:59-62, edit_conv.py:159-168). Fix: re-verify date+value+description under the
-      write lock before applying; abort with a message if the row moved.
+- [x] **Stale row-index race in /delete and /edit** *(fixed PR #48 — re-verify under write lock, abort if row moved)*
 - [ ] **Repair scripts unsafe next to a live bot** — no _excel_write_lock, plain wb.save (no atomic),
       lost-update if the bot writes concurrently; on gcs/s3 they modify a local file the bot never
       uploads. Fix: scripts refuse to run when backend != local, take the lock file (once one exists),
@@ -883,20 +865,13 @@ Found by BOTH reviewers independently — highest confidence:
 
 Unique findings (single reviewer, verified plausible):
 
-- [ ] **Date edit leaves Year/Month stale** — /edit writes only the edited column; reports filter on
-      Year/Month so a re-dated row counts in the wrong month forever (edit_conv.py:163-168).
-      Fix: when field == date, recompute and write Year + Month in the same save.
+- [x] **Date edit leaves Year/Month stale** *(fixed PR #48 — edit_conv builds {"Date","Year","Month"} dict, passed atomically to update_transaction_field)*
 - [x] **Formula injection via descriptions** *(fixed in PR #43 — bulk/quick/edit paths covered)* — formatters.sanitize_description (leading '=' guard)
       is called only in add_conv.py:199; bulk (bulk_conv.py:436), quick-add (quick_conv.py:203) and
       /edit write raw untrusted text into cells. Fix: sanitize in write_transaction_row so every
       path is covered once.
-- [ ] **Quick-add KeyError when Lists unreadable** — quick_conv.py:103 unconditionally indexes
-      category_map; empty lists (file locked/renamed sheet) → unhandled KeyError → no reply at all.
-      Fix: guard the lookup; if reference data is empty, reply with a clear "can't read your Excel" message.
-- [ ] **Range-text listener crosstalk** — bot.py group=1 handle_range_text fires on every text;
-      'awaiting_range' pops on unrelated messages mid-/add, and a valid range string also enters
-      the quick-add conversation → duplicate replies. Fix: scope the flag check tighter
-      (per-chat state + only when no other conversation active) or use a ConversationHandler.
+- [x] **Quick-add KeyError when Lists unreadable** *(fixed PR #48 — empty-categories guard in quick_conv.py)*
+- [x] **Range-text listener crosstalk** *(fixed PR #48 — handle_range_text group=-1, per-chat chat.id flag)*
 - [x] **fix_import_errors.py**: rule-3 (person→description) uses the description read BEFORE rule-2
       rewrote it — same-row combination silently undoes rule 2. Rerun also overwrites .bak with
       already-fixed data (backup should be write-once: skip if .bak exists).
@@ -933,20 +908,12 @@ write paths — commit 309df08.
 
 ## Follow-up PR: /export command hardening (PR #1 review, 2026-07-22)
 
-- [ ] **Exception message leak in /export** — handlers/misc.py `cmd_export`'s except branch replies
-      with the raw exception text, which could include internal paths/bucket names; send a generic
-      user-facing message and keep `log.exception` for server-side detail.
-- [ ] **No file-size guard before reply_document** — Telegram bot API caps uploads at 50MB; add a
-      size pre-check with a clear message before the workbook grows past the limit (same leak risk
-      above if a raw Telegram error surfaces on failure).
+- [x] **Exception message leak in /export** *(fixed PR #48 — generic user-facing error message, log.exception for server detail)*
+- [x] **No file-size guard before reply_document** *(fixed PR #48 — 50MB pre-check added)*
 
 ## Follow-up PR: recovery-queue hardening (PR #2 review, 2026-07-22)
 
-- [ ] **Quarantine rename failure retries forever** — file_storage.py: if the corrupt-queue-file
-      `.replace(corrupt_path)` itself fails (e.g. permissions), the exception is caught and logged
-      but the file stays at its original path; every subsequent flush hits the same JSONDecodeError
-      and repeats the same failing rename. Not a data-loss risk, just log spam — give up after one
-      retry or alert distinctly instead of looping silently.
+- [x] **Quarantine rename failure retries forever** *(fixed PR #48 — one-retry then log.critical, stops looping)*
 
 ## Follow-up: budget cycles review notes (pre-PR verify, 2026-07-24)
 
@@ -999,9 +966,7 @@ write paths — commit 309df08.
 - [ ] **User-editable Label cell interpolated raw into Markdown messages** — a
       label containing markdown chars breaks /summary, /budget and /cycle
       replies entirely; escape or sanitize. (cycles.py, handlers/reports.py)
-- [ ] **auth_write on CallbackQueryHandler never answers the callback query on
-      denial** — a non-owner tapping Yes/No sees a hanging spinner.
-      Pre-existing decorator gap, newly exposed. (config.py)
+- [x] **auth_write on CallbackQueryHandler never answers the callback query on denial** *(fixed PR #47 — auth_write answers callback before returning)*
 - [ ] **handlers/reports.py now ~730 lines** (rule cap 300 for new modules) —
       move `_current_cycle_bounds` / `_send_cycle_summary` toward cycles.py
       during the module-size sweep.
@@ -1196,13 +1161,8 @@ All three need the same `_current_cycle_bounds()` branch that `/summary` and `/b
 No end-to-end flow tests exist. Unit tests cover individual functions; no test exercises
 a full command from Telegram update → Excel write → reply. Confirmed gap 2026-07-24.
 
-- [ ] **Golden-path E2E tests** — one test per major command exercising the real handler
-      and asserting the bot reply and Excel mutation. Priority commands: `/add`,
-      `/bulk` (file attachment + text paste), `/edit`, `/delete`, `/summary`,
-      `/report`, `/cycle`, `/cycle detect`, and at least one `<cmd> help` subcommand.
-- [ ] **Edge-case E2E** — `/bulk` with an unrecognised statement format triggers the
-      profile flow; re-upload of a mapped statement matches silently; `/cycle detect`
-      with a mix of unambiguous and ambiguous months walks the full confirm+pick flow.
+- [x] **Golden-path E2E tests** *(done PR #49 — 60 E2E tests across /add, /bulk text+file, /edit, /delete, /summary, /report, /cycle, /help)*
+- [x] **Edge-case E2E** *(done PR #49 — cycle detect, bulk file, hostile name, empty first_name covered)*
 - [ ] **Regression guard** — run E2E suite in CI on every PR (currently only unit tests run).
 
 ## Follow-up PR: /summary picker UX — agreed design (brainstorm 2026-07-22)
