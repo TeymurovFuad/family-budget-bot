@@ -50,7 +50,7 @@ async def add_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     try:
         # Shared normalizer — handles `1 234,56`, `1.234,56`, `1,234.56` alike.
-        value = parse_amount(text)
+        value, _ = parse_amount(text)
         if value <= 0:
             raise ValueError
     except (ValueError, TypeError):

@@ -10,7 +10,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationHandlerStop, ContextTypes
 from telegram.helpers import escape_markdown
 
 import settings
@@ -896,7 +896,9 @@ async def handle_range_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = query.data  # e.g. "range:this_month"
 
     if data == "range:custom":
-        ctx.user_data["awaiting_range"] = True
+        # Store the chat id (not just True) so the free-text listener only
+        # consumes messages from the chat where the custom range was requested.
+        ctx.user_data["awaiting_range"] = query.message.chat.id
         await query.message.reply_text(
             "📅 Enter your custom range in the format:\n`YYYY-MM-DD to YYYY-MM-DD`",
             parse_mode="Markdown",
@@ -949,34 +951,52 @@ async def handle_range_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 @log_call()
 async def handle_range_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Handle free-text custom date range input (YYYY-MM-DD to YYYY-MM-DD)."""
-    if not ctx.user_data.get("awaiting_range"):
+    """Handle free-text custom date range input (YYYY-MM-DD to YYYY-MM-DD).
+
+    Registered in a group that runs BEFORE the conversation handlers. To avoid
+    crosstalk with /add, quick-add, etc. it only acts when:
+      - the 'awaiting_range' flag is set for this user AND belongs to this chat;
+      - the message actually looks like a date-range attempt.
+    Unrelated messages pass through untouched (flag kept), and consumed
+    messages raise ApplicationHandlerStop so no other handler double-replies.
+    """
+    flag = ctx.user_data.get("awaiting_range")
+    if not flag:
         return  # not our message
+    chat = update.effective_chat
+    if flag is not True and chat is not None and flag != chat.id:
+        return  # custom range was requested in a different chat
+
+    import re
+    text = update.message.text.strip()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", text)
+    if not m:
+        if re.search(r"\d{4}-\d{2}-\d{2}", text):
+            # Looks like a range attempt with a format mistake — keep the flag
+            # so the user can retry, and stop other handlers replying too.
+            await update.message.reply_text(
+                "❌ Could not parse range. Use format: `YYYY-MM-DD to YYYY-MM-DD`",
+                parse_mode="Markdown",
+            )
+            raise ApplicationHandlerStop
+        # Unrelated text (menu tap, quick-add, mid-/add answer): don't consume
+        # it and don't pop the flag — let the normal handlers process it.
+        return
 
     ctx.user_data.pop("awaiting_range", None)
     uid  = update.effective_user.id
     ccy  = get_display_currency(uid)
-    text = update.message.text.strip()
-
-    import re
-    m = re.match(r"(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", text)
-    if not m:
-        await update.message.reply_text(
-            "❌ Could not parse range. Use format: `YYYY-MM-DD to YYYY-MM-DD`",
-            parse_mode="Markdown",
-        )
-        return
 
     try:
         start = date.fromisoformat(m.group(1))
         end   = date.fromisoformat(m.group(2))
     except ValueError as e:
         await update.message.reply_text(f"❌ Invalid date: {e}")
-        return
+        raise ApplicationHandlerStop
 
     if start > end:
         await update.message.reply_text("❌ Start date must be before end date.")
-        return
+        raise ApplicationHandlerStop
 
     try:
         df      = load_data()
@@ -984,11 +1004,12 @@ async def handle_range_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         budgets = load_budgets()
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}")
-        return
+        raise ApplicationHandlerStop
 
     label = f"{start} to {end}"
     report_text = _build_range_report(df, rates, budgets, ccy, start, end, label)
     await update.message.reply_text(report_text, parse_mode="Markdown")
+    raise ApplicationHandlerStop
 
 
 # ── Rates Refresh button helper ───────────────────────────────────────────────

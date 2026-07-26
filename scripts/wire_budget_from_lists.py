@@ -20,7 +20,9 @@ with repair_guard():
         val = cell_i.value
         # Only replace hardcoded number formulas (e.g. =2100/$N$2), not SUM rows
         if isinstance(val, str) and val.startswith('=') and 'SUM' not in val and '$N$2' in val:
-            cell_i.value = f'=IFERROR(VLOOKUP(H{r},Lists!$C$2:$D$100,2,0),0)/$N$2'
+            # Open-ended to Excel max row — a $100 cap silently ignores
+            # categories added below Lists row 100 (see repair_dashboard_bounds).
+            cell_i.value = f'=IFERROR(VLOOKUP(H{r},Lists!$C$2:$D$1048576,2,0),0)/$N$2'
             print(f'  Row {r} ({cell_h.value}): {val} -> {cell_i.value}')
             fixed += 1
 

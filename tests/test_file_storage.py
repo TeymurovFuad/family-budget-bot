@@ -349,3 +349,114 @@ def test_repair_template_keeps_validation_ranges(tmp_path, monkeypatch):
     assert sqrefs, "validations were dropped entirely"
     end_row = int(sqrefs[0].split(":F")[1])
     assert end_row >= 500, f"validation range collapsed: {sqrefs}"
+
+
+# ── update_transaction_field — multi-field dict updates ──────────────────────
+# Year/Month sync on date edits is domain logic that lives in the edit
+# handler (handlers/edit_conv.py); the storage layer just writes whatever
+# fields it is given — atomically, in one save, when passed a dict.
+
+
+class TestMultiFieldUpdate:
+    def _seed_row(self, excel_path):
+        from datetime import date
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        ws.cell(2, 1, date(2024, 5, 12))   # Date
+        ws.cell(2, 2, 2024)                # Year
+        ws.cell(2, 3, "May")               # Month
+        ws.cell(2, 4, 45.0)                # Value
+        ws.cell(2, 8, "shop")              # Description
+        wb.save(excel_path)
+
+    def test_dict_updates_all_fields_in_one_write(self, excel_path):
+        from datetime import date
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(
+            2, {"Date": date(2023, 12, 31), "Year": 2023, "Month": "Dec"}
+        )
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 1).value.strftime("%Y-%m-%d") == "2023-12-31"
+        assert ws.cell(2, 2).value == 2023
+        assert ws.cell(2, 3).value == "Dec"
+
+    def test_date_only_edit_does_not_touch_year_month(self, excel_path):
+        """Storage stays generic: writing Date alone must not rewrite Year/Month."""
+        from datetime import date
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(2, "Date", date(2023, 12, 31))
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 2).value == 2024
+        assert ws.cell(2, 3).value == "May"
+
+    def test_non_date_edit_leaves_year_month_untouched(self, excel_path):
+        self._seed_row(excel_path)
+        file_storage.update_transaction_field(2, "Value", 99.0)
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["MasterData"]
+        assert ws.cell(2, 2).value == 2024
+        assert ws.cell(2, 3).value == "May"
+
+
+# ── quarantine + .bak fixes ───────────────────────────────────────────────────
+
+
+class TestFlushRecoveryQueueQuarantine:
+
+    def test_quarantine_rename_failure_falls_back_to_delete(self, tmp_path, monkeypatch):
+        """If the .corrupt rename fails, the corrupt file must be deleted so the
+        next flush doesn't hit the same JSONDecodeError forever."""
+        from unittest.mock import patch as _patch
+
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        with _patch.object(type(queue_path), "replace", side_effect=PermissionError("locked")):
+            rows = file_storage.flush_recovery_queue()
+
+        assert rows == []
+        assert not queue_path.exists(), "corrupt queue file must not survive the flush"
+
+    def test_quarantine_rename_success_moves_file(self, tmp_path, monkeypatch):
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        rows = file_storage.flush_recovery_queue()
+
+        assert rows == []
+        assert not queue_path.exists()
+        assert (tmp_path / "recovery_queue.json.corrupt").exists()
+
+
+class TestAtomicSaveBackupPolicy:
+
+    def test_no_bak_written_for_temp_download_files(self, tmp_path):
+        """Remote-backend temp downloads must not accumulate orphan .bak files."""
+        from file_storage import atomic_save, _temp_files
+
+        path = tmp_path / "download.xlsx"
+        wb = openpyxl.Workbook()
+        wb.save(path)  # pre-existing file so the .bak branch is reachable
+
+        _temp_files.add(path)
+        try:
+            atomic_save(wb, path)
+        finally:
+            _temp_files.discard(path)
+
+        assert path.exists()
+        assert not (tmp_path / "download.xlsx.bak").exists()
+
+    def test_bak_still_written_for_regular_files(self, tmp_path):
+        from file_storage import atomic_save
+
+        path = tmp_path / "workbook.xlsx"
+        wb = openpyxl.Workbook()
+        wb.save(path)
+        atomic_save(wb, path)
+
+        assert (tmp_path / "workbook.xlsx.bak").exists()

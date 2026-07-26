@@ -205,6 +205,7 @@ async def test_range_custom_sets_awaiting_flag():
     query.from_user.id = 123
     query.data = "range:custom"
     query.message.reply_text = AsyncMock()
+    query.message.chat.id = 555
 
     update = MagicMock()
     update.callback_query = query
@@ -212,7 +213,80 @@ async def test_range_custom_sets_awaiting_flag():
 
     await handle_range_callback(update, ctx)
 
-    assert ctx.user_data.get("awaiting_range") is True
+    # Flag stores the chat id so the text listener is scoped per chat.
+    assert ctx.user_data.get("awaiting_range") == 555
     query.message.reply_text.assert_called_once()
     prompt = query.message.reply_text.call_args.args[0]
     assert "YYYY-MM-DD" in prompt
+
+# ── handle_range_text crosstalk guards ────────────────────────────────────────
+
+def _make_range_text_update(text, chat_id=555, user_id=123):
+    update = _make_update(text, user_id=user_id)
+    update.effective_chat.id = chat_id
+    return update
+
+
+@pytest.mark.asyncio
+async def test_range_text_ignores_message_when_flag_not_set():
+    from handlers.reports import handle_range_text
+    upd = _make_range_text_update("2026-01-01 to 2026-02-01")
+    ctx = _make_ctx()
+    await handle_range_text(upd, ctx)
+    upd.message.reply_text.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_range_text_unrelated_message_passes_through_and_keeps_flag():
+    """Mid-/add answers or quick-add text must not pop the flag or get a reply."""
+    from handlers.reports import handle_range_text
+    upd = _make_range_text_update("groceries 89 EUR")
+    ctx = _make_ctx()
+    ctx.user_data["awaiting_range"] = 555
+    await handle_range_text(upd, ctx)
+    upd.message.reply_text.assert_not_called()
+    assert ctx.user_data.get("awaiting_range") == 555
+
+
+@pytest.mark.asyncio
+async def test_range_text_ignores_flag_from_other_chat():
+    from handlers.reports import handle_range_text
+    upd = _make_range_text_update("2026-01-01 to 2026-02-01", chat_id=777)
+    ctx = _make_ctx()
+    ctx.user_data["awaiting_range"] = 555  # set in a different chat
+    await handle_range_text(upd, ctx)
+    upd.message.reply_text.assert_not_called()
+    assert ctx.user_data.get("awaiting_range") == 555
+
+
+@pytest.mark.asyncio
+async def test_range_text_valid_range_consumed_and_stops_propagation():
+    """A valid range must produce exactly one reply and stop other handlers."""
+    from telegram.ext import ApplicationHandlerStop
+    from handlers.reports import handle_range_text
+    upd = _make_range_text_update("2026-01-01 to 2026-02-01")
+    ctx = _make_ctx()
+    ctx.user_data["awaiting_range"] = 555
+    with patch("handlers.reports.load_data", return_value=_sample_df()), \
+         patch("handlers.reports.load_rates", return_value={"PLN": 1.0}), \
+         patch("handlers.reports.load_budgets", return_value={}), \
+         patch("handlers.reports.get_display_currency", return_value="PLN"), \
+         patch("handlers.reports._build_range_report", return_value="report"):
+        with pytest.raises(ApplicationHandlerStop):
+            await handle_range_text(upd, ctx)
+    upd.message.reply_text.assert_called_once()
+    assert "awaiting_range" not in ctx.user_data
+
+
+@pytest.mark.asyncio
+async def test_range_text_format_mistake_replies_and_keeps_flag():
+    from telegram.ext import ApplicationHandlerStop
+    from handlers.reports import handle_range_text
+    upd = _make_range_text_update("2026-01-01 until 2026-02-01")
+    ctx = _make_ctx()
+    ctx.user_data["awaiting_range"] = 555
+    with pytest.raises(ApplicationHandlerStop):
+        await handle_range_text(upd, ctx)
+    msg = upd.message.reply_text.call_args.args[0]
+    assert "YYYY-MM-DD" in msg
+    assert ctx.user_data.get("awaiting_range") == 555

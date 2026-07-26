@@ -23,6 +23,17 @@ from validators import MAX_PAST_DAYS, validate_parsed_row
 async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text  = update.message.text.strip()
     lists = ctx.user_data.get("lists") or load_reference_data()
+    if not lists.get("categories"):
+        # Reference data unavailable (file locked, Lists sheet renamed, …).
+        # Without categories, every downstream lookup would KeyError and the
+        # user would get no reply at all — fail loudly instead.
+        log.error("Quick-add aborted: reference lists are empty — Excel file unreadable?")
+        await update.message.reply_text(
+            "❌ I can't read your Excel file right now, so I can't add "
+            "transactions. Check that the workbook is available (not locked "
+            "or renamed) and try again."
+        )
+        return
     try:
         loop = asyncio.get_running_loop()
         # Known merchant + amount → deterministic parse from merchant memory,

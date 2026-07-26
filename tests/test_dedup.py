@@ -932,3 +932,120 @@ class TestBulkConfirmSkipsDuplicatesAtSave:
         sent = upd.message.reply_text.call_args.args[0]
         assert "dropped as requested" in sent
         assert "#1" in sent
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Bulk-fixes PR: OOB feedback, footer dedup, mass-hint denominator, merge count
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestRowCommandOutOfBoundsFeedback:
+    def _rows(self, n=3):
+        return [
+            {"date": "2024-06-15", "value": 10 + i, "currency": "PLN",
+             "description": f"row{i}", "person": ""}
+            for i in range(1, n + 1)
+        ]
+
+    def test_all_oob_targets_error_consistently(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+
+        rows = self._rows(3)
+        action, reason, notes = _apply_bulk_edit("drop 7 9", rows)
+        assert reason == "invalid"
+        assert not any(r.get("dropped") for r in rows)
+
+    def test_partial_oob_reported_not_silent(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+
+        rows = self._rows(3)
+        action, reason, notes = _apply_bulk_edit("drop 2 9", rows)
+        assert reason == "edited"
+        assert rows[1]["dropped"] is True
+        assert any("out of range" in n for n in notes)
+
+    def test_in_bounds_only_has_no_oob_note(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+
+        rows = self._rows(3)
+        action, reason, notes = _apply_bulk_edit("drop 2", rows)
+        assert reason == "edited"
+        assert not any("out of range" in n for n in notes)
+
+
+class TestFooterSingleFlaggedRow:
+    def test_single_flagged_row_hint_not_duplicated(self):
+        from handlers.bulk_conv import _bulk_footer
+
+        rows = [
+            {"date": "2024-06-15", "value": 50, "currency": "PLN",
+             "category": "Groceries", "description": "shop", "person": "", "dup": True},
+            {"date": "2024-06-16", "value": 10, "currency": "PLN",
+             "category": "Groceries", "description": "milk", "person": ""},
+        ]
+        footer = _bulk_footer(rows)
+        assert footer.count("`keep 1`") == 1
+        assert "keep all flagged" in footer
+
+    def test_multiple_flagged_rows_show_range_hint(self):
+        from handlers.bulk_conv import _bulk_footer
+
+        rows = [
+            {"date": "2024-06-15", "value": 50 + i, "currency": "PLN",
+             "category": "Groceries", "description": f"shop{i}", "person": "", "dup": True}
+            for i in range(3)
+        ]
+        footer = _bulk_footer(rows)
+        assert "`keep 1`" in footer
+        assert "`keep 1-3`" in footer
+
+
+class TestMassLooseMatchDenominator:
+    def test_denominator_excludes_strict_skips(self):
+        from handlers.bulk_conv import _format_dedup_messages
+
+        # 10 rows total: 7 skipped by the strict pass, 3 loose matches.
+        # Rows left as new = 3 → 3 >= 3 // 2 → hint SHOWN. With the old
+        # (buggy) denominator folding the 7 skips in, 3 >= 10 // 2 failed.
+        loose = [
+            {"row": i, "value": 10, "currency": "PLN", "description": f"d{i}",
+             "date": "2024-06-15", "other_date": "2024-06-15", "other_desc": f"o{i}"}
+            for i in (8, 9, 10)
+        ]
+        summary = {
+            "flagged": 7,
+            "skip_groups": [], "single_skips": [
+                {"group_size": 1, "master_count": 1, "skip_n": 1,
+                 "flagged_rows": [i], "kept_rows": [], "example_date": "2024-05-01"}
+                for i in range(1, 8)
+            ],
+            "identical_groups": [], "loose_matches": loose,
+            "total_rows": 10,
+        }
+        msgs = _format_dedup_messages(summary)
+        assert any("drop all flagged" in m for m in msgs)
+
+    def test_flag_master_duplicates_records_total_rows(self):
+        from handlers.bulk_conv import _flag_master_duplicates
+        from unittest.mock import patch
+
+        rows = [{"date": "2024-06-15", "value": 10, "currency": "PLN",
+                 "description": "a", "person": ""}]
+        with patch("handlers.bulk_conv.load_dedup_evidence",
+                   return_value={"strict": {}, "loose": {}}):
+            summary = _flag_master_duplicates(rows)
+        assert summary["total_rows"] == 1
+
+
+class TestMergeBulkDraftReturnsPreMergeCount:
+    def test_second_element_is_pre_merge_count(self, tmp_path):
+        import settings as _settings
+        from unittest.mock import patch
+        from handlers.bulk_conv import _merge_bulk_draft
+
+        with patch.object(_settings, "BULK_DRAFTS_DIR", tmp_path):
+            row = {"date": "2024-06-15", "value": 10, "currency": "PLN",
+                   "description": "a", "person": ""}
+            merged, pre = _merge_bulk_draft(44444, [dict(row)])
+            assert pre == 0 and len(merged) == 1
+            merged2, pre2 = _merge_bulk_draft(44444, [dict(row)])
+            assert pre2 == 1 and len(merged2) == 2

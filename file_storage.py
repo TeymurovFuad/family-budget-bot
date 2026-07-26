@@ -121,7 +121,10 @@ def atomic_save(wb, path) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
         wb.save(tmp)
-        if path.exists():
+        # Skip the rolling .bak for temp downloads (GCS/S3 backends) — the
+        # remote object is the durable copy, and a .bak next to a
+        # NamedTemporaryFile would never be cleaned up.
+        if path.exists() and path not in _temp_files:
             try:
                 shutil.copy2(path, path.with_name(path.name + ".bak"))
             except Exception as e:
@@ -198,7 +201,25 @@ def flush_recovery_queue() -> list[dict]:
         try:
             RECOVERY_QUEUE_PATH.replace(corrupt_path)
         except Exception as e2:
+            # One fallback attempt: delete the corrupt file so the next flush
+            # doesn't hit the same JSONDecodeError and repeat the failing
+            # rename forever. If even that fails, alert loudly and give up —
+            # this needs operator attention (file locked / permissions).
             log.error("Failed to quarantine corrupt recovery queue file: %s", e2)
+            try:
+                RECOVERY_QUEUE_PATH.unlink()
+                log.warning(
+                    "Deleted corrupt recovery queue file %s after quarantine "
+                    "rename failed — its contents are lost.",
+                    RECOVERY_QUEUE_PATH,
+                )
+            except Exception as e3:
+                log.critical(
+                    "OPERATOR ACTION NEEDED: corrupt recovery queue file %s "
+                    "could not be quarantined or deleted (%s). Every flush "
+                    "will keep failing until it is removed manually.",
+                    RECOVERY_QUEUE_PATH, e3,
+                )
         return []
 
 
@@ -778,9 +799,14 @@ def delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
         log.info("Deleted MasterData row %d", row_idx)
 
 
-def update_transaction_field(row_idx: int, field: str, value, expected: dict | None = None) -> None:
+def update_transaction_field(row_idx: int, field, value=None, expected: dict | None = None) -> None:
     """
-    Update a single field of a MasterData row.
+    Update one or more fields of a MasterData row in a single save.
+
+    `field` is either a column name (with `value` as the new cell value) or a
+    dict of {column name: value} pairs applied atomically in one write. This
+    function is purely generic — any domain logic (e.g. keeping Year/Month in
+    sync with Date) belongs to the caller.
 
     If `expected` is given, the row is re-verified under the write lock
     before applying the change (see delete_transaction_row). Raises
@@ -796,10 +822,12 @@ def update_transaction_field(row_idx: int, field: str, value, expected: dict | N
             raise RowMovedError(
                 f"Row {row_idx} no longer matches the selected transaction — it may have moved."
             )
-        col_idx = headers.get(field)
-        if col_idx is None:
-            raise ValueError(f"Column '{field}' not found")
-        ws.cell(row_idx, col_idx, value)
+        updates = field if isinstance(field, dict) else {field: value}
+        for col_name, col_value in updates.items():
+            col_idx = headers.get(col_name)
+            if col_idx is None:
+                raise ValueError(f"Column '{col_name}' not found")
+            ws.cell(row_idx, col_idx, col_value)
         atomic_save(wb, excel_path)
-        log.info("Updated MasterData row %d column '%s'", row_idx, field)
+        log.info("Updated MasterData row %d columns %s", row_idx, list(updates))
 
