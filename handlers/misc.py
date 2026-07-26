@@ -65,6 +65,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/delete — remove one of the last 5 transactions\n"
         "/export — download your Excel workbook\n\n"
         "*Settings*\n"
+        "/setup — first\\-time onboarding: creates the budget file, then walks through categories, budgets and currency \\(owner only\\)\n"
         "/setcurrency — change the display currency\n"
         "/keywords — view, add or remove the salary keywords used for cycle detection \\(owner only\\)\n"
         "/setbudget — set the monthly budget limit for a category \\(owner only\\)\n"

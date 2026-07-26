@@ -61,6 +61,7 @@ from handlers.misc import (
     cmd_keywords, keywords_callback, keywords_add_word,
 )
 from handlers.quick_conv import handle_quick_add, quick_confirm
+from handlers.setup_conv import setup_conversation_handler
 from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
     cmd_savings, cmd_report, cmd_rates, cmd_chart,
@@ -124,6 +125,7 @@ BOT_COMMANDS = [
     BotCommand("setbudget",   "Set the monthly budget for a category (owner only)"),
     BotCommand("cycle",       "Show or start a budget cycle (owner only, needs BUDGET_CYCLE=1)"),
     BotCommand("keywords",    "Manage salary keywords for cycle detection (owner only)"),
+    BotCommand("setup",       "First-time onboarding: categories, budgets, currency (owner only)"),
     BotCommand("menu",        "Show the button menu"),
     BotCommand("help",        "List all commands with what they do"),
     BotCommand("start",       "Welcome message and main menu"),
@@ -136,10 +138,15 @@ async def error_handler(update, context) -> None:
     chat = getattr(update, "effective_chat", None)
     if chat is None:
         return
+    if isinstance(context.error, FileNotFoundError):
+        text = ("The budget file could not be found. "
+                "Run /setup to create and configure it.")
+    else:
+        text = "Something went wrong. Please try again."
     try:
         await context.bot.send_message(
             chat_id=chat.id,
-            text="Something went wrong. Please try again.",
+            text=text,
         )
     except Exception:
         log.exception("Failed to send error notification to chat %s", chat.id)
@@ -156,6 +163,12 @@ def build_application() -> Application:
     can inspect the registered handlers without starting the bot."""
     app = Application.builder().token(BOT_TOKEN).post_init(register_commands).build()
     app.add_error_handler(error_handler)
+
+    # ── /setup onboarding conversation ────────────────────────────────────────
+    # Must be registered BEFORE the plain /start handler: its /start entry
+    # routes the owner into onboarding when the workbook is missing, and
+    # falls through to the menu otherwise.
+    app.add_handler(setup_conversation_handler())
 
     # ── command handlers ──────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",   cmd_menu))

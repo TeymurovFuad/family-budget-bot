@@ -111,13 +111,34 @@ def _row_matches_snapshot(ws, headers: dict, row_idx: int, expected: dict) -> bo
     return True
 
 
+# On Windows, antivirus / search indexers can hold a just-written file open
+# for a few milliseconds, making os.replace fail with a transient
+# PermissionError (WinError 5). Retry briefly before giving up.
+_REPLACE_RETRIES = 5
+_REPLACE_RETRY_DELAY_SECONDS = 0.1
+
+
+def _replace_with_retry(src, dst) -> None:
+    import os
+
+    for attempt in range(1, _REPLACE_RETRIES + 1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_RETRIES:
+                raise
+            log.warning("os.replace %s -> %s locked (attempt %d/%d), retrying",
+                        src, dst, attempt, _REPLACE_RETRIES)
+            time.sleep(_REPLACE_RETRY_DELAY_SECONDS * attempt)
+
+
 def atomic_save(wb, path) -> None:
     """
     Crash-safe workbook save: write to a sibling temp file, keep a rolling
     .bak of the previous version, then atomically replace the target.
     A crash mid-save can no longer corrupt the only copy of the data.
     """
-    import os
     import shutil
 
     path = Path(path)
@@ -132,7 +153,7 @@ def atomic_save(wb, path) -> None:
                 shutil.copy2(path, path.with_name(path.name + ".bak"))
             except Exception as e:
                 log.warning("Could not write backup for %s: %s", path, e)
-        os.replace(tmp, path)
+        _replace_with_retry(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -457,6 +478,38 @@ def create_blank_excel(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     log.info("Created fallback Excel workbook at %s", path)
+
+
+def create_workbook_from_template(dest: Path) -> None:
+    """
+    Create a fresh workbook at `dest` atomically: the template is materialised
+    to a sibling .tmp file first, then os.replace moves it into place, so a
+    crash mid-creation never leaves a half-written workbook at `dest`.
+    """
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    try:
+        create_blank_excel(tmp)
+        _replace_with_retry(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
+    log.info("Created workbook from template at %s", dest)
+
+
+def lists_categories_populated(wb) -> bool:
+    """True if the Lists sheet has at least one category in the Categories column."""
+    if "Lists" not in wb.sheetnames:
+        return False
+    ws = wb["Lists"]
+    cat_col = find_col(ws, header_of(ListsSchema, "categories"))
+    if cat_col is None:
+        return False
+    for row in range(2, ws.max_row + 1):
+        val = ws.cell(row, cat_col).value
+        if val is not None and str(val).strip():
+            return True
+    return False
 
 
 def get_excel_path_for_reading() -> Path:

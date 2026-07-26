@@ -4,34 +4,194 @@ Findings from the whole-team review (Architect, Designer, Developer, PO, fresh-e
 of 2026-07-21 on branch `feat/bulk-import-draft-ordering`. Grouped by planned follow-up PR.
 Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
+## Planned runs — grouped 2026-07-25
+
+150 open items grouped into 3 runs. Items belong to the run they are **first meaningfully addressed in**; detail lives in the sections below.
+
+### Run 1 — "Unblock the re-import" (~20 items)
+Must ship before the user re-imports 1,400 historical rows.
+
+**Pre-shipped before the run (PRs #39–#42):**
+- [x] Statement decimal separator corrupts every amount *(Bugs 2026-07-25)* — PR #39
+- [x] Statement imports categorize everything as 'Other' *(Bugs 2026-07-25)* — PR #40
+
+**Shipped in PR #43 (merged 2026-07-26):**
+- [x] Quick-add doesn't recognise Savings as transaction type *(Bugs 2026-07-24)*
+- [x] Register PTB error handler — failures are currently silent *(markdown-validator review notes PR #37)*
+- [x] Salary-mask: Description match is unconditional OR *(salary-mask review notes PR #36)*
+- [x] Salary-mask: Exact-match brittle for statement imports *(salary-mask review notes PR #36)*
+- [x] Salary-mask: Test durability pin *(salary-mask review notes PR #36)* — verified already present (`tests/test_cycles.py`)
+- [x] [PR #3] Draft-limit path discards just-parsed input *(PR #3 bulk-import bugs)*
+- [x] Formula injection via descriptions — bulk/quick/edit bypass sanitizer *(parallel-review findings)*
+
+**Still open:**
+- [ ] Salary-mask: Empty `SALARY_CATEGORY` degenerates *(salary-mask review notes PR #36)*
+- [x] Monthly Summary sheet never updated by the bot *(fixed PR #38 — bot appends SUMIFS rows on every write)*
+- [x] Recovery-queue corruption bricks startup *(fixed in prior PRs — atomic write + .corrupt quarantine in file_storage.py)*
+- [x] Partial bulk save loses failed rows *(fixed in prior PRs — failed rows kept in draft with retry message)*
+- [ ] [PR #3] Preview edits not persisted to draft file *(PR #3 bulk-import bugs)*
+- [ ] [PR #3] Recovery replay writes Date as text string *(PR #3 bulk-import bugs)*
+- [ ] [PR #3] Cosmetic cleanup *(PR #3 bulk-import bugs)*
+
+### Run 2 — "Complete the cycles feature" (~35 items)
+Cycles is half-done: /summary and /budget are cycle-scoped, reports aren't, picker is missing.
+
+**Report gaps:**
+- [ ] `/report` still calendar-based *(cycle-aware report gaps)*
+- [ ] `/top` still calendar-based *(cycle-aware report gaps)*
+- [ ] `/savings` still calendar-based *(cycle-aware report gaps)*
+- [ ] `check_budget_alert` still calendar-scoped *(cycle-aware report gaps / PR #30 review)*
+
+**/summary picker UX (5 items from agreed design):**
+- [x] free-form args *(done PR #45)*
+- [x] bare /summary three-zone *(done PR #45)*
+- [x] /summary jul resolves ledger *(done PR #45)*
+- [x] range support *(done PR #45)*
+- [x] year overflow paging *(done PR #45)*
+
+**Cycle Dashboard + remaining design (8 items):** Cycle Dashboard sheet, sync check, lazy backfill on report, `none this month`, candidate window when detection finds nothing, past/entire-period walk, before-first-boundary bucket, multiple salary rows picker
+
+**Cycle correctness fixes (~12 items from PR #30/#32 review notes):** stale row-index race in /delete and /edit, date edit leaves Year/Month stale, bare `/cycle` write-gated for non-owners, auth_write spinner on CallbackQueryHandler, timezone inconsistency in cycle bounds, duplicate labels for two cycles in one month, `detect:stop` wrong count, "Two salary payments" hardcoded for 3+, `detect_candidates` not cleared on re-entry, no currency label on detect amounts, ad-hoc keywords don't reach `cycle_totals`, user-editable label interpolated raw into Markdown
+
+**Currency / PLN neutrality sweep (4 items):** remaining PLN in runtime messages, default-currency fallback hardcodes PLN, `goal_pln` field in ListsSchema, AI parser prompt hardcodes Polish zł/zl
+
+### Run 3 — "Quality, infra, and long tail" (~95 items)
+No hard deadline — work through these incrementally.
+
+### /setup onboarding — agreed design (brainstorm 2026-07-27)
+
+Goal: user sets XLSX_PATH in .env, runs /setup (or /start with no file present), bot creates the workbook from the bundled template and walks through full configuration. No spreadsheet editing required.
+
+**Entry points:** `/start` detects missing file and hands off to the setup flow. `/setup` also works as a direct command. Both use the same ConversationHandler in `handlers/setup_conv.py`.
+
+**File creation:** `create_workbook_from_template(dest)` in `file_storage.py` — atomic copy from `data/Expenses_Template.xlsx`. Parent directory created if missing. Clear error if path not writable or `XLSX_PATH` not set.
+
+**Workbook state detection (3 cases at handler entry):**
+1. File missing → create from template, run onboarding.
+2. File exists, Lists!C populated → "already configured" message (no re-run).
+3. File exists, Lists!C empty → skip file creation, run onboarding.
+
+**Auth:** only `ALLOWED_TELEGRAM_IDS[0]` (primary user) can run `/setup`.
+
+**Default categories (14, written to Lists!C on first run):**
+
+| # | Name | Type |
+|---|------|------|
+| 1 | Salary | Income |
+| 2 | Other Income | Income |
+| 3 | Housing | Expense |
+| 4 | Groceries | Expense |
+| 5 | Transport | Expense |
+| 6 | Utilities | Expense |
+| 7 | Health | Expense |
+| 8 | Dining Out | Expense |
+| 9 | Shopping | Expense |
+| 10 | Entertainment | Expense |
+| 11 | Subscriptions | Expense |
+| 12 | Travel | Expense |
+| 13 | Savings | Savings |
+| 14 | Other | Expense |
+
+**Conversation flow (7 steps):**
+1. Welcome — bot creates file silently, auto-advances.
+2. Category review — numbered list displayed; buttons: `Rename a category` · `Add a category` · `Done with categories`.
+3. Rename — bot shows all categories as inline buttons (emoji+name, 2 per row); user taps one → sends new name → list refreshes. Loops back to Step 2.
+4. Add — user sends name → picks type from `[Expense]` `[Income]` `[Savings]` → appended, list refreshes. Loops back to Step 2.
+5. Budget per category — Expense categories only, one at a time; 0 = no limit, default 0; non-numeric input re-prompts.
+6. Currency setup — buttons `[USD]` `[EUR]` `[RUB]` `[TRY]` `[CNY]` `[Other]`; user picks main display currency; `[Other]` → free-text 3-letter code.
+7. Summary + done — lists final categories, currencies, budgets; triggers rate fetch automatically; button: `Done`.
+
+Cancel button available from Step 2 onward — exits, keeps partial writes, tells user to re-run `/setup`.
+
+**What gets updated on every category add/rename (atomic, one workbook save):**
+- `Lists!C` — the category row itself
+- Dashboard category SUMIF block — full rebuild from final list (same pattern as `sync_cycle_dashboard_categories`)
+- Cycle Dashboard category block — `sync_cycle_dashboard_categories(wb)` called after rebuild
+- MasterData dropdown validations — `extend_validation_ranges` (already exists)
+- `merchant_map.json` — empty at setup time, no action needed
+
+**Category type hint (not enforcement):** A `CATEGORY_TYPE_HINTS` dict maps default category names to their typical type (e.g. `"Salary" → "Income"`). When a user picks a category in `/add` or quick-add, the bot pre-selects the hinted type. User can override. Enforcement (reject mismatches) is a follow-up item.
+
+**Display currency:** Written to `data/user_prefs.json` (same file `/setcurrency` uses) — not to `.env`. No bot restart needed. Env var `DISPLAY_CURRENCY` remains the server-default fallback.
+
+**Rate fetch:** Triggered automatically at end of setup (Step 7). If it fails, rates stay 1.0 and user is warned.
+
+**Category edits post-setup:** Not supported as a bot command — use `scripts/rename_category.py` on the server. Full in-bot rename/delete support deferred to the SQLite+web UI era (data migration is trivial with SQL; dangerous with Excel mid-use).
+
+**No-file guard for normal commands:** No hard block. `ExcelFileContext` raises `FileNotFoundError` naturally; global error handler in `bot.py` catches it and replies "No workbook found. Run /setup to create one."
+
+**Files to create/modify:**
+- `handlers/setup_conv.py` (new) — ConversationHandler + all step callbacks
+- `file_storage.py` — add `create_workbook_from_template`
+- `bot.py` — register setup ConversationHandler; add FileNotFoundError catch in global error handler
+- `states.py` — add SETUP_* state constants
+- `tests/test_setup_conv.py` (new)
+
+**Open items (resolve before implementation):**
+- [ ] Confirm `data/Expenses_Template.xlsx` is committed and present at runtime (it is — verify before starting)
+- [ ] Dashboard category SUMIF rebuild function: extract shared helper from `sync_cycle_dashboard_categories` so both Dashboard and Cycle Dashboard rebuilds share one code path
+- [ ] `CATEGORY_TYPE_HINTS` dict: implement as part of this PR or as a follow-up to the data-validation PR
+
+- **Infra/performance (7):** .bak leak, reference-data TTL cache, JSONL recovery queue, lost-update protection, `_load_bulk_drafts` reads every user, split `file_storage`, DeepSeek output as typed model
+- **E2E test coverage (3):** golden-path, edge-case, CI regression guard
+- **Token economy (6):** compact AI output, split extraction/categorization, local fast-path quick-add, dedup before parse, prompt byte-identical caching, off-peak batching
+- **UX (6):** person attribution per import, recurring detection, /add default-and-confirm, bulk edit drop/skip UX, quick-add one-tap recovery, report chunking markdown split, edit_conv currency keyboard
+- **Statement profile design + PR #18 review notes (~25):** profile contents spec, first-upload AI flow, known-format zero-token path, bank-redesign handling, plus all dead-code/test findings from PR #18
+- **Dedup review notes (5):** OOB feedback, wording drift, footer redundancy, denominator bug, double file read
+- **Data-validation review notes (2):** lone-separator reinterpretation, bulk revalidation skipped
+- **Code clarity + module size (4):** magic numbers sweep, 300-line cap, split offenders
+- **Draft + log lifecycle (3):** draft archival, log retention, per-operation audit line
+- **Schema simplification (2):** derive Year/Month from Date by formula, category rename support
+- **Parallel-review remaining (5):** repair scripts unsafe, dual logging, draft limit porous, range-text listener crosstalk, fix_import_errors rule-3 ordering
+- **Misc (~10):** /export exception leak, file-size guard, quarantine rename retries forever, legacy script cleanup, rename_category.py gaps, lists_currency_range row 100 cap, markdown-validator extension, /start test gaps, profile review notes PR #27
+
+---
+
 ## Session handoff — read this first if resuming in a new session
 
 > **Always verify before acting — this note is a snapshot, not live state.**
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-25 evening — PRs through #41 merged)*
+> *(Last updated: 2026-07-26 — PRs through #46 merged)*
 
 ### PR state at last update
-- **PRs #1–#41 merged.** This session shipped:
-  - **PR #39**: decimal-separator fix — profile list shows the separator,
-    "Fix settings" button (separator / date format / sign convention) in the
-    confirm flow, `validate_proposal_against_samples` sanity check.
-  - **PR #40**: statement AI categorization — `ai_parser.categorize_merchants`
-    (compact unique-merchant call, batched 80), 🤖 preview marker; AI guesses
-    never persisted to merchant memory.
-  - **PR #41**: Person field retired from all flows (household budgets as one
-    unit — user decision). /add is 8 steps; column stays until stage 2.
-    Carries the "Minimalism audit — agreed design" section (Designer review):
-    goals-columns cut, IsDone drop, report-surface collapse to /summary +
-    /budget, consolidated schema-simplification scope.
-- **User state 2026-07-25**: MasterData + Monthly Summary still cleared;
-  **the 1400-row re-import is now unblocked**. VM deploy checklist:
-  (1) pull + restart bot, (2) run `scripts/fix_formula_bounds.py`,
-  (3) delete the corrupt statement profile (`/bulk profile` → Delete) so the
-  fixed proposal flow reruns, (4) set `CYCLE_DETECT_KEYWORDS=wynagrodzenie`
-  in the VM .env, (5) re-upload the statement — expect 🤖 categorization.
-- **Next open work**: see "Next up" — /summary picker UX is now the top item.
+- **PRs #1–#46 merged.**
+- **PR #46 merged 2026-07-26**: Cycle Dashboard sheet — cycle-selector dropdown (B2,
+  fed from Cycles ledger), SUMIFS filtered by Date >= cycle start AND Date < next start
+  (MINIFS order-independent next-boundary lookup), open-ended last cycle falls back to
+  TODAY()+1. Summary block: Salary · Income · Expenses · Savings · Unaccounted · Cycle
+  Days. Category table mirrors Dashboard with shared Lists budget column (no pro-rating).
+  `cycle_dashboard.py` (`ensure_cycle_dashboard`, `sync_cycle_dashboard_categories`),
+  `scripts/sync_cycle_dashboard.py` (--dry-run flag), bot wiring in
+  `record_cycle_start`/`record_cycle_starts_batch`, template updated. `to_date` moved
+  from `cycles.py` to `excel_schema.py` as public function. DOCUMENTATION.md Sheets
+  table and Budget Cycles section updated. 7 new tests, 1082 total passing.
+- **PR #45 merged 2026-07-26**: /summary picker UX — free-form arg parsing,
+  three-zone bare /summary keyboard (This/Last cycle + This/Last month quick
+  row, Calendar/Cycle drill-down), ledger-first month resolution, range
+  support (free-form + button walk), year overflow paging. 41 new tests,
+  1116 total passing. DOCUMENTATION.md and /help updated.
+- **PR #43 merged 2026-07-26**: salary-mask hardening (blank-Category gate +
+  word-boundary matching), Savings type recognition in quick-add, bulk
+  draft-overflow holding buffer, global PTB error handler, formula-injection
+  sanitization in edit/bulk paths. Review follow-ups queued in
+  "PR #43 review notes (2026-07-25)" below.
+- **PRs #39–#42 merged 2026-07-25**: statement decimal-separator fix (#39),
+  AI categorization for statement imports (#40), Person field retired (#41),
+  handoff docs (#42). The statement-import correctness pair is done — the
+  re-import is unblocked.
+- **PR #38 merged 2026-07-25**: open-ended formula ranges + Monthly Summary
+  auto-population. `lists_currency_range` now uses `$1048576`; Dashboard
+  SUMIFS/VLOOKUP bounds rewritten via `repair_dashboard_bounds`; bot appends
+  Monthly Summary SUMIFS rows on every write (single, batch, recovery replay).
+  `scripts/fix_formula_bounds.py` repairs live workbooks in one pass.
+- **User state 2026-07-25**: MasterData + Monthly Summary cleared (headers
+  only). Ready to re-import 1400 historical rows once the server is updated
+  and `fix_formula_bounds.py` is run.
+  User's bank salary titles: "wynagrodzenie" / "salary" / both — managed via
+  the `/keywords` command (persisted to Excel, PR #44); no .env entry needed.
+- **Next open work**: E2E test coverage PR — no end-to-end flow tests exist for any command (confirmed gap 2026-07-24).
 - **PR-title rule is live**: titles become the Telegram changelog verbatim —
   write them as plain-language outcomes, no `feat:`/`fix:` prefixes, and
   always squash-merge. See `.github/pull_request_template.md`.
@@ -50,15 +210,10 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ### Next up (priority order — update when items complete)
   1. ~~**Formulas must survive data growth PR**~~ — ✅ merged as PR #38 (2026-07-25).
-  2. ~~**Statement-import correctness pair**~~ — ✅ both merged: decimal
-     separator (PR #39) + AI categorization (PR #40).
-  3. **`/summary` picker UX PR** — with `BUDGET_CYCLE=1`
-     the calendar view is currently unreachable from bare `/summary` (flag-on
-     removes it entirely until the picker ships). Design in "/summary picker
-     UX — agreed design" below.
-  3. **Cycle Dashboard sheet + sync check** — see "budget cycles — agreed
-     design"; must handle ledger rows that may be out of chronological order
-     (see PR #30 review notes).
+  2. ~~**Statement-import correctness pair**~~ — ✅ merged as PRs #39 + #40
+     (2026-07-25); Run 1 fix batch merged as PR #43 (2026-07-26).
+  3. ~~**/summary picker UX PR**~~ — ✅ merged as PR #45 (2026-07-26).
+  3. ~~**Cycle Dashboard sheet + sync check**~~ — ✅ merged as PR #46 (2026-07-26).
   4. **E2E test coverage PR** — no end-to-end flow tests exist for any command.
      Gap confirmed 2026-07-24. Separate PR after #32 merges. Cover golden path
      + key edge cases for: /add, /bulk (file + text), /edit, /delete, /summary,
@@ -100,7 +255,7 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
 ## Bugs (confirmed live, 2026-07-24)
 
-- [ ] **Quick-add doesn't recognise Savings as transaction type** — user typed
+- [x] **Quick-add doesn't recognise Savings as transaction type** *(fixed in PR #43)* — user typed
       "2380 added to savings 23 July 2026"; bot replied: ❌ Unknown category
       'Savings'. Use one of: Groceries, Housing, …
       Root cause: the AI parser maps "savings" / "saved" to the Category field
@@ -127,23 +282,25 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       (unaccounted math), and the live salary prompt
       (`maybe_prompt_cycle_start`).
 
-- [x] **Statement profile saved with wrong decimal separator corrupts every
-      amount (79.99 → 7999)** — fixed: (a) `/bulk profile list` now shows
-      the decimal separator; (b) debit/credit-split proposal message now
-      includes the separator; (c) new "Fix settings" button lets users correct
-      separator, date format, and sign convention in the confirm flow;
-      (d) `validate_proposal_against_samples` warns when sample amounts
-      contradict the proposed separator before saving.
-      (`statement_profiles.py`, `handlers/bulk_conv.py`)
+- [ ] **Statement profile saved with wrong decimal separator corrupts every
+      amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for
+      a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400
+      rows imported with 100× inflated values. Three compounding gaps:
+      (a) profile list (`/bulk profile`) doesn't show the separator;
+      (b) debit/credit-split proposal message omits the separator entirely;
+      (c) "Fix a column" can only remap columns — separator, date format, and
+      sign convention cannot be corrected in the confirm flow.
+      Also add a sanity check: sample amount values like `79.99` (2 digits
+      after ".") contradict comma-decimal — validate proposal against samples
+      before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
 
-- [x] **Statement imports categorize everything as 'Other'** — fixed: new
-      `ai_parser.categorize_merchants()` makes one compact call (unique
-      merchant names → categories, batched at 80) after merchant memory in
-      `_finish_profile_parse`; only exact Lists matches are applied, rows get
-      a 🤖 preview marker, and AI guesses are NOT persisted to merchant
-      memory (only user preview edits teach the map). This completes the
-      token-economy "split extraction from categorization" design for
-      statement imports. (`ai_parser.py`, `handlers/bulk_conv.py`)
+- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
+      returns no category; `_normalize_parsed_rows` defaults empties to
+      "Other"; merchant memory only helps for known merchants (empty on first
+      import). The AI-categorization step for unknown merchants (BACKLOG
+      "known format" design: "AI only for unknown merchants") was never wired
+      into the statement path. 1400 rows imported as Other.
+      (`handlers/bulk_conv.py` `_finish_profile_parse`)
 
 - [x] **Deployed bot stops replying to commands (file uploads still work)** —
       root cause found in VM logs: /help replied with MarkdownV2 containing an
@@ -169,118 +326,9 @@ Items marked **[PR #3]** should land in the current bulk-import PR before merge.
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
 
-## Follow-up: person-retirement review notes (PR #41, 2026-07-25)
-
-- [ ] **Dead reads left for stage 2** — `AddTransactionState.person` is now
-      always "", and `data.py` still loads the Lists `persons` column that no
-      flow consumes. Both are deliberate stage-1 leftovers; fold their removal
-      into the schema-simplification PR alongside the Person column drop.
-      (`models.py`, `data.py`)
-- [ ] **`_normalize_parsed_rows` person-relocation message says "moved to
-      description"** — accurate, but the user can no longer see or edit a
-      person field, so the phrasing may confuse; consider "recipient noted in
-      description". Cosmetic. (`handlers/bulk_conv.py`)
-
-## Minimalism audit — agreed design (Designer review, 2026-07-25)
-
-Whole-workbook redundancy audit against comparable minimal budget apps
-(r/ynab usage discussions, Actual-vs-Firefly comparisons, GitHub Telegram
-budget bots). Verdict: the core — quick entry → categories → budget-vs-actual
-→ cycle unaccounted — matches exactly what succeeds elsewhere; all redundancy
-is peripheral. The cycle "unaccounted" metric is the bot's differentiator:
-promote it as the headline number, don't bury it among nine reports.
-
-**User decision 2026-07-25: the household budgets as one unit — the Person
-field is retired entirely** (no future per-person scenario). Two stages:
-
-- [x] **Retire Person, stage 1 (no schema change)** — remove Person from every
-      flow: /add stops asking (write ""), bulk drops the per-row `person=`
-      edit field and the planned ask-once-per-import item, /report drops the
-      by-person section, merchant map stops storing person defaults. Column
-      stays in MasterData, silently empty. Supersedes the UX-group "person
-      attribution" item. *(done: 2026-07-25 — /add, /edit, /delete, /bulk,
-      quick-add, /report, AI prompts and merchant map all person-free;
-      writers still stamp person="" so the column stays intact)*
-- [ ] **Retire Person, stage 2 (schema)** — drop the Person column itself in
-      the schema-simplification PR, together with the other cuts below.
-
-Remaining agreed cuts, in the order they pay off:
-
-- [ ] **Delete the goals columns from ListsSchema** (`goal_name`/`goal_alloc`/
-      `goal_base`) — declared in the schema, referenced nowhere else in the
-      codebase. Pure dead weight; delete the schema fields, leave workbook
-      cells alone. (`excel_schema.py`)
-- [ ] **Drop `IsDone`** — every writer hardcodes True, ~20 report filters
-      carry `& df["IsDone"]` that can never exclude anything, and the dead
-      field already caused one bug. Fold into the schema-simplification PR
-      (migration + filter sweep). (`excel_schema.py`, `models.py`, `data.py`,
-      `handlers/reports.py`)
-- [ ] **Collapse the report surface to two commands** — keep `/summary`
-      (period picker: this cycle / this month / last 7 days / range) and
-      `/budget`; fold `/top`, `/savings`, `/week`, `/report`, `/chart`,
-      `/range` content into sections/buttons of those two. Retires six
-      commands, closes the cycle-awareness gaps for /report and /top by
-      construction, shrinks the help/MarkdownV2/E2E surface. Do together
-      with the /summary picker UX PR (same screen).
-- [ ] **Schema-simplification PR scope (consolidated)** — one migration, four
-      cuts: derive Year/Month from Date (existing item), drop IsDone, drop
-      Person column (stage 2), drop goals columns; convert Monthly Summary
-      to dynamic formulas (existing "never updated" bug's option c) so the
-      PR #38 row-append machinery can be deleted. One script, one formula
-      sweep, four redundancies gone.
-- [ ] **Recurring detection from history replaces the /add question**
-      (existing UX item, elevated) — same merchant ±10% in ≥2 prior months
-      ⇒ auto-flag; /add stops asking, bulk stops hardcoding False.
-- [ ] **Quick-add primary, /add default-and-confirm** (existing UX item,
-      elevated) — after amount+category pre-fill everything, jump to confirm
-      card; 9 round-trips → 2. Entry friction is the #1 churn cause in
-      comparable apps.
-
-## Follow-up: AI-categorization review notes (PR #40, 2026-07-25)
-
-- [ ] **Model must echo merchant names verbatim for the mapping to apply** —
-      lookup is exact-match on the merchant string; a model that trims spaces
-      or changes case silently loses that merchant (row falls back to Other,
-      no error). Normalize the lookup (casefold + strip) when matching
-      response keys back to targets. (`handlers/bulk_conv.py`
-      `_apply_ai_categorization`)
-- [ ] **Re-importing the same unknown merchants re-pays tokens** — deliberate
-      (AI guesses aren't persisted so wrong ones can't stick), but a repeat
-      import of an overlapping statement re-categorizes identical merchants.
-      Option: session-scoped cache, or persist guesses with a `provisional`
-      flag the map treats as weaker than user edits. Revisit after observing
-      real costs. (`ai_parser.py`, `merchant_map.py`)
-- [ ] **No cap on batch count for very diverse statements** — 1000 unique
-      merchants = 13 calls in one import; the session budget note says ~20.
-      Consider a max-batches guard with a "categorize the rest by editing"
-      message. (`ai_parser.py` `categorize_merchants`)
-- [ ] **🤖 message backticks render literally** — the `N category=...` hint is
-      sent without parse_mode (safe, but cosmetically wrong) — same class as
-      the PR #39 date-format prompt note; fix both together.
-      (`handlers/bulk_conv.py`)
-
-## Follow-up: decimal-separator review notes (PR #39, 2026-07-25)
-
-- [ ] **Sanity check only fires for NEW proposals — the already-saved bad profile
-      is never re-validated** — `validate_proposal_against_samples` runs in the
-      new-format path; a profile already saved with the wrong separator (the
-      live incident) still parses silently on fingerprint match. Run the same
-      check against the first rows at match time and warn before parsing.
-      The user's actual corrupt profile must be deleted by hand
-      (`/bulk profile` → Delete) before re-importing. (`handlers/bulk_conv.py`)
-- [ ] **Typed date_format is not validated** — `bulk_profile_fix_setting`
-      accepts any text as a strptime pattern; a typo (e.g. `%d.%m.%y` vs `%Y`)
-      saves fine and only surfaces as skipped rows at parse time. Try the
-      pattern against a sample date cell before accepting. (`handlers/bulk_conv.py`)
-- [ ] **Backticks in the date-format prompt render literally** — the
-      `fix_settings:date_fmt` message uses `` ` `` without parse_mode
-      (deliberately safe given the MarkdownV2 bug history, but cosmetically
-      wrong). Either drop the backticks or send with parse_mode and escapes.
-      (`handlers/bulk_conv.py`)
-
 ## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
 
-- [ ] **Description match is an unconditional OR** — an Income row with
+- [x] **Description match is an unconditional OR** *(fixed in PR #43)* — an Income row with
       Category "Freelance" and Description "Salary" counts as salary,
       inflating unaccounted math. Safer: fall back to Description only when
       Category is empty/blank. Same in `maybe_prompt_cycle_start`.
@@ -288,13 +336,13 @@ Remaining agreed cuts, in the order they pay off:
 - [ ] **Empty `SALARY_CATEGORY` degenerates** — a blank keyword matches every
       Income row with a blank Category or Description. Add
       `if not keyword: return all-False`. (`cycles.py` `salary_mask`)
-- [ ] **Exact-match on Description brittle for statement imports** — bank
+- [x] **Exact-match on Description brittle for statement imports** *(fixed in PR #43 — word-boundary contains match)* — bank
       salary rows often read "SALARY JUL 2024" / "ACME PAYROLL"; the exact
       `== "salary"` match misses them — the same failure mode PR #36 fixed.
       Check what the user's bank statement actually titles the salary transfer
       before the re-import; if longer than the bare word, switch to a
       word-boundary contains match. (`cycles.py` `salary_mask`)
-- [ ] **Test durability** — `test_detect_matches_salary_in_category_without_
+- [x] **Test durability** *(verified during PR #43: pin already present in `tests/test_cycles.py`)* — `test_detect_matches_salary_in_category_without_
       description_column` relies on `_cycle_df()` incidentally lacking a
       Description column; pin with `assert "Description" not in df.columns`.
       (`tests/test_cycles.py`)
@@ -331,15 +379,63 @@ Remaining agreed cuts, in the order they pay off:
       reply and all `<cmd> help` subcommand texts are not. Extract
       `_find_unescaped_reserved` into a shared test helper and parametrize.
       (`tests/test_help_markdown.py`, `handlers/*.py`)
-- [ ] **Register a PTB error handler** — "No error handlers are registered"
+- [x] **Register a PTB error handler** *(fixed in PR #43)* — "No error handlers are registered"
       in the VM log; a global `Application.add_error_handler` that logs and
       replies with a plain-text fallback would have surfaced the /help
       failure to the user on day one instead of silence. (`bot.py`)
 
+## Roadmap: Web UI + SQLite — phased integration (added 2026-07-26)
+
+Goal: a simple web UI that mirrors the Excel view, backed by SQLite, introduced
+incrementally so the bot never breaks and the household can switch gradually.
+Excel stays the source of truth until Cycle 4 explicitly flips it.
+
+Each cycle is a self-contained deliverable that ships value on its own.
+Cycles must be done in order — each depends on the previous.
+
+### Cycle W1 — SQLite as a shadow/parallel store
+- [ ] Design schema: `transactions` (mirrors MasterData), `cycles`, `lists` (categories, currencies, budgets), `merchant_map`.
+- [ ] Add a `sqlite_ops.py` layer: `init_db`, `upsert_transaction`, `delete_transaction`, `upsert_cycle`, `load_transactions(filters)`.
+- [ ] Wire dual-write: every `write_transaction_row` / `delete_transaction` / edit also writes to SQLite. Reads still come from Excel. Bot behaviour unchanged.
+- [ ] Backfill script: `scripts/backfill_sqlite.py` — import all existing MasterData rows into SQLite on first run.
+- [ ] CI: SQLite write failures are logged and non-fatal (Excel is still authoritative — a SQLite bug must never block a save).
+- Done when: SQLite stays in sync with Excel through normal bot usage for one week without divergence.
+
+### Cycle W2 — Read API + minimal web UI (view only)
+- [ ] FastAPI (or Flask) micro-service (`web/app.py`) reading from SQLite only. Runs on the same VM, different port.
+- [ ] Three pages: Transactions list (filterable by month/category/person), Summary (mirrors /summary numbers), Cycles list.
+- [ ] Auth: single shared password (env var `WEB_PASSWORD`) — no multi-user, no OAuth.
+- [ ] Transactions list matches Excel exactly: same columns, same sort order, paginated.
+- [ ] Deploy: systemd unit `budget-web.service`, documented in `deploy/` alongside the bot service.
+- Done when: the household can browse transactions in a browser and numbers match the bot's /summary.
+
+### Cycle W3 — Web UI write path (add / edit / delete)
+- [ ] Add transaction form in the web UI — same fields as /add, same validation (reuse `validators.py`).
+- [ ] Edit and delete in the web UI — same row-lock semantics as the bot (`_excel_write_lock`).
+- [ ] Dual-write: web UI writes to SQLite first, then queues an Excel write (same `atomic_save` path as the bot). Recovery queue handles failures.
+- [ ] Conflict detection: if the same row was edited in Excel and the web UI between reads, surface a conflict warning.
+- Done when: a transaction added via web UI appears in the bot's /summary and in Excel.
+
+### Cycle W4 — SQLite as primary, Excel as export
+- [ ] Flip reads: bot reads from SQLite instead of Excel for all queries (`/summary`, `/report`, `/top`, etc.).
+- [ ] Excel becomes an export target: "Export to Excel" button in the web UI generates a fresh workbook from SQLite on demand.
+- [ ] Remove dual-write: bot writes to SQLite only; Excel is regenerated on export, not kept in sync.
+- [ ] Migration: run a final reconciliation to ensure SQLite and Excel match before flipping.
+- [ ] Retire `file_storage.py` Excel read paths (keep write path for export only).
+- Done when: the bot runs for two weeks reading from SQLite with no regressions; Excel export produces a correct workbook.
+
+### Decisions (resolved 2026-07-26)
+- [x] **UI framework**: HTMX + Jinja2 templates served by FastAPI. Server-side rendering, no JS framework — closest Python equivalent to Blazor/Razor Pages.
+- [x] **Hosting**: systemd service + Nginx reverse proxy on the same Oracle Cloud VM. No Docker — same pattern as the existing bot service.
+- [x] **Access**: WireGuard VPN. No public web surface. Phone and laptop connect via WireGuard app (QR code setup). Web UI only reachable inside the VPN tunnel.
+- [ ] **SQLite concurrency**: enable WAL mode on the SQLite DB; verify bot + web server don't deadlock under concurrent writes. Resolve at W1.
+
+---
+
 ## Idea: SQLite as a parallel datastore, ahead of a future web UI (2026-07-24)
 
-Not scheduled — captured for when the user starts building a web UI to
-replace/supplement Excel as the primary interface.
+Superseded by the roadmap above. Keeping for context — the step-by-step
+approach described here is exactly Cycles W1–W4.
 
 - **Trigger for this idea**: discussed switching the datastore from Excel to
   SQLite as part of the PLN/base-currency rename work. Conclusion: Excel stays
@@ -405,7 +501,7 @@ replace/supplement Excel as the primary interface.
 
 ## In scope for PR #3 (bulk-import bug fixes)
 
-- [ ] **[PR #3] Draft-limit path discards just-parsed input** — `handlers/bulk_conv.py` `bulk_receive`:
+- [x] **[PR #3] Draft-limit path discards just-parsed input** *(fixed in PR #43 — overflow holding buffer)* — `handlers/bulk_conv.py` `bulk_receive`:
       when `_draft_limit_reached` fires, the freshly parsed rows (already paid for with an AI call)
       are dropped without warning. Keep them in a holding buffer or warn explicitly.
 - [ ] **[PR #3] Preview edits not persisted to draft file** — `bulk_confirm` `reason == "edited"`
@@ -640,8 +736,9 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: UX
 
-- [x] **Person attribution per import** — *(superseded 2026-07-25 by "Retire Person,
-      stage 1": the household budgets as one unit, the Person field is retired)*
+- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once
+      "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays.
+      /add: move person out of the mandatory flow (default household, edit from confirm card).
 - [ ] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.
@@ -789,7 +886,7 @@ Unique findings (single reviewer, verified plausible):
 - [ ] **Date edit leaves Year/Month stale** — /edit writes only the edited column; reports filter on
       Year/Month so a re-dated row counts in the wrong month forever (edit_conv.py:163-168).
       Fix: when field == date, recompute and write Year + Month in the same save.
-- [ ] **Formula injection via descriptions** — formatters.sanitize_description (leading '=' guard)
+- [x] **Formula injection via descriptions** *(fixed in PR #43 — bulk/quick/edit paths covered)* — formatters.sanitize_description (leading '=' guard)
       is called only in add_conv.py:199; bulk (bulk_conv.py:436), quick-add (quick_conv.py:203) and
       /edit write raw untrusted text into cells. Fix: sanitize in write_transaction_row so every
       path is covered once.
@@ -1024,12 +1121,6 @@ Help text examples updated to EUR in PR #32 (groceries example, setbudget limit 
 rates help). Remaining PLN references in business logic strings and any timezone-specific
 wording need a second pass — deferred to avoid scope creep in PR #32.
 
-- [ ] **AI quick-parse prompt says "a Polish household finance bot"** —
-      `ai_parser.py` `_build_quick_prompt` hardcodes the locale in a public-repo
-      prompt (found during PR #41 review). Replace with a neutral phrase
-      ("a household finance bot"); check `_build_parse_prompt` and the other
-      prompts for similar locale wording while there — same family as the
-      "zł/zl = PLN" alias item below.
 - [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
       note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
       setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm
@@ -1116,10 +1207,10 @@ a full command from Telegram update → Excel write → reply. Confirmed gap 202
 
 ## Follow-up PR: /summary picker UX — agreed design (brainstorm 2026-07-22)
 
-- [ ] **Free-form argument parsing, order-independent** — `/summary aug 2025`,
+- [x] **Free-form argument parsing, order-independent** *(done PR #45)* — `/summary aug 2025`,
       `2025 aug`, `08.2025`, bare `aug` (= most recent occurrence of that month) all
       resolve without a fixed year-then-month order.
-- [ ] **Bare `/summary` → one message, three zones** — buttons appear ONLY on bare
+- [x] **Bare `/summary` → one message, three zones** *(done PR #45)* — buttons appear ONLY on bare
       /summary (no arguments); any typed argument renders the report directly.
       Zone 1 (quick row, top): flag off → This month · Last month;
       flag on → This cycle · Last cycle · This month · Last month.
@@ -1133,13 +1224,13 @@ a full command from Telegram update → Excel write → reply. Confirmed gap 202
       with ranges: "Aug (23 Jul – today)", "Jul (25 Jun – 22 Jul)", "Earlier…" paging;
       a hole in the ledger triggers the lazy backfill prompt.
       Calendar/Cycle is never a gate — the quick row sits above it on the same screen.
-- [ ] **`/summary jul` with cycles enabled** — a bare month name resolves against the
+- [x] **`/summary jul` with cycles enabled** *(done PR #45)* — a bare month name resolves against the
       ledger label first (cycle "Jul"), calendar month only when no such label exists.
-- [ ] **Range support, both forms** — free-form `/summary aug 2025 - jan 2026`
+- [x] **Range support, both forms** *(done PR #45)* — free-form `/summary aug 2025 - jan 2026`
       (reuse the existing /range parsing pattern) and a `Range…` button that walks the
       same year→month picker twice ("From:" then "To:", prompt text shows progress).
       No new UI concepts — the same pickers, used twice.
-- [ ] **Year overflow paging** — years beyond ~2 rows of 4 buttons collapse into an
+- [x] **Year overflow paging** *(done PR #45)* — years beyond ~2 rows of 4 buttons collapse into an
       "Earlier…" page (Telegram inline-keyboard height limits).
 
 ## Follow-up PR: bank-statement profiles — agreed design (brainstorm 2026-07-22)
@@ -1259,6 +1350,191 @@ Non-blocking findings from the PR #27 review (debit/credit split columns + profi
       `tests/test_cycles.py::TestAppendCycleBoundary::test_creates_sheet_and_appends`
       failed once in a full-suite run but passes in isolation and on rerun;
       investigate test ordering / shared state.
+
+## Follow-up: PR #43 review notes (2026-07-25)
+
+Non-blocking findings from the PR #43 fan-out review (Architect, EM, Tester, TW):
+
+### Architect
+
+- [ ] **Bulk formula-injection guard duplicates `sanitize_description`** —
+      `_revalidate_bulk_row` (`handlers/bulk_conv.py` ~1158) re-implements
+      `formatters.sanitize_description` inline instead of calling it. Call
+      `sanitize_description` or extract the guard into a shared helper; as-is,
+      bulk skips the merchant-junk cleanup and truncation every other path gets.
+- [ ] **Salary detection rule lives in two places** — `cycles.py::salary_mask`
+      (pandas) and `handlers/cycle.py::maybe_prompt_cycle_start`
+      (per-transaction) both encode the rule. Extract a shared
+      `is_salary_row(category, description)` predicate in `cycles.py` so the
+      handler stays thin.
+- [ ] **Overflow buffer `_pending_overflow` is in-memory only** — a restart
+      between the overflow warning and save/cancel silently loses it. Persist
+      alongside the draft or as a second draft slot. (`handlers/bulk_conv.py`)
+- [ ] **"Fallback to Other" policy embedded twice** —
+      `validators.validate_parsed_row` and `_revalidate_bulk_row` both embed
+      the policy; consolidate. (`validators.py`, `handlers/bulk_conv.py`)
+
+### EM
+
+- [ ] **Category matching silently broadened in `cycles.py`** — exact `isin`
+      became word-boundary `contains` (e.g. "Salary Bonus" now matches). The
+      behaviour is intentional but undisclosed; the PR description should note
+      it explicitly.
+- [ ] **Overflow `cancel` returns `BULK_CONFIRM` instead of `END`** — when
+      overflow exists; verify this doesn't leave the user stuck in
+      conversation state after cancelling. (`handlers/bulk_conv.py`)
+
+### Tester
+
+- [ ] **`maybe_prompt_cycle_start` description-match path has zero test
+      coverage** — the test factory `make_transaction` has no `description`
+      param. (`handlers/cycle.py`, tests)
+- [ ] **Overflow buffer transitions untested** — `bulk_receive` populating
+      `_pending_overflow`, release on save success, and NOT releasing on
+      save-with-failed-items are all untested. (`handlers/bulk_conv.py`, tests)
+- [ ] **Error handler send-failure path untested.**
+- [ ] **Formula guard tests only cover `=`** — the `-` prefix mutating
+      legitimate descriptions (e.g. "-5% discount") is worth pinning with a
+      test.
+- [ ] **`/edit` sanitization side effects unasserted** — merchant cleaner +
+      truncation on edited descriptions have no assertions.
+- [ ] **Validator promotion untested without an "Other" category entry** —
+      behaviour when Lists lacks "Other" is unpinned. (`validators.py`, tests)
+
+### TW
+
+- [ ] **DOCUMENTATION.md "How a salary is detected" (~line 422) is stale** —
+      needs the new blank-Category gate and word-boundary Category matching.
+- [ ] **Bulk draft-limit doc (~line 376) describes old behaviour** — still
+      says "save or cancel"; the overflow-holding behaviour is undocumented.
+- [ ] **Savings-category promotion undocumented** — category "Savings" →
+      type Savings + category Other is not covered in the quick-add/bulk docs.
+- [ ] **Formula-injection apostrophe prefix worth a doc note** — `=+-@`
+      descriptions get a leading apostrophe, which affects "-5% discount"
+      style entries.
+
+## Follow-up: PR #44 review notes (2026-07-26)
+
+Non-blocking findings from the PR #44 review (/keywords feature):
+
+- [ ] **`load_salary_keywords` duplicates strip/lowercase/dedup loop** —
+      `cycles.py::load_salary_keywords` re-implements the same strip/lowercase/dedup
+      loop that `_keyword_column_words` already provides. `load_salary_keywords` should
+      call `_keyword_column_words` instead of duplicating the logic. (`cycles.py`)
+- [ ] **`save_salary_keyword` re-seeds from `.env` on empty list** —
+      `save_salary_keyword` re-seeds from `.env` whenever the stored keyword list is
+      empty, not just on first use. If the user removes all keywords, the next `/keywords
+      add` silently re-seeds from the env defaults before appending. Either guard by
+      checking whether the header row already exists (meaning the sheet was intentionally
+      emptied), or update the docstring to document the actual behaviour explicitly.
+      (`cycles.py`)
+- [ ] **`keywords_add_word` handler path for empty/whitespace input untested** —
+      the storage-layer rejection of empty/whitespace input is tested, but the handler's
+      re-prompt path (the Telegram reply asking the user to try again) is not covered.
+      (`handlers/keywords_conv.py`, tests)
+- [ ] **`save_salary_keyword("payroll")` when env already contains "payroll"** —
+      returns `False` but the Excel write still happened; the False-return contract is
+      surprising for callers who expect "False means nothing was written". Add a test
+      that asserts the exact return value and Excel state for this case. (`cycles.py`,
+      tests)
+- [ ] **`test_detect_keywords_prefer_excel_over_env` tests seeded content, not pure
+      Excel content** — the test exercises env-seeded-then-persisted keywords rather
+      than keywords written directly to Excel bypassing `save_salary_keyword`. The test
+      name and intent are misleading. Add a companion test that writes keywords directly
+      to the Excel sheet to verify the Excel-over-env preference on genuinely
+      non-seeded data. (`tests/test_cycles.py`)
+- [ ] **`delete_salary_keyword("")` untested** — deleting an empty string is a benign
+      named path (returns False, no-op) but has no test. Add a minimal test.
+      (`tests/test_cycles.py`)
+- [ ] **`_keywords_view()` source label misleading when both env and Excel are empty**
+      — currently shows ".env fallback" even when both env and Excel are empty. Consider
+      changing the label to "Not configured — use ➕ to add the first keyword" for this
+      state. (`handlers/keywords_conv.py`)
+- [ ] **Pre-existing flaky test `test_seed_from_master`** — `tests/test_merchant_map.py`
+      has a Windows file-lock race on `os.replace` during atomic save; fails
+      intermittently under parallel test runs. Unrelated to /keywords — needs its own
+      investigation and fix. (`tests/test_merchant_map.py`)
+
+## Follow-up: PR #45 review notes (2026-07-26)
+
+Non-blocking findings from the PR #45 fan-out review (/summary picker UX). Safe to merge as-is.
+
+**Correctness / robustness:**
+
+- [ ] **`sum_range` user_data state never cleared when the range walk is abandoned** —
+      a user who starts the `sum:rng` From/To walk and then taps a month button later
+      silently re-enters the From/To flow instead of getting a month report. Clear the
+      state in the `cmd_summary` bare path and on quick-button actions
+      (`tm`/`lm`/`tc`/`lc`/`cs`). (`handlers/reports.py:260`, also flagged at :186)
+- [ ] **`handle_summary_callback` has no `@auth` guard** — mirrors the pre-existing
+      `handle_range_callback` pattern; queue an auth-for-callback-handlers pass across
+      all read callbacks. (`handlers/reports.py:189`)
+- [ ] **Forged/stale callback data can raise unhandled exceptions** — `parts[1]`
+      IndexError on bare `sum:`; `date.fromisoformat(parts[2])` ValueError in the `cs`
+      branch on malformed dates. Add a defensive length check or try/except.
+      (`handlers/reports.py:222`)
+- [ ] **`/summary 2027` (future year) returns a full-year range over empty data**
+      instead of a "no data" message — the `min(..., today)` capping only applies when
+      `year == today.year`. (`handlers/summary_picker.py:172`)
+- [ ] **Dead import: `most_recent_year_for_month`** — imported inside
+      `handle_summary_callback` but never used there. (`handlers/reports.py:193`)
+
+**Architecture:**
+
+- [ ] **Cycle-boundary derivation exists in three places** —
+      `cycles.current_cycle_start`, `reports._current_cycle_bounds`, and
+      `summary_picker.cycle_bounds`; consolidate into `cycles.py` as the single owner.
+      (`handlers/summary_picker.py:57`)
+- [ ] **Two parallel range-report UIs** — `range:` presets + free-text vs `sum:rng`
+      two-step walk + free-form args, with disjoint callback namespaces and separate
+      user_data keys (`awaiting_range`, `sum_range`). Consider retiring `/range` or
+      re-routing it through the picker. (`handlers/reports.py:582-768`)
+
+**Test gaps (`tests/test_summary_picker.py`):**
+
+- [ ] **Empty-state handler branches untested** — `sum:cyc` with empty ledger,
+      `sum:tc`/`sum:lc` with too few cycles, `sum:cal`/`sum:rng` with empty DataFrame,
+      `sum:y` for a year with no months, `sum:cs` for a stale cycle start.
+- [ ] **Inverted range via button walk untested** — the handler auto-swaps From/To
+      while free-form inverted input returns None; the behavioral divergence has
+      coverage only on the free-form side.
+- [ ] **`sum:tm`/`sum:lm` handler branches untested** — especially Last month across
+      the year boundary (January → December of the prior year).
+- [ ] **Unknown-callback-action fallback and the FileNotFoundError branch of
+      `handle_summary_callback` untested.**
+- [ ] **Parser duplicate-slot inputs untested** — e.g. `aug 2025 2026`,
+      `08.2025 sep`; both should return None per the put() guard.
+- [ ] **Stray `excel_path=None` parameter in `test_cycle_button_lists_ledger`
+      signature** — cosmetic dead artifact. (~line 330)
+
+**Docs / wording:**
+
+- [ ] **`BotCommand("summary", …)` description stale** — still "This month at a
+      glance"; update after the docs PR lands. (`bot.py:96`)
+- [ ] **/start text "Try /summary to start" is now a stronger onboarding hook** —
+      optional wording refresh. (`handlers/misc.py:30`)
+- [ ] **/cycle help card says "with cycles enabled, /summary covers the current
+      cycle"** — still true via the "This cycle" button, but worth clarifying when
+      touching docs. (`handlers/cycle.py:42`)
+
+## Follow-up: Cycle Dashboard review notes (PR #46, 2026-07-26)
+
+Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
+
+### Architect
+
+- [ ] **Deferred imports masking a structural cycle** — `cycles.py` still uses deferred inline imports (`from cycle_dashboard import ensure_cycle_dashboard` inside function bodies) as a workaround for the previous circular dependency. Now that `_to_date` is in `excel_schema`, investigate whether the top-level import can be promoted; deferred imports make the dependency graph harder to read. (`cycles.py` `record_cycle_start`, `record_cycle_starts_batch`)
+- [ ] **Local copy of Dashboard sheet name constant** — `cycle_dashboard.py` defines its own `DASHBOARD_SHEET_NAME = "Dashboard"` instead of importing a shared constant from `excel_schema.py`. If the sheet is ever renamed this copy silently diverges. Move to `excel_schema.py`. (`cycle_dashboard.py`)
+
+### Reviewer
+
+- [ ] **Escape or validate `salary_category` before embedding in Excel formula string** — `_sumifs_salary` interpolates `salary_category` directly into the formula string; a value containing a double-quote would emit a syntactically broken formula. Escape or validate the value before interpolation. (`cycle_dashboard.py` `_sumifs_salary`)
+- [ ] **`sync_cycle_dashboard_categories` over-clearing risk when `current_cats is None`** — when the Cycle Dashboard exists but has no TOTAL row, `old_total_row` falls back to 11 and the clear loop upper bound is `max(11, ws.max_row) + 1`, which could wipe legitimate content in columns H–L below the category block. Tighten the bound or document the assumption. (`cycle_dashboard.py` `sync_cycle_dashboard_categories`)
+- [ ] **Missing comment on intentional Var % omission in `_write_total_row`** — the TOTAL row skips the Var % (column L) because summing percentages is meaningless, but this is not documented; a reader may mistake it for a bug. Add a one-line comment. (`cycle_dashboard.py` `_write_total_row`)
+
+### TW
+
+- [ ] **Scripts inventory missing from DOCUMENTATION.md** — `sync_cycle_dashboard.py` (and the pre-existing scripts `fix_formula_bounds.py`, `fix_import_errors.py`, etc.) are undocumented at the doc level. Create a "Maintenance Scripts" table in DOCUMENTATION.md covering all scripts in `scripts/` (purpose, when to run, flags). (`DOCUMENTATION.md`)
 
 ## Notes
 
