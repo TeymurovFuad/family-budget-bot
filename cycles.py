@@ -217,7 +217,7 @@ def _rewrite_keyword_column(ws, kw_col, words: list[str]) -> None:
         ws.cell(row, kw_col).value = None
 
 
-MAX_SALARY_KEYWORD_LENGTH = 50  # Telegram callback_data limit is 64 bytes; "kw:del:" takes 7
+MAX_SALARY_KEYWORD_BYTES = 57  # Telegram callback_data limit is 64 bytes; "kw:del:" takes 7
 
 
 def save_salary_keyword(keyword: str) -> bool:
@@ -231,7 +231,7 @@ def save_salary_keyword(keyword: str) -> bool:
     from openpyxl import load_workbook
 
     keyword = str(keyword or "").strip().lower()
-    if not keyword or len(keyword) > MAX_SALARY_KEYWORD_LENGTH:
+    if not keyword or len(keyword.encode("utf-8")) > MAX_SALARY_KEYWORD_BYTES:
         return False
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)

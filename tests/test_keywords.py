@@ -115,7 +115,8 @@ def test_save_blank_is_rejected(excel_path):
 
 
 def test_save_overlong_keyword_is_rejected(excel_path):
-    assert save_salary_keyword("x" * (cycles.MAX_SALARY_KEYWORD_LENGTH + 1)) is False
+    assert save_salary_keyword("x" * (cycles.MAX_SALARY_KEYWORD_BYTES + 1)) is False
+    assert save_salary_keyword("ż" * 30) is False  # 60 UTF-8 bytes — byte limit, not chars
     assert load_salary_keywords(excel_path) == []
 
 
@@ -222,7 +223,7 @@ async def test_keywords_add_flow(excel_path, monkeypatch):
 
 
 async def test_keywords_add_overlong_word_reprompts(excel_path):
-    msg = make_update("x" * (cycles.MAX_SALARY_KEYWORD_LENGTH + 1))
+    msg = make_update("x" * (cycles.MAX_SALARY_KEYWORD_BYTES + 1))
     state = await keywords_add_word(msg, make_ctx())
     assert state == KW_ADD
     assert "too long" in msg.message.reply_text.call_args[0][0]
