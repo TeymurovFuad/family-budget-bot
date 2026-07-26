@@ -190,7 +190,7 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     """Handle inline button taps from the /summary picker (callback data 'sum:…')."""
     from handlers.summary_picker import (
         build_cycle_keyboard, build_month_keyboard, build_year_keyboard,
-        cycle_bounds, most_recent_year_for_month,
+        cycle_bounds,
     )
 
     query = update.callback_query

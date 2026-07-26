@@ -97,7 +97,7 @@ QUICK_CONFIRM_TIMEOUT_SECONDS = 60      # quick-add — single yes/no confirmati
 # via set_my_commands — no manual BotFather step needed. Conversation-internal
 # commands (/cancel, /skip, /save) are deliberately excluded.
 BOT_COMMANDS = [
-    BotCommand("summary",     "This month at a glance: income, expenses, savings"),
+    BotCommand("summary",     "Pick a period, or type one like 'aug 2025'"),
     BotCommand("add",         "Log one transaction step by step"),
     BotCommand("bulk",        "Import many transactions from photo, file or text"),
     BotCommand("week",        "Last 7 days of spending by category"),

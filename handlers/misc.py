@@ -48,7 +48,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/bulk — import many transactions from photo, file or text; review the parsed rows, reply with edits like `2 category=Transport`, then `save` or `cancel`; unfinished drafts resume with /bulk\n"
         "Or just type naturally: \"groceries 89 EUR\" to quick\\-add\\.\n\n"
         "*Reports*\n"
-        "/summary — this month at a glance: income, expenses, savings\n"
+        "/summary — period picker; or type a period like `aug 2025` or a range like `aug 2025 - jan 2026`\n"
         "/week — last 7 days of spending by category\n"
         "/budget — budget vs actual for every category\n"
         "/top — top 5 biggest expenses this month\n"
