@@ -770,7 +770,7 @@ class TestCycleFlow:
 
     async def test_cycle_status_current(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        local_today = datetime.now(cycle_mod.TIMEZONE).date()
+        local_today = cycle_mod.now_utc().date()
         start = local_today - timedelta(days=9)
         with patch("handlers.cycle.current_cycle_start",
                    return_value=(start, "Jul 2026")):
@@ -783,17 +783,17 @@ class TestCycleFlow:
 
     async def test_cycle_started_today(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        record = AsyncMock(return_value=True)
+        record = AsyncMock(return_value="Jul 2026")
         with patch("handlers.cycle.async_record_cycle_start", record):
             upd = make_update("/cycle started")
             await cycle_mod.cmd_cycle(upd, make_ctx(args=["started"]))
         record.assert_awaited_once()
-        assert record.call_args.args[0] == datetime.now(cycle_mod.TIMEZONE).date()
+        assert record.call_args.args[0] == cycle_mod.now_utc().date()
         assert "New budget cycle" in all_replies(upd)
 
     async def test_cycle_started_with_date(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        record = AsyncMock(return_value=True)
+        record = AsyncMock(return_value="Jul 2026")
         with patch("handlers.cycle.async_record_cycle_start", record):
             upd = make_update("/cycle started 2026-07-01")
             await cycle_mod.cmd_cycle(upd, make_ctx(args=["started", "2026-07-01"]))
@@ -810,7 +810,7 @@ class TestCycleFlow:
     async def test_cycle_started_future_rejected(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
         record = AsyncMock(return_value=True)
-        future = (datetime.now(cycle_mod.TIMEZONE).date() + timedelta(days=5)).isoformat()
+        future = (cycle_mod.now_utc().date() + timedelta(days=5)).isoformat()
         with patch("handlers.cycle.async_record_cycle_start", record):
             upd = make_update(f"/cycle started {future}")
             await cycle_mod.cmd_cycle(upd, make_ctx(args=["started", future]))
@@ -851,10 +851,12 @@ class TestCycleFlow:
         with patch("handlers.cycle.load_data", return_value=MagicMock()), \
              patch("handlers.cycle.load_cycles", return_value=[]), \
              patch("handlers.cycle.cycle_detect_keywords", return_value=["salary"]), \
-             patch("handlers.cycle.detect_cycle_candidates", return_value=candidates):
+             patch("handlers.cycle.detect_cycle_candidates", return_value=candidates), \
+             patch("handlers.cycle.format_base_as_currency", return_value="5000.00 EUR"):
             await cycle_mod.cmd_cycle(make_update("/cycle detect"), ctx)
         assert ctx.user_data["detect_candidates"] == [
-            {"date_str": "2026-06-01", "amounts": [5000.0], "unambiguous": True}]
+            {"date_str": "2026-06-01", "amounts": [5000.0],
+             "amounts_fmt": ["5000.00 EUR"], "unambiguous": True}]
 
     async def test_cycle_detect_nothing_found(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
