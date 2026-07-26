@@ -1,9 +1,12 @@
 """
 rename_category.py — atomically rename a category everywhere in a workbook:
-Lists Categories column, all MasterData rows, and the Dashboard budget table.
+Lists Categories column, all MasterData rows, the Dashboard budget table,
+category names quoted inside formulas (SUMIFS criteria etc.) on Dashboard and
+Monthly Summary, and any pending bulk drafts in data/bulk_drafts/*.json.
 
 Usage:  python scripts/rename_category.py "Old Name" "New Name" [path-to-xlsx]
 """
+import json
 import os
 import shutil
 import sys
@@ -32,7 +35,8 @@ def main():
         print(f"Backup: {path}.bak")
 
         wb = openpyxl.load_workbook(path, data_only=False)
-        counts = {"Lists": 0, "MasterData": 0, "Dashboard": 0}
+        counts = {"Lists": 0, "MasterData": 0, "Dashboard": 0,
+                  "Formulas": 0, "Bulk drafts": 0}
 
         # Lists: Categories column
         ws = wb["Lists"]
@@ -61,6 +65,43 @@ def main():
                 if str(ws.cell(r, c).value or "").strip() == old_name:
                     ws.cell(r, c, new_name)
                     counts["Dashboard"] += 1
+
+        # Formulas: the old name may appear as a quoted string literal inside
+        # SUMIFS/COUNTIFS criteria on Dashboard and Monthly Summary.
+        old_lit, new_lit = f'"{old_name}"', f'"{new_name}"'
+        for sheet_name in ("Dashboard", "Monthly Summary"):
+            if sheet_name not in wb.sheetnames:
+                continue
+            ws = wb[sheet_name]
+            for row in ws.iter_rows():
+                for cell in row:
+                    v = cell.value
+                    if isinstance(v, str) and v.startswith("=") and old_lit in v:
+                        cell.value = v.replace(old_lit, new_lit)
+                        counts["Formulas"] += 1
+
+        # Pending bulk drafts: parsed-but-unsaved rows keep category by name.
+        drafts_dir = settings.BULK_DRAFTS_DIR
+        if drafts_dir.is_dir():
+            for draft_path in sorted(drafts_dir.glob("*.json")):
+                try:
+                    rows = json.loads(draft_path.read_text(encoding="utf-8"))
+                except Exception as e:
+                    print(f"Skipping unreadable draft {draft_path.name}: {e}")
+                    continue
+                if not isinstance(rows, list):
+                    continue
+                changed = 0
+                for row in rows:
+                    if isinstance(row, dict) and str(row.get("category", "")).strip() == old_name:
+                        row["category"] = new_name
+                        changed += 1
+                if changed:
+                    draft_path.write_text(
+                        json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
+                    counts["Bulk drafts"] += changed
+                    print(f"Draft {draft_path.name}: {changed} row(s) renamed")
 
         atomic_save(wb, path)
         for sheet, n in counts.items():

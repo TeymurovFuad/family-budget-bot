@@ -254,6 +254,11 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         f"🔍 Found *{_esc(str(n))}* unrecorded {'salary' if n == 1 else 'salaries'}\\.\n\n"
         + "\n".join(lines)
     )
+    if extra_keywords:
+        text += (
+            "\n\n⚠️ Keywords used in this scan are not saved\\. "
+            "Add them via /keywords to make them permanent\\."
+        )
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Confirm all", callback_data="detect:confirm_all")],
         [InlineKeyboardButton("🔍 Review one by one", callback_data="detect:review")],

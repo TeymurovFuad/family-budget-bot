@@ -1207,7 +1207,7 @@ def _draft_limit_reached(user_id: int) -> bool:
 
 
 # Telegram hard limit is 4096 chars; leave headroom for the header/footer.
-_PREVIEW_MSG_LIMIT = 3500
+_PREVIEW_MSG_LIMIT_CHARS = 3500
 
 
 def _md_escape(text: str) -> str:
@@ -1291,7 +1291,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
     current = [f"Found *{len(parsed)}* transaction(s):\n"]
     current_len = len(current[0])
     for line in row_lines:
-        if current_len + len(line) + 1 > _PREVIEW_MSG_LIMIT:
+        if current_len + len(line) + 1 > _PREVIEW_MSG_LIMIT_CHARS:
             messages.append("\n".join(current))
             current = []
             current_len = 0

@@ -1,14 +1,15 @@
 """
-tests/test_help_markdown.py — /help must always produce valid MarkdownV2.
+tests/test_help_markdown.py — every static MarkdownV2 reply must be valid.
 
 This exact bug class shipped twice (unescaped chars silently killing /help
 with a Telegram BadRequest the user never sees): PR #32 fixed one instance,
-another shipped in the same PR. This validator catches any reserved character
-left unescaped outside code spans before it reaches Telegram.
+another shipped in the same PR. The shared validator in tests/mdv2_helpers.py
+catches any reserved character left unescaped outside code spans before it
+reaches Telegram. Covered here: /help, /start, /setcurrency's unknown-currency
+reply, and every `<cmd> help` subcommand text.
 """
 
 import os
-import re
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -27,23 +28,10 @@ import config
 import handlers.misc
 from handlers.misc import cmd_help, cmd_start
 
-# Telegram MarkdownV2 reserved characters that must be escaped in plain text.
-# '*' and '_' are excluded here because the help text legitimately uses them
-# as bold/italic markup — balance is asserted separately.
-_RESERVED = set("[]()~>#+-=|{}.!")
-
-
-def _find_unescaped_reserved(text: str) -> list[str]:
-    problems = []
-    # Remove escaped characters first, then code spans — what remains must
-    # contain no reserved characters at all.
-    without_escapes = re.sub(r"\\.", "", text)
-    without_code = re.sub(r"`[^`]*`", "", without_escapes)
-    for i, ch in enumerate(without_code):
-        if ch in _RESERVED:
-            context = without_code[max(0, i - 25):i + 25].replace("\n", "⏎")
-            problems.append(f"unescaped {ch!r} near: …{context}…")
-    return problems
+from tests.mdv2_helpers import (
+    assert_valid_markdown_v2,
+    find_unescaped_reserved,
+)
 
 
 def make_update(user_id=111):
@@ -56,12 +44,21 @@ def make_update(user_id=111):
     return upd
 
 
-def make_ctx():
+def make_ctx(args=None):
     ctx = MagicMock()
-    ctx.args = []
+    ctx.args = args or []
     ctx.user_data = {}
     return ctx
 
+
+def _get_reply(update) -> str:
+    """Assert exactly one MarkdownV2 reply was sent and return its text."""
+    update.message.reply_text.assert_awaited_once()
+    assert update.message.reply_text.call_args[1].get("parse_mode") == "MarkdownV2"
+    return update.message.reply_text.call_args[0][0]
+
+
+# ── /help and /start ──────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_help_text_is_valid_markdown_v2(monkeypatch):
@@ -70,22 +67,7 @@ async def test_help_text_is_valid_markdown_v2(monkeypatch):
 
     await cmd_help(update, make_ctx())
 
-    update.message.reply_text.assert_awaited_once()
-    text = update.message.reply_text.call_args[0][0]
-    assert update.message.reply_text.call_args[1].get("parse_mode") == "MarkdownV2"
-
-    problems = _find_unescaped_reserved(text)
-    assert not problems, "MarkdownV2 violations in /help:\n" + "\n".join(problems)
-
-    # Bold/italic markers and code fences must be balanced. Backticks are
-    # counted on the raw (escape-stripped) text; * and _ only outside code
-    # spans, where they are literal characters.
-    without_escapes = re.sub(r"\\.", "", text, flags=re.S)
-    assert "\\" not in without_escapes, "stray lone backslash"
-    assert without_escapes.count("`") % 2 == 0, "unbalanced backticks"
-    outside_code = re.sub(r"`[^`]*`", "", without_escapes)
-    assert outside_code.count("*") % 2 == 0, "unbalanced asterisks"
-    assert outside_code.count("_") % 2 == 0, "unbalanced underscores"
+    assert_valid_markdown_v2(_get_reply(update), "/help")
 
 
 @pytest.mark.asyncio
@@ -97,8 +79,109 @@ async def test_start_escapes_hostile_first_name(monkeypatch):
 
     await cmd_start(update, make_ctx())
 
-    update.message.reply_text.assert_awaited_once()
-    text = update.message.reply_text.call_args[0][0]
-    assert update.message.reply_text.call_args[1].get("parse_mode") == "MarkdownV2"
-    problems = _find_unescaped_reserved(text)
-    assert not problems, "MarkdownV2 violations in /start:\n" + "\n".join(problems)
+    assert_valid_markdown_v2(_get_reply(update), "/start")
+
+
+@pytest.mark.asyncio
+async def test_start_empty_first_name_falls_back_to_there(monkeypatch):
+    monkeypatch.setattr(config, "ALLOWED_USERS", [111])
+    monkeypatch.setattr(handlers.misc, "get_display_currency", lambda uid: "EUR")
+    update = make_update()
+    update.effective_user.first_name = None
+
+    await cmd_start(update, make_ctx())
+
+    text = _get_reply(update)
+    assert "there" in text
+    assert_valid_markdown_v2(text, "/start (no first name)")
+
+
+# ── /setcurrency unknown-currency reply ───────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_setcurrency_unknown_currency_reply_is_valid_markdown_v2(monkeypatch):
+    monkeypatch.setattr(config, "ALLOWED_USERS", [111])
+    monkeypatch.setattr(
+        handlers.misc, "load_rates", lambda: {"PLN": 1.0, "EUR": 4.3, "USD": 3.9}
+    )
+    monkeypatch.setattr(handlers.misc, "get_display_currency", lambda uid: "PLN")
+    update = make_update()
+
+    await handlers.misc.cmd_setcurrency(update, make_ctx(args=["XYZ"]))
+
+    text = _get_reply(update)
+    assert "XYZ" in text
+    assert_valid_markdown_v2(text, "/setcurrency unknown currency")
+
+
+# ── every `<cmd> help` subcommand text ────────────────────────────────────────
+
+def _help_handlers():
+    """(id, module name, handler name) for every command with a help branch."""
+    return [
+        ("setcurrency", "handlers.misc", "cmd_setcurrency"),
+        ("export", "handlers.misc", "cmd_export"),
+        ("setbudget", "handlers.misc", "cmd_setbudget"),
+        ("keywords", "handlers.misc", "cmd_keywords"),
+        ("add", "handlers.add_conv", "cmd_add"),
+        ("delete", "handlers.delete_conv", "cmd_delete"),
+        ("edit", "handlers.edit_conv", "cmd_edit"),
+        ("bulk", "handlers.bulk_conv", "cmd_bulk"),
+        ("summary", "handlers.reports", "cmd_summary"),
+        ("week", "handlers.reports", "cmd_week"),
+        ("budget", "handlers.reports", "cmd_budget"),
+        ("top", "handlers.reports", "cmd_top"),
+        ("savings", "handlers.reports", "cmd_savings"),
+        ("report", "handlers.reports", "cmd_report"),
+        ("rates", "handlers.reports", "cmd_rates"),
+        ("chart", "handlers.reports", "cmd_chart"),
+        ("range", "handlers.reports", "cmd_range"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "module_name,handler_name",
+    [pytest.param(m, h, id=i) for i, m, h in _help_handlers()],
+)
+async def test_cmd_help_subcommand_is_valid_markdown_v2(
+    monkeypatch, module_name, handler_name
+):
+    import importlib
+
+    module = importlib.import_module(module_name)
+    handler = getattr(module, handler_name)
+    monkeypatch.setattr(config, "ALLOWED_USERS", [111])
+    update = make_update()
+
+    await handler(update, make_ctx(args=["help"]))
+
+    assert_valid_markdown_v2(_get_reply(update), f"/{handler_name} help")
+
+
+# ── validator self-tests ──────────────────────────────────────────────────────
+
+def test_validator_flags_unescaped_reserved_chars():
+    assert find_unescaped_reserved("bad dot.") != []
+    assert find_unescaped_reserved("ok dot\\.") == []
+    assert find_unescaped_reserved("`dot . in code` fine") == []
+
+
+def test_validator_escaped_backtick_inside_code_span():
+    """Regression: a legal '\\`' inside a code span must not toggle code-span
+    state — escape pairs are consumed in the same pass that locates spans, so
+    the remaining backticks stay correctly paired."""
+    text = "start `code \\` span (raw) chars.` end\\."
+    assert_valid_markdown_v2(text, "escaped backtick in code span")
+
+    # Reserved chars after such a span are still outside code and must flag.
+    bad = "`a \\` b` then (bad)"
+    problems = find_unescaped_reserved(bad)
+    assert any("'('" in p for p in problems), problems
+
+
+def test_validator_flags_unbalanced_markup():
+    with pytest.raises(AssertionError):
+        assert_valid_markdown_v2("*bold `code` unclosed")
+    with pytest.raises(AssertionError):
+        assert_valid_markdown_v2("odd `backtick")

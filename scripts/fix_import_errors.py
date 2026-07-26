@@ -44,8 +44,14 @@ def main():
     path = sys.argv[1] if len(sys.argv) > 1 else str(settings.XLSX_PATH)
 
     with repair_guard():
-        shutil.copy2(path, path + ".bak")
-        print(f"Backup written: {path}.bak")
+        # Never overwrite an existing backup: a rerun would replace the
+        # pristine pre-fix copy with already-fixed data.
+        bak = path + ".bak"
+        if os.path.exists(bak):
+            print(f"Backup already exists, keeping it: {bak}")
+        else:
+            shutil.copy2(path, bak)
+            print(f"Backup written: {bak}")
 
         wb = openpyxl.load_workbook(path, data_only=False)
         ws = wb["MasterData"]
@@ -68,14 +74,20 @@ def main():
                 "Gifts & Shopping": "Shopping",
                 "Home Improvement": "Housing",
             }
+            # Rules run sequentially on the same row state: each rule updates
+            # the local variables so later rules see earlier rewrites (a rule-3
+            # rewrite based on the pre-rule-2 description would silently undo
+            # rule 2 on the same row).
             if cat in category_remap:
-                ws.cell(r, hdr["Category"], category_remap[cat])
+                cat = category_remap[cat]
+                ws.cell(r, hdr["Category"], cat)
                 fixed_shopping += 1
 
             if cat == "Savings" and "self" in desc.lower():
-                ws.cell(r, hdr["Type"], "Expense")
-                ws.cell(r, hdr["Category"], "Groceries")
-                ws.cell(r, hdr["Description"], "Transfer to own card for groceries")
+                typ, cat, desc = "Expense", "Groceries", "Transfer to own card for groceries"
+                ws.cell(r, hdr["Type"], typ)
+                ws.cell(r, hdr["Category"], cat)
+                ws.cell(r, hdr["Description"], desc)
                 fixed_savings += 1
 
             if per and str(per).strip() and str(per).strip() not in persons:
