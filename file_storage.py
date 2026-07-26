@@ -62,6 +62,9 @@ from excel_schema import CyclesSchema, ListsSchema, MasterDataSchema, find_col, 
 
 _excel_write_lock = asyncio.Lock()
 
+# Last MasterData row covered by the category dropdown validation (row count).
+_VALIDATION_LAST_ROW = 10000
+
 
 class RowMovedError(Exception):
     """
@@ -446,7 +449,7 @@ def create_blank_excel(path: Path) -> None:
     try:
         from openpyxl.worksheet.datavalidation import DataValidation as _DV
         dv = _DV(type="list", formula1=f"Lists!$C$2:$C${1+len(categories)}", allow_blank=True)
-        dv.sqref = "F2:F10000"
+        dv.sqref = f"F2:F{_VALIDATION_LAST_ROW}"
         ws_md.add_data_validation(dv)
     except Exception as _e:
         log.warning("Could not add category dropdown: %s", _e)

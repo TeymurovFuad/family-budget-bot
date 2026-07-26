@@ -329,6 +329,38 @@ async def test_cmd_cycle_started_defaults_to_today(excel_path, monkeypatch):
     assert len(ledger) == 1
 
 
+async def test_cmd_cycle_detect_warns_extra_keywords_not_saved(excel_path, monkeypatch):
+    """Per-scan `/cycle detect <word>` keywords are not persisted — the user
+    must be told to add them via /keywords."""
+    import handlers.cycle as hc
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_cycles", lambda: [])
+    candidates = [{"date": date(2026, 6, 25), "amounts": [5000.0], "unambiguous": True}]
+    monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: candidates)
+
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["detect", "bonuspay"]))
+
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    assert any("this scan only" in t and "/keywords" in t for t in texts), texts
+
+
+async def test_cmd_cycle_detect_no_warning_without_extra_keywords(excel_path, monkeypatch):
+    import handlers.cycle as hc
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_cycles", lambda: [])
+    candidates = [{"date": date(2026, 6, 25), "amounts": [5000.0], "unambiguous": True}]
+    monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: candidates)
+
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["detect"]))
+
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    assert not any("not saved" in t for t in texts), texts
+
+
 async def test_cmd_cycle_rejects_bad_and_future_dates(excel_path, monkeypatch):
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
     upd = make_update()

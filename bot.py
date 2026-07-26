@@ -91,6 +91,15 @@ EDIT_TIMEOUT_SECONDS        = 5 * 60    # /edit — short guided flow
 BULK_REVIEW_TIMEOUT_SECONDS = 30 * 60   # /bulk — reviewing 100+ parsed rows takes time
 QUICK_CONFIRM_TIMEOUT_SECONDS = 60      # quick-add — single yes/no confirmation
 
+# ── Scheduled job times (local TIMEZONE unless noted) ────────────────────────
+WEEKLY_REPORT_DAY_OF_WEEK   = "sun"
+WEEKLY_REPORT_HOUR          = 18   # Sunday 18:00 — weekly report
+MONTHLY_SUMMARY_DAY_OF_MONTH = 1
+MONTHLY_SUMMARY_HOUR        = 8    # 1st of month 08:00 — monthly summary
+DAILY_REMINDER_HOUR         = 21   # every day 21:00 — log-your-expenses nudge
+WEEKLY_NUDGE_DAY_OF_WEEK    = "sun"
+WEEKLY_NUDGE_HOUR           = 9    # Sunday 09:00 — weekly nudge
+
 
 # ── Telegram command menu (the "/" button) ────────────────────────────────────
 # Every user-facing command, ordered by frequency of use. Registered at startup
@@ -315,10 +324,14 @@ def main():
 
     # ── scheduler ─────────────────────────────────────────────────────────────
     scheduler = AsyncIOScheduler(timezone=str(TIMEZONE))
-    scheduler.add_job(send_weekly_report,   "cron", day_of_week="sun", hour=18, minute=0, args=[app])
-    scheduler.add_job(send_monthly_summary, "cron", day=1,             hour=8,  minute=0, args=[app])
-    scheduler.add_job(send_daily_reminder,  "cron", hour=21, minute=0, timezone=TIMEZONE, args=[app])
-    scheduler.add_job(send_weekly_nudge,    "cron", day_of_week="sun", hour=9, minute=0, timezone=TIMEZONE, args=[app])
+    scheduler.add_job(send_weekly_report,   "cron", day_of_week=WEEKLY_REPORT_DAY_OF_WEEK,
+                      hour=WEEKLY_REPORT_HOUR, minute=0, args=[app])
+    scheduler.add_job(send_monthly_summary, "cron", day=MONTHLY_SUMMARY_DAY_OF_MONTH,
+                      hour=MONTHLY_SUMMARY_HOUR, minute=0, args=[app])
+    scheduler.add_job(send_daily_reminder,  "cron", hour=DAILY_REMINDER_HOUR, minute=0,
+                      timezone=TIMEZONE, args=[app])
+    scheduler.add_job(send_weekly_nudge,    "cron", day_of_week=WEEKLY_NUDGE_DAY_OF_WEEK,
+                      hour=WEEKLY_NUDGE_HOUR, minute=0, timezone=TIMEZONE, args=[app])
     scheduler.start()
 
     log.info("Bot starting — polling")

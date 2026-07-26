@@ -306,6 +306,9 @@ Remaining agreed cuts, in the order they pay off:
       `CYCLE_DETECT_KEYWORDS` produce cycles whose salary rows count as plain
       income in the unaccounted math. Docs advise the .env route; consider
       persisting per-scan words or warning when they find matches. (`cycles.py`)
+      *(partially done in PR #49: the detect reply now warns that per-scan
+      keywords apply to that scan only and points at /keywords; routing the
+      ad-hoc keywords into `cycle_totals` remains open.)*
 - [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!`
       can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed.
       (`cycles.py` `salary_mask`)
@@ -663,8 +666,9 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 - [ ] **Unit-less magic numbers sweep** — parameters like `conversation_timeout=1800` don't say
       seconds/minutes. Every duration, size, or count literal must be a named constant with the
       unit in the name (e.g. `BULK_REVIEW_TIMEOUT_SECONDS = 30 * 60`). bot.py timeouts done in
-      PR #3; sweep the rest: `_PREVIEW_MSG_LIMIT` (chars), `_CHUNK_TARGET_CHARS`,
-      `_BULK_MAX_TOKENS`, `_REQUEST_TIMEOUT_S` → `_SECONDS`, APScheduler cron params,
+      PR #3; PR #49 renamed `_PREVIEW_MSG_LIMIT` → `_PREVIEW_MSG_LIMIT_CHARS`, added
+      `_REPORT_MSG_LIMIT_CHARS`, and named the APScheduler cron constants. Sweep the rest:
+      `_CHUNK_TARGET_CHARS`, `_BULK_MAX_TOKENS`, `_REQUEST_TIMEOUT_S` → `_SECONDS`,
       `conversation_timeout` on /setcurrency and /add (currently unset = infinite — decide
       deliberately), recovery-queue retry counts, `$100` row bounds in VLOOKUP ranges.
 
@@ -796,17 +800,23 @@ Unique findings (single reviewer, verified plausible):
       'awaiting_range' pops on unrelated messages mid-/add, and a valid range string also enters
       the quick-add conversation → duplicate replies. Fix: scope the flag check tighter
       (per-chat state + only when no other conversation active) or use a ConversationHandler.
-- [ ] **fix_import_errors.py**: rule-3 (person→description) uses the description read BEFORE rule-2
+- [x] **fix_import_errors.py**: rule-3 (person→description) uses the description read BEFORE rule-2
       rewrote it — same-row combination silently undoes rule 2. Rerun also overwrites .bak with
       already-fixed data (backup should be write-once: skip if .bak exists).
-- [ ] **Legacy scripts lack settings/backup** — fix_currency_range.py, fix_dashboard_validations.py,
+      *(done in PR #49: rules chain on local row state so rule 3 sees rule 2's rewrite;
+      .bak is write-once — kept if it already exists; regression test in
+      tests/test_repair_scripts.py.)*
+- [x] **Legacy scripts lack settings/backup** — fix_currency_range.py, fix_dashboard_validations.py,
       wire_budget_from_lists.py hardcode data/Expenses_Improved.xlsx, save without .bak;
       wire_budget_from_lists hardcodes Dashboard rows 11-27. Either upgrade to the settings+backup
       pattern or delete them (they were one-time migration scripts — deletion preferred).
-- [ ] **rename_category.py gaps** — doesn't touch category names inside formula string-literals
+      *(done in PR #49: all three one-time migration scripts deleted.)*
+- [x] **rename_category.py gaps** — doesn't touch category names inside formula string-literals
       (SUMIFS criteria) nor pending bulk drafts in data/bulk_drafts/*.json (old name resurfaces and
       gets silently normalized to 'Other'). Fix: scan Dashboard/Monthly Summary formulas for the
       quoted old name; rename inside all pending drafts.
+      *(done in PR #49: Dashboard/Monthly Summary formula string-literals and pending
+      bulk-draft JSON files are renamed; tests in tests/test_repair_scripts.py.)*
 - [x] **Bulk manual edits bypass the normalizer** — `2 category=Trnsport` writes verbatim
       (bulk_conv.py:229-260); run _normalize_parsed_rows (or the shared validator) on the edited
       field too. (Covered by the data-validation PR: `_apply_bulk_edit` now runs the shared

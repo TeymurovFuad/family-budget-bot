@@ -28,6 +28,12 @@ from formatters import (
 )
 
 
+# Telegram hard limit is 4096 chars; leave headroom for Markdown overhead.
+_REPORT_MSG_LIMIT_CHARS = 4000
+# Timeout for the frankfurter.dev live-rates HTTP call, in seconds.
+_RATES_HTTP_TIMEOUT_S = 10.0
+
+
 def _current_cycle_bounds() -> tuple[date, date, str] | None:
     """(start, today, label) for the current cycle, or None → calendar fallback."""
     if not settings.BUDGET_CYCLE:
@@ -626,14 +632,13 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {input_ccy}: {total:,.0f}")
 
     report_text = "\n".join(lines)
-    MAX = 4000
-    if len(report_text) <= MAX:
+    if len(report_text) <= _REPORT_MSG_LIMIT_CHARS:
         await update.message.reply_text(report_text, parse_mode="Markdown")
     else:
         chunks = []
         current = ""
         for line in report_text.split("\n"):
-            if len(current) + len(line) + 1 > MAX:
+            if len(current) + len(line) + 1 > _REPORT_MSG_LIMIT_CHARS:
                 chunks.append(current)
                 current = line
             else:
@@ -664,7 +669,7 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             import httpx
             primary_url  = "https://api.frankfurter.dev/v1/latest?from=PLN"
             fallback_url = "https://api.frankfurter.app/latest?from=PLN"
-            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=_RATES_HTTP_TIMEOUT_S) as client:
                 try:
                     resp = await client.get(primary_url)
                     resp.raise_for_status()
