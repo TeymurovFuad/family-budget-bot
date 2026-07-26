@@ -225,7 +225,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/start` | Welcome message with the three entry methods and the main button menu |
 | `/menu` | Show the persistent button menu |
 | `/help` | List all commands grouped by purpose |
-| `/summary` | This month: income, expenses, savings, net, savings rate |
+| `/summary` | Opens a period picker (quick buttons, history drill-down); or pass a period/range directly, e.g. `/summary aug 2025` or `/summary aug 2025 - jan 2026` |
 | `/week` | Last 7 days spending by category |
 | `/budget` | All 17 categories with budget vs actual and progress bars |
 | `/top` | The 5 biggest expenses this month |
@@ -496,11 +496,24 @@ Boundaries that already exist in the `Cycles` sheet are skipped — running
 
 ### Cycle-scoped /summary and /budget
 
-When `BUDGET_CYCLE=1` and at least one boundary has been recorded, bare
-`/summary` and `/budget` compute over the **current cycle** — last recorded
-boundary through today, open-ended — instead of the calendar month. The cycle
-summary shows income, expenses, savings, net and savings rate for the cycle,
-plus:
+Bare `/summary` opens a **period picker** instead of computing a report
+directly:
+
+- **Quick row** — one-tap buttons for *This cycle*, *Last cycle* (shown when
+  `BUDGET_CYCLE=1` and boundaries exist), *This month* and *Last month*.
+- **History drill-down** — a 📅 *Calendar* / 💰 *Cycle* choice that pages
+  through past years/months or recorded cycles.
+- **Free-form arguments** — type the period directly: `/summary aug 2025`,
+  `/summary 2025 aug`, `/summary 08.2025`, or a bare month like
+  `/summary aug` (resolved to the most recent matching month).
+- **Range syntax** — `/summary aug 2025 - jan 2026` reports over a span of
+  months.
+
+When `BUDGET_CYCLE=1` and at least one boundary has been recorded, the cycle
+buttons compute over the **current cycle** — last recorded boundary through
+today, open-ended — and `/budget` still defaults to the current cycle instead
+of the calendar month. The cycle summary shows income, expenses, savings, net
+and savings rate for the cycle, plus:
 
 | Line | Meaning |
 |---|---|

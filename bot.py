@@ -65,6 +65,7 @@ from handlers.reports import (
     cmd_summary, cmd_week, cmd_budget, cmd_top,
     cmd_savings, cmd_report, cmd_rates, cmd_chart,
     cmd_range, handle_range_callback, handle_range_text,
+    handle_summary_callback,
 )
 from scheduled import (
     send_weekly_report, send_monthly_summary,
@@ -96,7 +97,7 @@ QUICK_CONFIRM_TIMEOUT_SECONDS = 60      # quick-add — single yes/no confirmati
 # via set_my_commands — no manual BotFather step needed. Conversation-internal
 # commands (/cancel, /skip, /save) are deliberately excluded.
 BOT_COMMANDS = [
-    BotCommand("summary",     "This month at a glance: income, expenses, savings"),
+    BotCommand("summary",     "Pick a period, or type one like 'aug 2025'"),
     BotCommand("add",         "Log one transaction step by step"),
     BotCommand("bulk",        "Import many transactions from photo, file or text"),
     BotCommand("week",        "Last 7 days of spending by category"),
@@ -168,6 +169,7 @@ def build_application() -> Application:
 
     # ── range report inline callback ──────────────────────────────────────────
     app.add_handler(CallbackQueryHandler(handle_range_callback, pattern="^range:"))
+    app.add_handler(CallbackQueryHandler(handle_summary_callback, pattern="^sum:"))
 
     # ── budget-cycle boundary confirmation callback ───────────────────────────
     app.add_handler(CallbackQueryHandler(handle_cycle_callback, pattern="^cycle:"))

@@ -39,8 +39,9 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
     return start, today, label
 
 
-async def _send_cycle_summary(update, ccy: str, df, rates,
+async def _send_cycle_summary(msg, ccy: str, df, rates,
                               start: date, end: date, label: str) -> None:
+    """msg is anything with reply_text — update.message or query.message."""
     from cycles import cycle_totals
     totals  = cycle_totals(df, start, end)
     income  = totals["income"]
@@ -56,9 +57,9 @@ async def _send_cycle_summary(update, ccy: str, df, rates,
     net_line = (f"✅ *Net:* {format_base_as_currency(net, ccy, rates)}" if net >= 0
                 else f"⚠️ *Net:* {format_base_as_currency(net, ccy, rates)}")
 
-    await update.message.reply_text(
+    await msg.reply_text(
         f"📊 *Cycle {label} — Summary* ({ccy})\n"
-        f"_{start.isoformat()} → today, day {days_elapsed}_\n\n"
+        f"_{start.isoformat()} → {'today' if end == now_utc().date() else end.isoformat()}, day {days_elapsed}_\n\n"
         f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
         f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
         f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
@@ -71,43 +72,14 @@ async def _send_cycle_summary(update, ccy: str, df, rates,
     )
 
 
-@auth
-@log_call()
-async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if ctx.args and ctx.args[0].lower() == "help":
-        await update.message.reply_text(
-            "📊 */summary* — Monthly summary\n\n"
-            "Shows this month's income, expenses, savings, and net at a glance\\.\n"
-            "Includes savings rate and projected month\\-end spend at today's pace\\.",
-            parse_mode="MarkdownV2",
-        )
-        return
-
-    year, month = current_year_and_month()
-    uid = update.effective_user.id
-    ccy = get_display_currency(uid)
-    try:
-        df    = load_data()
-        rates = load_rates()
-    except FileNotFoundError as e:
-        await update.message.reply_text(f"❌ {e}"); return
-
-    cycle = _current_cycle_bounds()
-    if cycle is not None:
-        await _send_cycle_summary(update, ccy, df, rates, *cycle)
-        return
-
+async def _send_month_summary(msg, ccy: str, df, rates, year: int, month: str) -> None:
+    """Calendar-month summary. Projection line only for the current month."""
     sub     = df[(df["Year"] == year) & (df["Month"] == month) & df["IsDone"]]
     income  = sub[sub["Type"] == "Income"]["_base"].sum()
     expense = sub[sub["Type"] == "Expense"]["_base"].sum()
     savings = sub[sub["Type"] == "Savings"]["_base"].sum()
     net     = income - expense - savings
     rate    = savings / income if income > 0 else 0
-
-    now           = now_utc()
-    days_elapsed  = now.day
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
-    projected     = expense / days_elapsed * days_in_month if days_elapsed > 0 else 0
 
     net_line = (f"✅ *Net:* {format_base_as_currency(net, ccy, rates)}" if net >= 0
                 else f"⚠️ *Net:* {format_base_as_currency(net, ccy, rates)}")
@@ -118,10 +90,233 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
         f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
         f"{net_line}\n\n"
-        f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*\n"
-        f"📈 Projected month-end spend: `{format_base_as_currency(projected, ccy, rates)}`"
+        f"{savings_emoji(rate)} Savings rate: *{rate:.0%}*"
     )
-    await update.message.reply_text(summary_text, parse_mode="Markdown")
+
+    if (year, month) == current_year_and_month():
+        now           = now_utc()
+        days_elapsed  = now.day
+        days_in_month = calendar.monthrange(now.year, now.month)[1]
+        projected     = expense / days_elapsed * days_in_month if days_elapsed > 0 else 0
+        summary_text += (
+            f"\n📈 Projected month-end spend: `{format_base_as_currency(projected, ccy, rates)}`"
+        )
+
+    await msg.reply_text(summary_text, parse_mode="Markdown")
+
+
+def _summary_years(df) -> list[int]:
+    """Actual MasterData years, newest first, years with data only."""
+    return sorted({int(y) for y in df["Year"].dropna().unique()}, reverse=True)
+
+
+def _summary_months(df, year: int) -> list[int]:
+    """Month numbers with data for one year, ascending."""
+    from handlers.summary_picker import MONTHS_BY_NAME
+    names = df[df["Year"] == year]["Month"].dropna().unique()
+    return sorted({MONTHS_BY_NAME[str(n).lower()] for n in names
+                   if str(n).lower() in MONTHS_BY_NAME})
+
+
+async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict) -> None:
+    """Dispatch a parse_summary_args() result to the right report."""
+    kind = resolution["kind"]
+    if kind == "month":
+        await _send_month_summary(msg, ccy, df, rates,
+                                  resolution["year"], month_name(resolution["month"]))
+    elif kind == "cycle":
+        await _send_cycle_summary(msg, ccy, df, rates,
+                                  resolution["start"], resolution["end"], resolution["label"])
+    else:  # range
+        budgets = load_budgets()
+        text = _build_range_report(df, rates, budgets, ccy,
+                                   resolution["start"], resolution["end"], resolution["label"])
+        await msg.reply_text(text, parse_mode="Markdown")
+
+
+@auth
+@log_call()
+async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "📊 */summary* — Monthly summary\n\n"
+            "Bare /summary opens a picker: quick buttons plus history drill\\-down\\.\n"
+            "Or type a period directly: `/summary aug 2025`, `/summary 08.2025`, "
+            "`/summary jul`, `/summary aug 2025 \\- jan 2026`\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
+
+    from handlers.summary_picker import build_summary_keyboard, parse_summary_args
+
+    uid = update.effective_user.id
+    ccy = get_display_currency(uid)
+    try:
+        df    = load_data()
+        rates = load_rates()
+    except FileNotFoundError as e:
+        await update.message.reply_text(f"❌ {e}"); return
+
+    today = now_utc().date()
+
+    if ctx.args:
+        # Typed argument → render the report directly, no buttons.
+        cycles = None
+        if settings.BUDGET_CYCLE:
+            from cycles import load_cycles
+            cycles = load_cycles()
+        resolution = parse_summary_args(ctx.args, today, cycles)
+        if resolution is None:
+            await update.message.reply_text(
+                "❌ Could not understand that period. Try `/summary aug 2025`, "
+                "`/summary 08.2025`, `/summary jul`, or `/summary aug 2025 - jan 2026`.",
+                parse_mode="Markdown",
+            )
+            return
+        await _render_summary_resolution(update.message, ccy, df, rates, resolution)
+        return
+
+    # Bare /summary → one message, three zones.
+    keyboard = build_summary_keyboard(bool(settings.BUDGET_CYCLE), _summary_years(df))
+    await update.message.reply_text(
+        "📊 *Summary* — pick a period:",
+        parse_mode="Markdown",
+        reply_markup=keyboard,
+    )
+
+
+@log_call()
+async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle inline button taps from the /summary picker (callback data 'sum:…')."""
+    from handlers.summary_picker import (
+        build_cycle_keyboard, build_month_keyboard, build_year_keyboard,
+        cycle_bounds,
+    )
+
+    query = update.callback_query
+    await query.answer()
+    msg  = query.message
+    ccy  = get_display_currency(query.from_user.id)
+    try:
+        df    = load_data()
+        rates = load_rates()
+    except FileNotFoundError as e:
+        await msg.reply_text(f"❌ {e}")
+        return
+
+    today = now_utc().date()
+    parts = query.data.split(":")
+    action = parts[1]
+
+    if action in ("tm", "lm"):
+        year, month = current_year_and_month()
+        if action == "lm":
+            prev = today.replace(day=1) - timedelta(days=1)
+            year, month = prev.year, month_name(prev.month)
+        await _send_month_summary(msg, ccy, df, rates, year, month)
+        return
+
+    if action in ("tc", "lc"):
+        from cycles import load_cycles
+        cycles = [c for c in load_cycles() if c[0] <= today]
+        need = 1 if action == "tc" else 2
+        if len(cycles) < need:
+            await msg.reply_text("❌ Not enough cycles recorded yet.")
+            return
+        index = len(cycles) - need
+        start, end = cycle_bounds(cycles, index, today)
+        await _send_cycle_summary(msg, ccy, df, rates, start, end, cycles[index][1])
+        return
+
+    if action == "cal" or action == "yrs":
+        page = int(parts[2]) if action == "yrs" else 0
+        years = _summary_years(df)
+        if not years:
+            await msg.reply_text("No data recorded yet.")
+            return
+        stage = (ctx.user_data.get("sum_range") or {}).get("stage")
+        prompt = {"from": "📊 *Range — From:* pick a year:",
+                  "to":   "📊 *Range — To:* pick a year:"}.get(stage, "📊 *History* — pick a year:")
+        await msg.edit_text(prompt, parse_mode="Markdown",
+                            reply_markup=build_year_keyboard(years, page))
+        return
+
+    if action == "y":
+        year = int(parts[2])
+        months = _summary_months(df, year)
+        if not months:
+            await msg.reply_text(f"No data for {year}.")
+            return
+        stage = (ctx.user_data.get("sum_range") or {}).get("stage")
+        prompt = {"from": f"📊 *Range — From:* pick a month of {year}:",
+                  "to":   f"📊 *Range — To:* pick a month of {year}:"}.get(
+            stage, f"📊 *{year}* — pick a month:")
+        await msg.edit_text(prompt, parse_mode="Markdown",
+                            reply_markup=build_month_keyboard(year, months))
+        return
+
+    if action == "m":
+        year, month = int(parts[2]), int(parts[3])
+        state = ctx.user_data.get("sum_range")
+        if state and state.get("stage") == "from":
+            ctx.user_data["sum_range"] = {"stage": "to", "from": (year, month)}
+            years = _summary_years(df)
+            await msg.edit_text(
+                f"📊 *Range — From:* {month_name(month)} {year} ✓\n*To:* pick a year:",
+                parse_mode="Markdown",
+                reply_markup=build_year_keyboard(years, 0),
+            )
+            return
+        if state and state.get("stage") == "to":
+            ctx.user_data.pop("sum_range", None)
+            fy, fm = state["from"]
+            start = date(fy, fm, 1)
+            end   = date(year, month, calendar.monthrange(year, month)[1])
+            if start > end:
+                start, end = date(year, month, 1), date(fy, fm, calendar.monthrange(fy, fm)[1])
+                fy, fm, year, month = year, month, fy, fm
+            budgets = load_budgets()
+            label = f"{month_name(fm)} {fy} – {month_name(month)} {year}"
+            text = _build_range_report(df, rates, budgets, ccy, start, end, label)
+            await msg.reply_text(text, parse_mode="Markdown")
+            return
+        await _send_month_summary(msg, ccy, df, rates, year, month_name(month))
+        return
+
+    if action == "cyc":
+        from cycles import load_cycles
+        cycles = [c for c in load_cycles() if c[0] <= today]
+        if not cycles:
+            await msg.reply_text("❌ No cycles recorded yet.")
+            return
+        page = int(parts[2]) if len(parts) > 2 else 0
+        await msg.edit_text("📊 *Cycles* — pick one:", parse_mode="Markdown",
+                            reply_markup=build_cycle_keyboard(cycles, today, page))
+        return
+
+    if action == "cs":
+        from cycles import load_cycles
+        start = date.fromisoformat(parts[2])
+        cycles = [c for c in load_cycles() if c[0] <= today]
+        for i, (c_start, label) in enumerate(cycles):
+            if c_start == start:
+                s, e = cycle_bounds(cycles, i, today)
+                await _send_cycle_summary(msg, ccy, df, rates, s, e, label)
+                return
+        await msg.reply_text("❌ That cycle is no longer in the ledger.")
+        return
+
+    if action == "rng":
+        years = _summary_years(df)
+        if not years:
+            await msg.reply_text("No data recorded yet.")
+            return
+        ctx.user_data["sum_range"] = {"stage": "from"}
+        await msg.edit_text("📊 *Range — From:* pick a year:", parse_mode="Markdown",
+                            reply_markup=build_year_keyboard(years, 0))
+        return
+
+    await msg.reply_text("Unknown summary option.")
 
 
 @auth
