@@ -218,6 +218,108 @@ def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     extend_validation_ranges(ws, r)
 
 
+# ── Dashboard category block (shared by Dashboard and Cycle Dashboard) ───────
+
+# Both dashboards render "Expenses by Category" as H11.. with columns
+# H=Category, I=Budget, J=Actual, K=Variance, L=Var % and a TOTAL row below.
+CATEGORY_FIRST_ROW = 11
+_CAT_COL_CATEGORY = 8   # H
+_CAT_COL_BUDGET   = 9   # I
+_CAT_COL_ACTUAL   = 10  # J
+_CAT_COL_VARIANCE = 11  # K
+_CAT_COL_VAR_PCT  = 12  # L
+CATEGORY_TOTAL_LABEL = "TOTAL"
+
+
+def _dashboard_actual_formula(r: int) -> str:
+    """Main Dashboard 'Actual' SUMIFS for the category in H{r} — filtered by
+    the Year ($B$2) and optional Month ($D$2) selectors, in display currency."""
+    return (
+        f'=(IF($D$2="",SUMIFS(MasterData!$L$2:$L${_EXCEL_MAX_ROW},'
+        f'MasterData!$F$2:$F${_EXCEL_MAX_ROW},H{r},'
+        f'MasterData!$B$2:$B${_EXCEL_MAX_ROW},$B$2,'
+        f'MasterData!$J$2:$J${_EXCEL_MAX_ROW},TRUE),'
+        f'SUMIFS(MasterData!$L$2:$L${_EXCEL_MAX_ROW},'
+        f'MasterData!$F$2:$F${_EXCEL_MAX_ROW},H{r},'
+        f'MasterData!$B$2:$B${_EXCEL_MAX_ROW},$B$2,'
+        f'MasterData!$C$2:$C${_EXCEL_MAX_ROW},$D$2,'
+        f'MasterData!$J$2:$J${_EXCEL_MAX_ROW},TRUE)))/($N$2)'
+    )
+
+
+def write_category_sumif_row(ws, r: int, actual_formula: str) -> None:
+    """Budget / Actual / Variance / Var % formulas for the category in H{r}.
+    `actual_formula` supplies the dashboard-specific 'Actual' SUMIFS."""
+    ws.cell(r, _CAT_COL_BUDGET,
+            f"=IFERROR(VLOOKUP(H{r},Lists!$C$2:$D${_EXCEL_MAX_ROW},2,0),0)/$N$2")
+    ws.cell(r, _CAT_COL_ACTUAL, actual_formula)
+    ws.cell(r, _CAT_COL_VARIANCE, f"=I{r}-J{r}")
+    ws.cell(r, _CAT_COL_VAR_PCT, f'=IF(I{r}=0,"",K{r}/I{r})')
+
+
+def write_category_sumif_block(ws, categories: list[str], actual_formula_fn,
+                               first_row: int = CATEGORY_FIRST_ROW) -> None:
+    """
+    Write the full H{first_row}..TOTAL category block.
+    `actual_formula_fn(r)` returns the 'Actual' formula string for row r.
+    """
+    r = first_row
+    for cat in categories:
+        ws.cell(r, _CAT_COL_CATEGORY, cat)
+        write_category_sumif_row(ws, r, actual_formula_fn(r))
+        r += 1
+    # TOTAL row
+    ws.cell(r, _CAT_COL_CATEGORY, CATEGORY_TOTAL_LABEL)
+    if r > first_row:
+        ws.cell(r, _CAT_COL_BUDGET,   f"=SUM(I{first_row}:I{r - 1})")
+        ws.cell(r, _CAT_COL_ACTUAL,   f"=SUM(J{first_row}:J{r - 1})")
+        ws.cell(r, _CAT_COL_VARIANCE, f"=SUM(K{first_row}:K{r - 1})")
+    else:
+        ws.cell(r, _CAT_COL_BUDGET, 0)
+        ws.cell(r, _CAT_COL_ACTUAL, 0)
+        ws.cell(r, _CAT_COL_VARIANCE, 0)
+
+
+def read_category_block(ws, first_row: int = CATEGORY_FIRST_ROW) -> list[str] | None:
+    """
+    Category names from H{first_row} down to (exclusive) the first TOTAL row.
+    Returns None when no TOTAL row exists (malformed / absent block).
+    """
+    cats: list[str] = []
+    for r in range(first_row, ws.max_row + 1):
+        v = str(ws.cell(r, _CAT_COL_CATEGORY).value or "").strip()
+        if v == CATEGORY_TOTAL_LABEL:
+            return cats
+        if v:
+            cats.append(v)
+    return None
+
+
+def clear_category_block(ws, first_row: int = CATEGORY_FIRST_ROW) -> None:
+    """Blank the existing H..L category block including its TOTAL row."""
+    current = read_category_block(ws, first_row)
+    old_total_row = first_row + (len(current) if current is not None else 0)
+    for r in range(first_row, max(old_total_row, ws.max_row) + 1):
+        for c in range(_CAT_COL_CATEGORY, _CAT_COL_VAR_PCT + 1):
+            ws.cell(r, c).value = None
+
+
+def sync_dashboard_categories(wb, categories: list[str]) -> int:
+    """
+    Rewrite the main Dashboard 'Expenses by Category' block so it lists
+    exactly `categories`. Returns the number of category rows written
+    (0 = already in sync or no Dashboard sheet).
+    """
+    if "Dashboard" not in wb.sheetnames:
+        return 0
+    ws = wb["Dashboard"]
+    if read_category_block(ws) == categories:
+        return 0
+    clear_category_block(ws)
+    write_category_sumif_block(ws, categories, _dashboard_actual_formula)
+    return len(categories)
+
+
 # ── Dashboard formula-bound repair ───────────────────────────────────────────
 
 def repair_dashboard_bounds(wb) -> int:

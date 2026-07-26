@@ -243,10 +243,11 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/setcurrency` | Pick display currency from a keyboard |
 | `/keywords` | View, add or remove the salary keywords used for cycle detection — owner only |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
+| `/setup` | First-time onboarding: creates the budget file from the template, then walks through categories, budgets, and currency — **owner only** (see "Onboarding via /setup") |
 | `/export` | Download the live Excel workbook as a Telegram document |
 | `/cycle` | Show the current budget cycle (any allowed user); `/cycle started [YYYY-MM-DD]` records a boundary; `/cycle detect [word ...]` backfills history; `/cycle list` shows all boundaries; `/cycle remove YYYY-MM-DD` deletes one — **changes are owner only**, needs `BUDGET_CYCLE=1` |
 
-`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/keywords`, `/setbudget`,
+`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/keywords`, `/setbudget`, `/setup`,
 the `/cycle` write subcommands (`started`, `remove`), and quick-add (typed
 transactions) are **owner-only** — only the first ID listed in
 `ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
@@ -257,6 +258,34 @@ Every command accepts `help` as a subcommand (e.g. `/add help`, `/bulk help`,
 
 All of these are also registered in Telegram's command menu (the `/` button) at
 startup via `set_my_commands` — no manual BotFather registration needed.
+
+### Onboarding via /setup
+
+`/setup` (owner only) walks a first-time user from an empty deployment to a
+working budget. Sending `/start` when no workbook exists routes the owner into
+the same flow automatically.
+
+1. **Welcome** — if the workbook is missing, it is created from
+   `data/Expenses_Template.xlsx` atomically (temp file + rename), and a default
+   set of 14 categories (Salary, Other Income, Housing, Groceries, Transport,
+   Utilities, Health, Dining Out, Shopping, Entertainment, Subscriptions,
+   Travel, Savings, Other) is loaded for review.
+2. **Category review** — inline buttons to rename a category, add a category
+   (with an Expense/Income/Savings type picker), confirm, or cancel.
+3. **Budgets** — for every Expense category in turn, send a monthly limit
+   (`0` = no limit). Skipped silently if there are no Expense categories.
+4. **Currency** — pick USD/EUR/RUB/TRY/CNY, or "Other" and type any 3-letter
+   code. The choice becomes your display currency and is added to the Lists
+   currency table.
+5. **Summary** — categories, budgets, and currency are written to the workbook
+   (Lists sheet, Dashboard, and Cycle Dashboard stay in sync), and live
+   exchange rates are fetched from frankfurter.dev (best effort — a warning is
+   shown if the fetch fails or the chosen code has no live rate).
+
+Writes happen at two atomic checkpoints (categories when you confirm them;
+budgets + currency at the summary), so `/cancel` keeps everything already
+confirmed. Running `/setup` again on a configured workbook asks for
+confirmation first, then lets you edit the existing categories and budgets.
 
 ### Scheduled Reports
 

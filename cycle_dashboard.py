@@ -12,7 +12,10 @@ atomic_save themselves.
 
 import settings
 from logger import get_logger
-from excel_schema import CyclesSchema, col_indices, to_date
+from excel_schema import (
+    CATEGORY_FIRST_ROW, CyclesSchema, clear_category_block, col_indices,
+    read_category_block, to_date, write_category_sumif_block,
+)
 
 log = get_logger(__name__)
 
@@ -38,7 +41,7 @@ _N4_FORMULA = (
 _DATE_FORMAT = "yyyy-mm-dd"
 
 _CATEGORY_HEADERS = ["Category", "Budget", "Actual", "Variance", "Var %"]
-_CATEGORY_FIRST_ROW = 11  # H11 — same as Dashboard
+_CATEGORY_FIRST_ROW = CATEGORY_FIRST_ROW  # H11 — same as Dashboard
 
 
 def _sumifs_type(txn_type: str) -> str:
@@ -64,46 +67,20 @@ def _sumifs_salary(salary_category: str) -> str:
     )
 
 
-def _write_category_row(ws, r: int) -> None:
-    """Budget / Actual / Variance / Var % formulas for the category in Hr."""
-    ws.cell(r, 9,  f"=IFERROR(VLOOKUP(H{r},Lists!$C$2:$D${_MAX_ROW},2,0),0)/$N$2")
-    ws.cell(r, 10, (
+def _cycle_actual_formula(r: int) -> str:
+    """Cycle-bounded 'Actual' SUMIFS for the category in H{r}."""
+    return (
         f'=IF($N$3="",0,SUMIFS(MasterData!$L$2:$L${_MAX_ROW},'
         f'MasterData!$F$2:$F${_MAX_ROW},H{r},'
         f'MasterData!$A$2:$A${_MAX_ROW},">="&$N$3,'
         f'MasterData!$A$2:$A${_MAX_ROW},"<"&$N$4,'
         f'MasterData!$J$2:$J${_MAX_ROW},TRUE)/$N$2)'
-    ))
-    ws.cell(r, 11, f"=I{r}-J{r}")
-    ws.cell(r, 12, f'=IF(I{r}=0,"",K{r}/I{r})')
-
-
-def _write_total_row(ws, r: int) -> None:
-    first = _CATEGORY_FIRST_ROW
-    ws.cell(r, 8, "TOTAL")
-    if r > first:
-        ws.cell(r, 9,  f"=SUM(I{first}:I{r - 1})")
-        ws.cell(r, 10, f"=SUM(J{first}:J{r - 1})")
-        ws.cell(r, 11, f"=SUM(K{first}:K{r - 1})")
-    else:
-        ws.cell(r, 9, 0)
-        ws.cell(r, 10, 0)
-        ws.cell(r, 11, 0)
+    )
 
 
 def _read_category_list(ws) -> list[str] | None:
-    """
-    Categories from H11 down to (exclusive) the first "TOTAL" row.
-    Returns None when no TOTAL row exists (malformed / absent block).
-    """
-    cats: list[str] = []
-    for r in range(_CATEGORY_FIRST_ROW, ws.max_row + 1):
-        v = str(ws.cell(r, 8).value or "").strip()
-        if v == "TOTAL":
-            return cats
-        if v:
-            cats.append(v)
-    return None
+    """Categories from H11 down to (exclusive) the first "TOTAL" row."""
+    return read_category_block(ws)
 
 
 def _dashboard_categories(wb) -> list[str]:
@@ -138,12 +115,7 @@ def _latest_cycle_label(wb) -> str:
 
 def _write_category_block(ws, categories: list[str]) -> None:
     """Write H11..TOTAL rows (headers in row 10 are written by ensure)."""
-    r = _CATEGORY_FIRST_ROW
-    for cat in categories:
-        ws.cell(r, 8, cat)
-        _write_category_row(ws, r)
-        r += 1
-    _write_total_row(ws, r)
+    write_category_sumif_block(ws, categories, _cycle_actual_formula)
 
 
 def ensure_cycle_dashboard(wb, salary_category=None):
@@ -230,12 +202,7 @@ def sync_cycle_dashboard_categories(wb) -> int:
         return 0
 
     # Full rebuild: delete the existing H11..TOTAL block rows' contents, rewrite.
-    old_len = len(current_cats) if current_cats is not None else 0
-    old_total_row = _CATEGORY_FIRST_ROW + old_len
-    for r in range(_CATEGORY_FIRST_ROW, max(old_total_row, ws.max_row) + 1):
-        for c in range(8, 13):  # H..L
-            ws.cell(r, c).value = None
-
+    clear_category_block(ws)
     _write_category_block(ws, dashboard_cats)
     log.info(
         "Synced %s categories: %d row(s) rewritten",
