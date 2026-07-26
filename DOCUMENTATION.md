@@ -30,6 +30,7 @@ All amounts are stored internally in **PLN**. You can change how they are displa
 | MasterData | Every transaction, one row per entry |
 | Monthly Summary | One row per month, calculated from MasterData |
 | Dashboard | Interactive view — change Year, Month, Display Currency to filter |
+| Cycle Dashboard | Cycle-scoped mirror of Dashboard — filter spending by budget cycle (B2 dropdown). Created automatically when the first cycle boundary is recorded. Only present when BUDGET_CYCLE=1. |
 
 ---
 
@@ -449,6 +450,14 @@ The boundary is written immediately to the `Cycles` sheet in the workbook with
 a label such as "Jul 2026". Labels always include the year so multi-year
 history is unambiguous. The sheet is part of the template and is auto-created
 on first use for existing workbooks.
+
+A **Cycle Dashboard** sheet is created automatically when the first cycle
+boundary is recorded. It mirrors the existing Dashboard but filters by a
+selected cycle — pick one in the B2 dropdown, which is fed from the Cycles
+ledger. It shows a summary block for the selected cycle: Salary, Income,
+Expenses, Savings, Unaccounted, and Cycle Days. If the Cycle Dashboard's
+category rows fall out of sync with the main Dashboard, run
+`scripts/sync_cycle_dashboard.py` to realign them.
 
 ### Salary-cycle prompt
 

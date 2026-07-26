@@ -15,7 +15,7 @@ import pandas as pd
 
 import settings
 from logger import get_logger
-from excel_schema import CyclesSchema, ListsSchema, col_indices, header_of
+from excel_schema import CyclesSchema, ListsSchema, col_indices, header_of, to_date
 from file_storage import (
     ExcelFileContext,
     _excel_write_lock,
@@ -32,19 +32,6 @@ LISTS_SHEET_NAME = "Lists"
 def cycle_label(start: date) -> str:
     """Ledger label for a cycle — always carries the year, e.g. 'Aug 2026'."""
     return start.strftime("%b %Y")
-
-
-def _to_date(value) -> date | None:
-    if value is None:
-        return None
-    if hasattr(value, "date"):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        return date.fromisoformat(str(value).strip()[:10])
-    except ValueError:
-        return None
 
 
 def ensure_cycles_sheet(wb):
@@ -78,7 +65,7 @@ def load_cycles() -> list[tuple[date, str]]:
             return []
         cycles: list[tuple[date, str]] = []
         for row in range(2, ws.max_row + 1):
-            start = _to_date(ws.cell(row, start_col).value)
+            start = to_date(ws.cell(row, start_col).value)
             if start is None:
                 continue
             raw_label = ws.cell(row, label_col).value if label_col else None
@@ -109,7 +96,7 @@ def record_cycle_start(start: date) -> bool:
         label_col = idx["label"]
         next_row = 2
         for row in range(2, ws.max_row + 1):
-            existing = _to_date(ws.cell(row, start_col).value)
+            existing = to_date(ws.cell(row, start_col).value)
             if existing is None:
                 continue
             if existing == start:
@@ -145,7 +132,7 @@ def remove_cycle_start(start: date) -> bool:
         if not start_col:
             return False
         for row in range(2, ws.max_row + 1):
-            if _to_date(ws.cell(row, start_col).value) == start:
+            if to_date(ws.cell(row, start_col).value) == start:
                 ws.delete_rows(row)
                 atomic_save(wb, excel_path)
                 log.info("Removed cycle boundary %s", start)
@@ -409,7 +396,7 @@ def record_cycle_starts_batch(starts: list[date]) -> int:
         existing: set[date] = set()
         next_row = 2
         for row in range(2, ws.max_row + 1):
-            existing_date = _to_date(ws.cell(row, start_col).value)
+            existing_date = to_date(ws.cell(row, start_col).value)
             if existing_date is None:
                 continue
             existing.add(existing_date)

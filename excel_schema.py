@@ -20,7 +20,24 @@ Usage
 """
 
 from dataclasses import dataclass, field, fields
+from datetime import date
 from typing import Any
+
+
+# ── Value helpers ─────────────────────────────────────────────────────────────
+
+def to_date(value) -> date | None:
+    """Coerce a cell value (datetime, date, or ISO string) to a date, else None."""
+    if value is None:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip()[:10])
+    except ValueError:
+        return None
 
 
 # ── Field helper ──────────────────────────────────────────────────────────────

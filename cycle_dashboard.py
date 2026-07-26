@@ -12,7 +12,7 @@ atomic_save themselves.
 
 import settings
 from logger import get_logger
-from excel_schema import CyclesSchema, col_indices
+from excel_schema import CyclesSchema, col_indices, to_date
 
 log = get_logger(__name__)
 
@@ -114,7 +114,7 @@ def _dashboard_categories(wb) -> list[str]:
 
 def _latest_cycle_label(wb) -> str:
     """Latest cycle label read straight from the open workbook's Cycles sheet."""
-    from cycles import CYCLES_SHEET_NAME, _to_date, cycle_label
+    from cycles import CYCLES_SHEET_NAME, cycle_label
 
     if CYCLES_SHEET_NAME not in wb.sheetnames:
         return ""
@@ -126,7 +126,7 @@ def _latest_cycle_label(wb) -> str:
         return ""
     latest = None
     for row in range(2, ws.max_row + 1):
-        start = _to_date(ws.cell(row, start_col).value)
+        start = to_date(ws.cell(row, start_col).value)
         if start is None:
             continue
         raw_label = ws.cell(row, label_col).value if label_col else None
