@@ -90,6 +90,22 @@ def _msg(update: Update):
     return update.message or (update.callback_query and update.callback_query.message)
 
 
+async def _reply(update: Update, text: str, **kwargs) -> bool:
+    """Reply via the effective message. Returns False if no message is available
+    (e.g. an inaccessible callback message) — callers should end the conversation."""
+    msg = _msg(update)
+    if not msg:
+        if update.callback_query:
+            try:
+                await update.callback_query.answer()
+            except Exception:
+                pass
+        log.warning("/setup: no effective message to reply to")
+        return False
+    await msg.reply_text(text, **kwargs)
+    return True
+
+
 # ── Workbook state detection / IO ─────────────────────────────────────────────
 
 def _workbook_exists() -> bool:
@@ -100,10 +116,29 @@ def _workbook_exists() -> bool:
 
 
 def _load_existing_state() -> tuple[list[tuple[str, str]], dict[str, float]]:
-    """Read categories (with hinted types) and budgets from the live workbook."""
+    """Read categories (with persisted or hinted types) and budgets."""
     from file_storage import get_excel_path_for_reading, load_lists
-    lists = load_lists(get_excel_path_for_reading())
-    cats = [(str(c), CATEGORY_TYPE_HINTS.get(str(c), "Expense"))
+    path = get_excel_path_for_reading()
+    lists = load_lists(path)
+    stored_types: dict[str, str] = {}
+    try:
+        from openpyxl import load_workbook
+        from excel_schema import ListsSchema, col_indices
+        wb = load_workbook(path, read_only=True)
+        ws = wb["Lists"]
+        idx = col_indices(ws, ListsSchema)
+        cat_col, typ_col = idx.get("categories"), idx.get("category_type")
+        if cat_col and typ_col:
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                cat = row[cat_col - 1] if len(row) >= cat_col else None
+                typ = row[typ_col - 1] if len(row) >= typ_col else None
+                if cat is not None and typ:
+                    stored_types[str(cat).strip()] = str(typ).strip()
+        wb.close()
+    except Exception:
+        log.warning("/setup: could not read stored category types", exc_info=True)
+    cats = [(str(c),
+             stored_types.get(str(c)) or CATEGORY_TYPE_HINTS.get(str(c), "Expense"))
             for c in lists.get("categories", [])]
     return cats, dict(lists.get("budgets", {}))
 
@@ -124,16 +159,23 @@ def _commit_categories(session: dict) -> None:
     """Checkpoint A: Lists!C + both dashboards + validation, one atomic save."""
     from openpyxl import load_workbook
     from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, sync_cycle_dashboard_categories
-    from excel_schema import ListsSchema, col_indices, sync_dashboard_categories
+    from excel_schema import (
+        ListsSchema, col_indices, header_of, sync_dashboard_categories,
+    )
     from file_storage import ExcelFileContext, atomic_save
 
     names = [name for name, _typ in session["categories"]]
+    types = {name: typ for name, typ in session["categories"]}
     with ExcelFileContext() as excel_path:
         wb = load_workbook(excel_path)
         ws = wb["Lists"]
         idx = col_indices(ws, ListsSchema)
         cat_col = idx["categories"]
         bud_col = idx.get("budget_base")
+        typ_col = idx.get("category_type")
+        if typ_col is None:  # older workbooks: add the column at the first free slot
+            typ_col = ws.max_column + 1
+            ws.cell(1, typ_col, header_of(ListsSchema, "category_type"))
         # preserve budgets of surviving categories, clear the rest
         old_budgets = {}
         for r in range(2, ws.max_row + 1):
@@ -141,10 +183,12 @@ def _commit_categories(session: dict) -> None:
             if cat is not None and bud_col:
                 old_budgets[str(cat).strip()] = ws.cell(r, bud_col).value
             ws.cell(r, cat_col).value = None
+            ws.cell(r, typ_col).value = None
             if bud_col:
                 ws.cell(r, bud_col).value = None
         for i, name in enumerate(names, start=2):
             ws.cell(i, cat_col, name)
+            ws.cell(i, typ_col, types.get(name, "Expense"))
             if bud_col and old_budgets.get(name) is not None:
                 ws.cell(i, bud_col, old_budgets[name])
         sync_dashboard_categories(wb, names)
@@ -269,7 +313,8 @@ def _summary_text(session: dict) -> str:
 
 async def _show_review(update: Update, ctx) -> int:
     text, kb = _review_view(_session(ctx))
-    await _msg(update).reply_text(text, parse_mode="Markdown", reply_markup=kb)
+    if not await _reply(update, text, parse_mode="Markdown", reply_markup=kb):
+        return ConversationHandler.END
     return SETUP_REVIEW
 
 
@@ -283,15 +328,17 @@ async def _begin_fresh(update: Update, ctx) -> int:
             file_storage.create_workbook_from_template(file_storage.LOCAL_XLSX_PATH)
         except Exception:
             log.exception("/setup: workbook creation failed")
-            await _msg(update).reply_text(CREATE_FAIL_TEXT)
+            await _reply(update, CREATE_FAIL_TEXT)
             return ConversationHandler.END
     session = _session(ctx)
     session["categories"] = list(DEFAULT_CATEGORIES)
     session["budgets"] = {}
-    await _msg(update).reply_text(
-        "🚀 *Setup started.* Budget file created. Review your categories next.",
+    if not await _reply(
+        update,
+        "🚀 *Setup started.* Review your categories below.",
         parse_mode="Markdown",
-    )
+    ):
+        return ConversationHandler.END
     return await _show_review(update, ctx)
 
 
@@ -310,7 +357,7 @@ async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         wb.close()
     except Exception:
         log.exception("/setup: could not read workbook")
-        await _msg(update).reply_text(CREATE_FAIL_TEXT)
+        await _reply(update, CREATE_FAIL_TEXT)
         return ConversationHandler.END
 
     if not populated:
@@ -320,11 +367,13 @@ async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         InlineKeyboardButton("Continue", callback_data="setup:continue"),
         InlineKeyboardButton("Cancel", callback_data="setup:cancel"),
     ]])
-    await _msg(update).reply_text(
+    if not await _reply(
+        update,
         "⚠️ Setup already ran. Running it again edits your existing "
         "categories and budgets. Continue?",
         reply_markup=kb,
-    )
+    ):
+        return ConversationHandler.END
     return SETUP_WELCOME
 
 
@@ -334,9 +383,13 @@ async def cmd_start_or_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
     """/start entry: fall through to the menu unless the workbook is missing.
     Only the owner (ALLOWED_USERS[0]) is routed into setup."""
     from config import ALLOWED_USERS
-    if update.effective_user.id == ALLOWED_USERS[0] and not _workbook_exists():
-        ctx.user_data.pop(_SK, None)
-        return await _begin_fresh(update, ctx)
+    if not _workbook_exists():
+        if update.effective_user.id == ALLOWED_USERS[0]:
+            ctx.user_data.pop(_SK, None)
+            return await _begin_fresh(update, ctx)
+        await _reply(update,
+                     "No workbook found. The bot owner needs to run /setup first.")
+        return ConversationHandler.END
     from handlers.menu import cmd_menu
     await cmd_menu(update, ctx)
     return ConversationHandler.END
@@ -350,7 +403,12 @@ async def setup_welcome_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
     await query.answer()
     if query.data == "setup:cancel":
         return await setup_cancel(update, ctx)
-    cats, budgets = _load_existing_state()
+    try:
+        cats, budgets = _load_existing_state()
+    except Exception:
+        log.exception("/setup: could not load existing state")
+        await _reply(update, "❌ Could not read the budget file. Try again.")
+        return ConversationHandler.END
     session = _session(ctx)
     session["categories"] = cats or list(DEFAULT_CATEGORIES)
     session["budgets"] = budgets
@@ -390,13 +448,17 @@ async def _next_budget_or_currency(update: Update, ctx) -> int:
     session = _session(ctx)
     if session["budget_queue"]:
         cat = session["budget_queue"][0]
-        await _msg(update).reply_text(
+        if not await _reply(
+            update,
             f"💸 Monthly budget for *{cat}*? Send a number. *0* = no limit.",
             parse_mode="Markdown",
-        )
+        ):
+            return ConversationHandler.END
         return SETUP_BUDGET
-    await _msg(update).reply_text(
-        "💰 Pick your main currency:", reply_markup=_currency_keyboard())
+    if not await _reply(
+        update, "💰 Pick your main currency:", reply_markup=_currency_keyboard()
+    ):
+        return ConversationHandler.END
     return SETUP_CURRENCY
 
 
@@ -408,7 +470,10 @@ async def setup_rename_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
     if query.data == "setup:cancel":
         session["pending_rename"] = None  # discard pending, keep committed work
         return await setup_cancel(update, ctx)
-    idx = int(query.data.rsplit(":", 1)[1])
+    try:
+        idx = int(query.data.rsplit(":", 1)[1])
+    except ValueError:
+        return await _show_review(update, ctx)
     if not 0 <= idx < len(session["categories"]):
         return await _show_review(update, ctx)
     session["pending_rename"] = idx
@@ -507,24 +572,28 @@ async def _finish_with_currency(update: Update, ctx, ccy: str) -> int:
         _commit_budgets_and_currency(session)
     except Exception:
         log.exception("/setup: final commit failed")
-        await _msg(update).reply_text(CREATE_FAIL_TEXT)
+        await _reply(update, CREATE_FAIL_TEXT)
         return ConversationHandler.END
     set_display_currency(update.effective_user.id, ccy)
 
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("Done", callback_data="setup:finish")]])
-    await _msg(update).reply_text(
-        _summary_text(session), parse_mode="Markdown", reply_markup=kb)
+    if not await _reply(
+        update, _summary_text(session), parse_mode="Markdown", reply_markup=kb
+    ):
+        return ConversationHandler.END
 
     try:
         live = await _refresh_rates_best_effort()
         if ccy not in live:
-            await _msg(update).reply_text(
+            await _reply(
+                update,
                 f"⚠️ No live rate found for {ccy} — its rate is set to 1.0. "
-                "Update it in the Lists sheet or run /rates refresh later."
+                "Update it in the Lists sheet or run /rates refresh later.",
             )
     except Exception as e:
         log.warning("/setup: rate refresh failed: %s", e)
-        await _msg(update).reply_text(
+        await _reply(
+            update,
             "⚠️ Could not fetch live exchange rates. Run /rates refresh later.")
     return SETUP_SUMMARY
 
@@ -566,7 +635,7 @@ async def setup_summary_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
 @log_call()
 async def setup_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     ctx.user_data.pop(_SK, None)
-    await _msg(update).reply_text(CANCEL_TEXT)
+    await _reply(update, CANCEL_TEXT)
     return ConversationHandler.END
 
 

@@ -544,6 +544,7 @@ class ListsSchema:
     months:      Any = col("Months")
     txn_types:   Any = col("TxnTypes")
     categories:  Any = col("Categories")
+    category_type: Any = col("Category Type")
     budget_base: Any = col("Budget (base)")
     persons:     Any = col("Persons")
     years:       Any = col("Years")
