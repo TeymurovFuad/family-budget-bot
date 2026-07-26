@@ -190,6 +190,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | E | Years | Add the next year here before January |
 | G | Currency codes | Add a new currency here |
 | H | Rates to PLN | Edit when an exchange rate changes |
+| Salary Keywords | Extra words that mark a transaction as salary income | Managed via `/keywords` — do not edit directly |
 
 ---
 
@@ -239,11 +240,12 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `/delete` | Remove one of the last 5 transactions |
 | `/setcurrency EUR` | Switch display currency for this session |
 | `/setcurrency` | Pick display currency from a keyboard |
+| `/keywords` | View, add or remove the salary keywords used for cycle detection — owner only |
 | `/setbudget` | Set the monthly budget limit for a category — **owner only** (the first ID in `ALLOWED_TELEGRAM_IDS`) |
 | `/export` | Download the live Excel workbook as a Telegram document |
 | `/cycle` | Show the current budget cycle; `/cycle started [YYYY-MM-DD]` records a boundary; `/cycle detect [word ...]` backfills history; `/cycle list` shows all boundaries; `/cycle remove YYYY-MM-DD` deletes one — **owner only**, needs `BUDGET_CYCLE=1` |
 
-`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/setbudget`, `/cycle`, and
+`/add`, `/bulk`, `/edit`, `/delete`, `/setcurrency`, `/keywords`, `/setbudget`, `/cycle`, and
 quick-add (typed transactions) are **owner-only** — only the first ID listed in
 `ALLOWED_TELEGRAM_IDS` can use them. Every other allowed user can still use all
 read/report commands.
@@ -428,19 +430,20 @@ transactions into the previous cycle — no transaction data is touched.
 
 ### How a salary is detected
 
-A transaction counts as salary when it is type **Income** and its Category
-contains a detection keyword as a whole word — so a category of "Salary Bonus"
-matches the keyword `salary`, but "Salaries" does not. The Description is only
-checked when the Category is blank: a bulk-imported row with an empty category
-and the bank transfer title "WYNAGRODZENIE ZA LIPIEC ACME" matches, while a
-categorised row (e.g. category "Freelance", description "salary top-up") does
-not — its category already says what it is. The keyword list is `SALARY_CATEGORY`
-plus `CYCLE_DETECT_KEYWORDS` (comma-separated .env setting, e.g.
-`CYCLE_DETECT_KEYWORDS=wynagrodzenie,payroll`) plus any words passed to
-`/cycle detect <word> ...` for that one scan. The same matching drives
-`/cycle detect`, the salary-cycle prompt, and the unaccounted metric.
-Prefer the .env setting over per-scan words: per-scan words find the
-boundaries, but the unaccounted math only sees keywords configured in .env.
+A transaction counts as salary when it is type **Income** and its Category or
+Description contains a detection keyword as a whole word — so a category of
+"Salary Bonus" matches the keyword `salary`, but "Salaries" does not. The
+Description is always checked alongside the Category (e.g. a bulk-imported row
+with the bank transfer title "WYNAGRODZENIE ZA LIPIEC ACME" and an empty
+category matches via Description). The keyword list starts with `SALARY_CATEGORY`
+and is extended by keywords stored in the Excel Lists sheet "Salary Keywords"
+column — managed via `/keywords`. If no keywords have been saved to Excel yet,
+the bot falls back to `CYCLE_DETECT_KEYWORDS` in `.env` as a seed; once the
+first keyword is added via `/keywords` the `.env` value is seeded into Excel and
+`.env` is no longer the authoritative source. Any words passed to
+`/cycle detect <word> ...` are also included for that one scan. The same
+matching drives `/cycle detect`, the salary-cycle prompt, and the unaccounted
+metric.
 
 The boundary is written immediately to the `Cycles` sheet in the workbook with
 a label such as "Jul 2026". Labels always include the year so multi-year

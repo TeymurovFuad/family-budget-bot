@@ -15,7 +15,7 @@ import pandas as pd
 
 import settings
 from logger import get_logger
-from excel_schema import CyclesSchema, col_indices, header_of
+from excel_schema import CyclesSchema, ListsSchema, col_indices, header_of
 from file_storage import (
     ExcelFileContext,
     _excel_write_lock,
@@ -26,6 +26,7 @@ from file_storage import (
 log = get_logger(__name__)
 
 CYCLES_SHEET_NAME = "Cycles"
+LISTS_SHEET_NAME = "Lists"
 
 
 def cycle_label(start: date) -> str:
@@ -177,10 +178,137 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
+def load_salary_keywords(excel_path=None) -> list[str]:
+    """
+    Salary keywords stored in the Lists sheet "Salary Keywords" column —
+    stripped, lowercased, deduplicated, blanks skipped. Returns [] when the
+    column is missing/empty or the workbook is unreadable.
+    """
+    from openpyxl import load_workbook
+
+    try:
+        path = excel_path if excel_path is not None else get_excel_path_for_reading()
+        wb = load_workbook(path, data_only=True)
+        if LISTS_SHEET_NAME not in wb.sheetnames:
+            return []
+        ws = wb[LISTS_SHEET_NAME]
+        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
+        if not kw_col:
+            return []
+        return _keyword_column_words(ws, kw_col)
+    except Exception as e:
+        log.warning("Could not load salary keywords from Lists sheet: %s", e)
+        return []
+
+
+def _keyword_column_words(ws, kw_col) -> list[str]:
+    words: list[str] = []
+    for row in range(2, ws.max_row + 1):
+        w = str(ws.cell(row, kw_col).value or "").strip().lower()
+        if w and w not in words:
+            words.append(w)
+    return words
+
+
+def _rewrite_keyword_column(ws, kw_col, words: list[str]) -> None:
+    for i, w in enumerate(words, start=2):
+        ws.cell(i, kw_col, w)
+    for row in range(2 + len(words), ws.max_row + 1):
+        ws.cell(row, kw_col).value = None
+
+
+MAX_SALARY_KEYWORD_BYTES = 57  # Telegram callback_data limit is 64 bytes; "kw:del:" takes 7
+
+
+def save_salary_keyword(keyword: str) -> bool:
+    """
+    Append one keyword to the Lists sheet "Salary Keywords" column. The very
+    first write ever (column header not yet present) creates the column and
+    seeds it with the current .env keywords so they are not silently dropped;
+    a list the user has emptied via /keywords stays empty.
+    Returns False (no write) when the keyword is already stored or invalid.
+    """
+    from openpyxl import load_workbook
+
+    keyword = str(keyword or "").strip().lower()
+    if not keyword or len(keyword.encode("utf-8")) > MAX_SALARY_KEYWORD_BYTES:
+        return False
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb[LISTS_SHEET_NAME]
+        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
+        first_write = kw_col is None
+        if first_write:
+            kw_col = ws.max_column + 1
+            ws.cell(1, kw_col, header_of(ListsSchema, "salary_keyword"))
+        words = _keyword_column_words(ws, kw_col)
+        seeded = False
+        if first_write:
+            for w in settings.CYCLE_DETECT_KEYWORDS:
+                w = str(w or "").strip().lower()
+                if w and w not in words:
+                    words.append(w)
+            seeded = bool(words)
+        added = keyword not in words
+        if added:
+            words.append(keyword)
+        if not added and not seeded:
+            return False
+        _rewrite_keyword_column(ws, kw_col, words)
+        atomic_save(wb, excel_path)
+        log.info("Saved salary keyword %r (%d stored)", keyword, len(words))
+        return added
+
+
+async def async_save_salary_keyword(keyword: str) -> bool:
+    loop = asyncio.get_running_loop()
+    async with _excel_write_lock:
+        return await loop.run_in_executor(None, save_salary_keyword, keyword)
+
+
+def delete_salary_keyword(keyword: str) -> bool:
+    """
+    Remove one keyword from the Lists sheet "Salary Keywords" column.
+    Only that column's cells are shifted — Lists rows are shared with other
+    reference columns, so whole-row deletion is never used here.
+    Returns False when the keyword is not stored.
+    """
+    from openpyxl import load_workbook
+
+    keyword = str(keyword or "").strip().lower()
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        if LISTS_SHEET_NAME not in wb.sheetnames:
+            return False
+        ws = wb[LISTS_SHEET_NAME]
+        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
+        if not kw_col:
+            return False
+        words = _keyword_column_words(ws, kw_col)
+        if keyword not in words:
+            return False
+        words = [w for w in words if w != keyword]
+        _rewrite_keyword_column(ws, kw_col, words)
+        atomic_save(wb, excel_path)
+        log.info("Deleted salary keyword %r (%d remain)", keyword, len(words))
+        return True
+
+
+async def async_delete_salary_keyword(keyword: str) -> bool:
+    loop = asyncio.get_running_loop()
+    async with _excel_write_lock:
+        return await loop.run_in_executor(None, delete_salary_keyword, keyword)
+
+
 def cycle_detect_keywords(extra: list[str] | None = None) -> list[str]:
-    """SALARY_CATEGORY plus CYCLE_DETECT_KEYWORDS plus any ad-hoc extras, lowercased,
+    """SALARY_CATEGORY plus the stored salary keywords (Excel, falling back to
+    .env CYCLE_DETECT_KEYWORDS) plus any ad-hoc extras, lowercased,
     deduplicated, blanks dropped."""
-    words = [settings.SALARY_CATEGORY, *settings.CYCLE_DETECT_KEYWORDS, *(extra or [])]
+    stored = load_salary_keywords()
+    if not stored:
+        log.debug("No salary keywords in Excel — falling back to .env CYCLE_DETECT_KEYWORDS")
+        stored = settings.CYCLE_DETECT_KEYWORDS
+    words = [settings.SALARY_CATEGORY, *stored, *(extra or [])]
     seen: list[str] = []
     for w in words:
         w = str(w or "").strip().lower()

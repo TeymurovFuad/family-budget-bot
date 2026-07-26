@@ -15,7 +15,12 @@ from data import load_budgets, load_rates, load_reference_data
 from file_storage import get_excel_path_for_reading, update_category_budget_in_excel
 from formatters import format_amount
 from validators import parse_amount
-from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT
+from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT, KW_PICK, KW_ADD
+import settings
+from cycles import (
+    MAX_SALARY_KEYWORD_BYTES,
+    async_delete_salary_keyword, async_save_salary_keyword, load_salary_keywords,
+)
 
 
 @auth
@@ -58,6 +63,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/export — download your Excel workbook\n\n"
         "*Settings*\n"
         "/setcurrency — change the display currency\n"
+        "/keywords — view, add or remove the salary keywords used for cycle detection \\(owner only\\)\n"
         "/setbudget — set the monthly budget limit for a category \\(owner only\\)\n"
         "/cycle — show the current budget cycle; /cycle started \\[YYYY\\-MM\\-DD\\] records a new one \\(owner only, needs `BUDGET_CYCLE=1`\\)\n"
         "/menu — show the button menu\n"
@@ -252,3 +258,88 @@ async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=_build_setbudget_keyboard(),
     )
     return SET_BUDGET_PICK
+
+
+# ── /keywords conversation (owner only) ───────────────────────────────────────
+
+def _keywords_view() -> tuple[str, InlineKeyboardMarkup]:
+    stored = load_salary_keywords()
+    if stored:
+        words, source = stored, "stored in Excel (Lists sheet)"
+    else:
+        words = [w.strip().lower() for w in settings.CYCLE_DETECT_KEYWORDS if w.strip()]
+        source = ".env fallback — adding a keyword moves the list into Excel"
+    lines = ["🔑 Salary keywords for cycle detection"]
+    lines.append(f"Source: {source}")
+    lines.append(f"Always included: {settings.SALARY_CATEGORY.lower()}")
+    if words:
+        lines.append("\n" + "\n".join(f"• {w}" for w in words))
+    else:
+        lines.append("\nNo extra keywords set.")
+    rows = [
+        [InlineKeyboardButton(f"➖ {w}", callback_data=f"kw:del:{w}")]
+        for w in stored
+    ]
+    rows.append([InlineKeyboardButton("➕ Add keyword", callback_data="kw:add")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+@auth_write
+@log_call()
+async def cmd_keywords(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if ctx.args and ctx.args[0].lower() == "help":
+        await update.message.reply_text(
+            "🔑 */keywords* — Manage salary keywords \\(owner only\\)\n\n"
+            "These words mark an Income transaction as a salary for budget\\-cycle "
+            "detection \\(matched in Category or Description\\)\\.\n\n"
+            "Tap ➖ next to a keyword to remove it, or ➕ to add one\\. "
+            "Keywords are stored in the Excel Lists sheet; until the first one is "
+            "added there, the `CYCLE_DETECT_KEYWORDS` \\.env value is used\\.\n"
+            "/cancel exits\\.",
+            parse_mode="MarkdownV2",
+        )
+        return ConversationHandler.END
+
+    text, kb = _keywords_view()
+    await update.message.reply_text(text, reply_markup=kb)
+    return KW_PICK
+
+
+@log_call()
+async def keywords_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "kw:add":
+        await query.message.reply_text("Send the new salary keyword (or /cancel):")
+        return KW_ADD
+
+    if query.data.startswith("kw:del:"):
+        word = query.data[len("kw:del:"):]
+        removed = await async_delete_salary_keyword(word)
+        note = f"🗑 Removed '{word}'." if removed else f"'{word}' is not in the list."
+        text, kb = _keywords_view()
+        await query.message.reply_text(f"{note}\n\n{text}", reply_markup=kb)
+        return KW_PICK
+
+    log.warning("Unknown keywords callback: %s", query.data)
+    return KW_PICK
+
+
+@log_call()
+async def keywords_add_word(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    word = (update.message.text or "").strip().lower()
+    if not word:
+        await update.message.reply_text("❌ Keyword cannot be empty. Send a word or /cancel:")
+        return KW_ADD
+    if len(word.encode("utf-8")) > MAX_SALARY_KEYWORD_BYTES:
+        await update.message.reply_text(
+            "❌ Keyword is too long. Send a shorter word or /cancel:"
+        )
+        return KW_ADD
+
+    added = await async_save_salary_keyword(word)
+    note = f"✅ Added '{word}'." if added else f"'{word}' is already in the list."
+    text, kb = _keywords_view()
+    await update.message.reply_text(f"{note}\n\n{text}", reply_markup=kb)
+    return KW_PICK

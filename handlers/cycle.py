@@ -37,8 +37,8 @@ _CYCLE_USAGE = (
     "(fix a wrong date with remove + `/cycle started` the right one)\n\n"
     "*How detection matches a salary:* an Income transaction whose "
     "Category equals the salary category, or whose Description contains "
-    "any search word (default: salary; extend permanently via "
-    "`CYCLE_DETECT_KEYWORDS` in .env, or per-scan with `/cycle detect <word>`).\n\n"
+    "any search word (default: salary; extend permanently via /keywords, "
+    "or per-scan with `/cycle detect <word>`).\n\n"
     "*Reports:* with cycles enabled, /summary and /budget cover the "
     "current cycle (last boundary → today) instead of the calendar month."
 )

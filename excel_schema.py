@@ -433,6 +433,7 @@ class ListsSchema:
     goal_name:   Any = col("Goal Name")
     alloc_pct:   Any = col("Alloc %")
     goal_pln:    Any = col("Goal (PLN)")
+    salary_keyword: Any = col("Salary Keywords")
 
 
 # ── Cycles sheet ──────────────────────────────────────────────────────────────
