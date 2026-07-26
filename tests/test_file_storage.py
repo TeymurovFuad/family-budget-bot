@@ -382,3 +382,65 @@ class TestDateEditSyncsYearMonth:
         ws = wb["MasterData"]
         assert ws.cell(2, 2).value == 2024
         assert ws.cell(2, 3).value == "May"
+
+
+# ── quarantine + .bak fixes ───────────────────────────────────────────────────
+
+
+class TestFlushRecoveryQueueQuarantine:
+
+    def test_quarantine_rename_failure_falls_back_to_delete(self, tmp_path, monkeypatch):
+        """If the .corrupt rename fails, the corrupt file must be deleted so the
+        next flush doesn't hit the same JSONDecodeError forever."""
+        from unittest.mock import patch as _patch
+
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        with _patch.object(type(queue_path), "replace", side_effect=PermissionError("locked")):
+            rows = file_storage.flush_recovery_queue()
+
+        assert rows == []
+        assert not queue_path.exists(), "corrupt queue file must not survive the flush"
+
+    def test_quarantine_rename_success_moves_file(self, tmp_path, monkeypatch):
+        queue_path = tmp_path / "recovery_queue.json"
+        queue_path.write_text("{not valid json", encoding="utf-8")
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        rows = file_storage.flush_recovery_queue()
+
+        assert rows == []
+        assert not queue_path.exists()
+        assert (tmp_path / "recovery_queue.json.corrupt").exists()
+
+
+class TestAtomicSaveBackupPolicy:
+
+    def test_no_bak_written_for_temp_download_files(self, tmp_path):
+        """Remote-backend temp downloads must not accumulate orphan .bak files."""
+        from file_storage import atomic_save, _temp_files
+
+        path = tmp_path / "download.xlsx"
+        wb = openpyxl.Workbook()
+        wb.save(path)  # pre-existing file so the .bak branch is reachable
+
+        _temp_files.add(path)
+        try:
+            atomic_save(wb, path)
+        finally:
+            _temp_files.discard(path)
+
+        assert path.exists()
+        assert not (tmp_path / "download.xlsx.bak").exists()
+
+    def test_bak_still_written_for_regular_files(self, tmp_path):
+        from file_storage import atomic_save
+
+        path = tmp_path / "workbook.xlsx"
+        wb = openpyxl.Workbook()
+        wb.save(path)
+        atomic_save(wb, path)
+
+        assert (tmp_path / "workbook.xlsx.bak").exists()

@@ -178,10 +178,15 @@ def build_application() -> Application:
     app.add_handler(CallbackQueryHandler(handle_detect_callback, pattern="^detect:"))
 
     # ── custom range text input ───────────────────────────────────────────────
+    # group=-1 → runs BEFORE the conversation handlers. handle_range_text only
+    # consumes messages that belong to a pending custom-range prompt (per-chat
+    # flag + range-shaped text) and raises ApplicationHandlerStop when it does,
+    # so a valid range never also enters quick-add; everything else passes
+    # through to the conversations untouched.
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND,
         handle_range_text,
-    ), group=1)
+    ), group=-1)
 
     # ── /setcurrency conversation ─────────────────────────────────────────────
     app.add_handler(ConversationHandler(

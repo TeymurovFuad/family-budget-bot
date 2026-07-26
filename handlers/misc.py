@@ -22,6 +22,9 @@ from cycles import (
     async_delete_salary_keyword, async_save_salary_keyword, load_salary_keywords,
 )
 
+# Telegram bot API caps outgoing documents at 50 MB.
+TELEGRAM_MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
+
 
 @auth
 @log_call()
@@ -138,13 +141,26 @@ async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not excel_path.exists():
             await update.message.reply_text("❌ Workbook not found on the server.")
             return
+        size = excel_path.stat().st_size
+        if size > TELEGRAM_MAX_DOCUMENT_BYTES:
+            await update.message.reply_text(
+                f"❌ The workbook is {size / (1024 * 1024):.1f} MB — larger than "
+                "Telegram's 50 MB document limit, so it can't be sent here. "
+                "Copy it from the server or its storage bucket directly."
+            )
+            return
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         filename = f"Expenses_Improved_{today}.xlsx"
         with open(excel_path, "rb") as fh:
             await update.message.reply_document(document=fh, filename=filename)
-    except Exception as e:
+    except Exception:
+        # Never echo the raw exception back to the chat — it can leak internal
+        # paths or bucket names. Full detail goes to the server log only.
         log.exception("Failed to export workbook")
-        await update.message.reply_text(f"❌ Could not export the workbook: {e}")
+        await update.message.reply_text(
+            "❌ Could not export the workbook. Please try again later — "
+            "the error has been logged on the server."
+        )
 
 
 @log_call()

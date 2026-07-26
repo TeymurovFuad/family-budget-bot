@@ -107,3 +107,41 @@ async def test_cmd_export_unauthorised_user_rejected(tmp_path, monkeypatch):
     reply = update.message.reply_text.call_args[0][0]
     assert "not authorized" in reply.lower()
     assert "123" in reply  # the unauthorized user's own Telegram ID
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_error_reply_does_not_leak_exception_detail(tmp_path):
+    update = _make_update()
+    ctx = _make_ctx()
+    secret = "s3://internal-bucket/secret-path.xlsx"
+
+    with patch("handlers.misc.get_excel_path_for_reading",
+               side_effect=RuntimeError(secret)):
+        await cmd_export(update, ctx)
+
+    msg = update.message.reply_text.call_args[0][0]
+    assert secret not in msg
+    assert "internal-bucket" not in msg
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_rejects_file_over_telegram_limit(tmp_path):
+    from handlers import misc
+
+    fake_path = tmp_path / "Expenses_Improved.xlsx"
+    fake_path.write_bytes(b"x")
+
+    update = _make_update()
+    ctx = _make_ctx()
+
+    big = misc.TELEGRAM_MAX_DOCUMENT_BYTES + 1
+    stat_result = MagicMock()
+    stat_result.st_size = big
+
+    with patch("handlers.misc.get_excel_path_for_reading", return_value=fake_path), \
+         patch.object(type(fake_path), "stat", return_value=stat_result):
+        await cmd_export(update, ctx)
+
+    update.message.reply_document.assert_not_called()
+    msg = update.message.reply_text.call_args[0][0]
+    assert "50" in msg and "MB" in msg

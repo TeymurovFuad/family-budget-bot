@@ -1385,6 +1385,20 @@ class TestBulkConvConfirm:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestQuickConvHandleQuickAdd:
+    async def test_empty_reference_lists_replies_cant_read_excel(self):
+        # Lists unreadable (file locked / sheet renamed) → clear reply, no KeyError
+        upd = make_update("groceries 50")
+        ctx = make_ctx()
+        empty = {"months": [], "txn_types": [], "categories": [],
+                 "persons": [], "years": [], "budgets": {}}
+        with patch("handlers.quick_conv.load_reference_data", return_value=empty), \
+             patch("handlers.quick_conv.parse_quick") as mock_parse:
+            result = await handle_quick_add(upd, ctx)
+        assert result is None
+        mock_parse.assert_not_called()
+        sent = upd.message.reply_text.call_args.args[0]
+        assert "can't read your excel" in sent.lower()
+
     async def test_parse_returns_none_returns_none(self):
         upd = make_update("hello world")
         ctx = make_ctx()

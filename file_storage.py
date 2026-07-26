@@ -121,7 +121,10 @@ def atomic_save(wb, path) -> None:
     tmp = path.with_name(path.name + ".tmp")
     try:
         wb.save(tmp)
-        if path.exists():
+        # Skip the rolling .bak for temp downloads (GCS/S3 backends) — the
+        # remote object is the durable copy, and a .bak next to a
+        # NamedTemporaryFile would never be cleaned up.
+        if path.exists() and path not in _temp_files:
             try:
                 shutil.copy2(path, path.with_name(path.name + ".bak"))
             except Exception as e:
@@ -198,7 +201,25 @@ def flush_recovery_queue() -> list[dict]:
         try:
             RECOVERY_QUEUE_PATH.replace(corrupt_path)
         except Exception as e2:
+            # One fallback attempt: delete the corrupt file so the next flush
+            # doesn't hit the same JSONDecodeError and repeat the failing
+            # rename forever. If even that fails, alert loudly and give up —
+            # this needs operator attention (file locked / permissions).
             log.error("Failed to quarantine corrupt recovery queue file: %s", e2)
+            try:
+                RECOVERY_QUEUE_PATH.unlink()
+                log.warning(
+                    "Deleted corrupt recovery queue file %s after quarantine "
+                    "rename failed — its contents are lost.",
+                    RECOVERY_QUEUE_PATH,
+                )
+            except Exception as e3:
+                log.critical(
+                    "OPERATOR ACTION NEEDED: corrupt recovery queue file %s "
+                    "could not be quarantined or deleted (%s). Every flush "
+                    "will keep failing until it is removed manually.",
+                    RECOVERY_QUEUE_PATH, e3,
+                )
         return []
 
 
