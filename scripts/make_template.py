@@ -156,6 +156,14 @@ def main(source: Path, dest: Path) -> None:
         ensure_cycles_sheet(wb)
         print("  Cycles: sheet created (empty ledger).")
 
+    from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, ensure_cycle_dashboard
+    if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
+        wb[CYCLE_DASHBOARD_SHEET_NAME]["B2"] = ""
+        print("  Cycle Dashboard: cycle selector reset.")
+    else:
+        ensure_cycle_dashboard(wb)
+        print("  Cycle Dashboard: sheet created.")
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     wb.save(dest)
     print(f"\n✅  Template saved: {dest}")
