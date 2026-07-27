@@ -69,7 +69,7 @@ if not STATEMENT_PROFILES_DIR.is_absolute():
 BUDGET_CYCLE = os.getenv("BUDGET_CYCLE", "0").strip() == "1"
 SALARY_CATEGORY = os.getenv("SALARY_CATEGORY", "Salary")
 # Fallback seed for salary-detection words (comma-separated, e.g.
-# "wynagrodzenie,payroll") — manage via /keywords once set; the Excel Lists
+# "wages,payroll") — manage via /keywords once set; the Excel Lists
 # sheet ("Salary Keywords" column) takes precedence when non-empty.
 # SALARY_CATEGORY is always included — this list only adds to it.
 CYCLE_DETECT_KEYWORDS = [
