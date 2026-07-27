@@ -39,6 +39,9 @@ else:
     SAVINGS_RATE_TARGET = float(os.getenv("SAVINGS_RATE_TARGET", "0.20"))
 
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
+# True when the operator explicitly set STORAGE_BACKEND — an explicit choice
+# must always win over stray GCS_BUCKET_NAME / S3_BUCKET_NAME leftovers.
+STORAGE_BACKEND_EXPLICIT = "STORAGE_BACKEND" in os.environ
 USER_PREFS_PATH = Path(os.getenv("USER_PREFS_PATH", str(DATA_DIR / "user_prefs.json"))).expanduser()
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
 GCS_OBJECT_NAME = os.getenv("GCS_OBJECT_NAME", "Expenses.xlsx")

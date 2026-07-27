@@ -72,6 +72,7 @@ from handlers.reports import (
 from scheduled import (
     send_weekly_report, send_monthly_summary,
     send_daily_reminder, send_weekly_nudge,
+    replay_recovery_queue_job,
 )
 from states import (
     ADD_VALUE, ADD_CURRENCY, ADD_TYPE, ADD_CATEGORY,
@@ -347,6 +348,9 @@ def main():
                       timezone=TIMEZONE, args=[app])
     scheduler.add_job(send_weekly_nudge,    "cron", day_of_week=WEEKLY_NUDGE_DAY_OF_WEEK,
                       hour=WEEKLY_NUDGE_HOUR, minute=0, timezone=TIMEZONE, args=[app])
+    # Recovery queue: failed writes are journaled and replayed every 10 minutes
+    # (not only at startup), so a transient outage self-heals while running.
+    scheduler.add_job(replay_recovery_queue_job, "interval", minutes=10, args=[app])
     scheduler.start()
 
     log.info("Bot starting — polling")

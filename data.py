@@ -4,6 +4,7 @@ data.py — read-only Excel helpers: load_data, load_rates, load_budgets,
 """
 
 import calendar
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -30,17 +31,89 @@ def current_year_and_month() -> tuple[int, str]:
     return n.year, month_name(n.month)
 
 
+# ── reference-data TTL cache ──────────────────────────────────────────────────
+# load_reference_data / load_rates / load_budgets are called several times per
+# incoming message and each call used to trigger a full workbook read — on
+# remote backends that meant re-downloading the whole workbook every time.
+# Results are now cached for REFERENCE_CACHE_TTL_SECONDS.
+#
+# Staleness guards:
+#   - local backend: the cache entry also stores (path, mtime_ns) of the
+#     workbook, so any write invalidates it immediately;
+#   - remote backends: TTL only, plus explicit invalidation — excel_ops.py and
+#     file_storage.py call invalidate_reference_cache() after every write.
+
+REFERENCE_CACHE_TTL_SECONDS = 120
+
+# key -> (expires_at_monotonic, signature, value)
+_ref_cache: dict[str, tuple[float, object, object]] = {}
+
+
+def invalidate_reference_cache() -> None:
+    """Drop all cached reference data. Called after any workbook write."""
+    _ref_cache.clear()
+
+
+def _cache_signature():
+    """
+    Freshness signature for the current workbook.
+
+    Local backend: (path, mtime_ns) — changes whenever the file changes.
+    Remote backends: None — computing a signature would require a download,
+    so freshness is governed by the TTL + explicit invalidation instead.
+    """
+    import file_storage
+    if file_storage._active_backend() != "local":
+        return None
+    try:
+        path = get_excel_path_for_reading()
+        return (str(path), path.stat().st_mtime_ns)
+    except OSError as e:
+        # A persistently locked/unreadable workbook must be visible in logs.
+        log.debug("stat failed for reference-cache signature: %s", e)
+        return object()
+    except Exception:
+        # Cannot stat the workbook — return a unique object so the cache
+        # never serves a possibly-stale entry.
+        return object()
+
+
+def _cached(key: str, loader):
+    now = time.monotonic()
+    signature = _cache_signature()
+    entry = _ref_cache.get(key)
+    if entry is not None:
+        expires_at, cached_sig, value = entry
+        # Tuple signatures must match exactly (local backend, mtime-based);
+        # None==None means remote backend where the TTL alone governs.
+        # A bare `object()` sentinel (stat failure) never matches anything.
+        if now < expires_at and isinstance(cached_sig, (tuple, type(None))) and cached_sig == signature:
+            return value
+    value = loader()
+    _ref_cache[key] = (now + REFERENCE_CACHE_TTL_SECONDS, signature, value)
+    return value
+
+
 # ── reference data ────────────────────────────────────────────────────────────
 
 def load_reference_data() -> dict:
-    lists = load_lists(get_excel_path_for_reading())
-    rates = load_rates()
-    lists["currencies"] = list(rates.keys()) if rates else ["PLN"]
-    return lists
+    def _load() -> dict:
+        lists = load_lists(get_excel_path_for_reading())
+        rates = load_rates()
+        lists["currencies"] = list(rates.keys()) if rates else ["PLN"]
+        return lists
+
+    cached = _cached("reference_data", _load)
+    # Shallow-copy per key so callers can't mutate the cached lists.
+    return {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+            for k, v in cached.items()}
 
 
 def load_budgets() -> dict[str, float]:
-    return load_budgets_from_excel(get_excel_path_for_reading())
+    return dict(_cached(
+        "budgets",
+        lambda: load_budgets_from_excel(get_excel_path_for_reading()),
+    ))
 
 
 # ── rates ─────────────────────────────────────────────────────────────────────
@@ -50,12 +123,16 @@ def load_rates() -> dict[str, float]:
     Read currency rate table from the Lists sheet.
     Column positions are resolved via ListsSchema — no hardcoded positions.
     Returns {currency_code: pln_per_unit}. Falls back to {"PLN": 1.0}.
+    Cached — see the reference-data TTL cache above.
     """
-    try:
-        return load_currency_rates_from_path(get_excel_path_for_reading())
-    except Exception as e:
-        log.warning("Could not load currency rates: %s", e)
-        return {"PLN": 1.0}
+    def _load() -> dict[str, float]:
+        try:
+            return load_currency_rates_from_path(get_excel_path_for_reading())
+        except Exception as e:
+            log.warning("Could not load currency rates: %s", e)
+            return {"PLN": 1.0}
+
+    return dict(_cached("rates", _load))
 
 
 def get_rate(ccy: str, rates: dict[str, float]) -> float:

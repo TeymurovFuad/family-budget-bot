@@ -1,5 +1,7 @@
-"""APScheduler job functions — weekly report, monthly summary, daily reminder, weekly nudge."""
+"""APScheduler job functions — weekly report, monthly summary, daily reminder,
+weekly nudge, periodic recovery-queue replay."""
 
+import asyncio
 import calendar
 from datetime import timedelta
 
@@ -9,6 +11,25 @@ from telegram.ext import Application
 from config import ALLOWED_USERS, get_display_currency, log
 from data import load_data, load_rates, load_budgets, now_utc, current_year_and_month, month_name
 from formatters import format_base_as_currency, savings_emoji
+
+
+async def replay_recovery_queue_job(app: Application | None = None):
+    """
+    Periodically re-apply writes that failed and were journaled to the
+    recovery queue. Previously the queue was only replayed at startup, so a
+    failed write could sit unrecovered until the next restart.
+    """
+    from excel_ops import replay_recovery_queue
+    from file_storage import excel_write_lock, flush_recovery_queue
+
+    if not flush_recovery_queue():   # cheap peek — nothing pending
+        return
+    loop = asyncio.get_running_loop()
+    async with excel_write_lock:
+        try:
+            await loop.run_in_executor(None, replay_recovery_queue)
+        except Exception:
+            log.exception("Periodic recovery queue replay failed")
 
 
 async def send_weekly_report(app: Application):

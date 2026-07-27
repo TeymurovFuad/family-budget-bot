@@ -727,20 +727,6 @@ def _user_draft_path(user_id: int) -> Path:
     return _bulk_draft_dir() / f"{user_id}.json"
 
 
-def _load_bulk_drafts() -> dict[str, list[dict]]:
-    draft_dir = _bulk_draft_dir()
-    draft_dir.mkdir(parents=True, exist_ok=True)
-    drafts: dict[str, list[dict]] = {}
-    for path in draft_dir.glob("*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                drafts[path.stem] = data
-        except Exception:
-            log.exception("Could not read bulk draft from %s", path)
-    return drafts
-
-
 def _load_user_draft(user_id: int) -> list[dict]:
     """Read one user's draft directly — avoids scanning every user's file."""
     path = _user_draft_path(user_id)
