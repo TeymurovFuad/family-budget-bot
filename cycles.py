@@ -336,7 +336,9 @@ def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd
     transfer title (e.g. 'WYNAGRODZENIE ZA LIPIEC') with an empty category;
     a categorised row ('Freelance' + 'Salary' description) is not a salary.
     """
-    keywords = cycle_detect_keywords(extra_keywords)
+    # Drop blank keywords defensively — a blank SALARY_CATEGORY must never
+    # produce an empty regex alternative that matches every Income row.
+    keywords = [k for k in cycle_detect_keywords(extra_keywords) if str(k).strip()]
     if not keywords:
         return pd.Series(False, index=df.index)
     pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
