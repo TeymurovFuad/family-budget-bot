@@ -546,7 +546,7 @@ async def setup_budget_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> i
         return await _next_budget_or_currency(update, ctx)
     cat = session["budget_queue"][0]
     try:
-        amount = parse_amount(update.message.text)
+        amount, _ = parse_amount(update.message.text)
         if amount < 0:
             raise ValueError
     except (ValueError, TypeError):

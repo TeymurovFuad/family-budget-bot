@@ -11,7 +11,7 @@ Two connected parts:
 
 | Part | Purpose |
 |---|---|
-| `Expenses_Improved.xlsx` | Source of truth — stores every transaction |
+| `Expenses.xlsx` | Source of truth — stores every transaction |
 | `bot.py` (Telegram) | Reads and writes the Excel file, sends summaries |
 
 All amounts are stored internally in **PLN**. You can change how they are displayed
@@ -70,7 +70,7 @@ Without this it shows 0.
 3. Set **Currency** if not PLN. The PLN equivalent calculates automatically.
 4. Choose **Type** from the dropdown: Expense, Income, or Savings.
 5. Choose **Category** from the dropdown.
-6. Write a short **Description** (mention a family member here if it matters).
+6. Write a short **Description**.
 7. Set **IsRecurring** = TRUE for anything that repeats every month.
 8. Leave **IsDone** = TRUE for transactions already made.
 
@@ -90,7 +90,7 @@ Without this it shows 0.
 | Entertainment | Restaurants, cinema, fun |
 | Travel | Hotels, flights, trips |
 | Children | Nursery fees, toys, clothing, medical |
-| Personal | Pocket money for <YOUR_NAME> or <FAMILY_MEMBER_1> |
+| Personal | Pocket money, personal spending |
 | Gifts & Shopping | Presents, clothing, home items |
 | Insurance | Car insurance, health insurance |
 | Loan | Monthly loan repayment |
@@ -99,9 +99,6 @@ Without this it shows 0.
 | Education | Courses, books, driving school |
 | Subscriptions | Google Drive, Proton VPN, streaming |
 | Other | Anything that doesn't fit |
-
-**Person column** is retired — the household budgets as one unit. Mention a
-family member in the Description when it matters (e.g. "pharmacy — kid").
 
 ---
 
@@ -202,7 +199,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 1. Create a bot via `@BotFather` on Telegram → copy the token
 2. Get your Telegram user ID from `@userinfobot`
 3. Copy `.env.example` to `.env` and fill in the values
-4. Put `Expenses_Improved.xlsx` in the `data/` folder
+4. Put `Expenses.xlsx` in the `data/` folder
 5. Run `python bot.py`
 
 ### Environment Variables
@@ -211,7 +208,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | — | Token from @BotFather |
 | `ALLOWED_TELEGRAM_IDS` | ✅ | — | Comma-separated user IDs. Get from @userinfobot |
-| `XLSX_PATH` | — | `data/Expenses_Improved.xlsx` | Path to the Excel file |
+| `XLSX_PATH` | — | `data/Expenses.xlsx` | Path to the Excel file |
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
 | `DISPLAY_CURRENCY` | — | `PLN` | Default display currency. Change to `EUR` or `AZN` when relocating |
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
@@ -296,15 +293,14 @@ confirmation first, then lets you edit the existing categories and budgets.
 
 ### Logging a Transaction via /add
 
-The bot walks you through 8 steps:
+The bot walks you through 7 steps:
 1. Enter the amount (numbers only)
 2. Pick the currency (keyboard shown, your display currency is first)
 3. Pick the type: Expense, Income, or Savings
 4. Pick the category (skipped for Income and Savings)
-5. Pick the family member (skipped for Income and Savings)
-6. Write a description — or type `/skip`
-7. Confirm whether it's recurring
-8. Review the summary and confirm with ✅ Save or ❌ Cancel
+5. Write a description — or type `/skip`
+6. Confirm whether it's recurring
+7. Review the summary and confirm with ✅ Save or ❌ Cancel
 
 The bot writes the transaction directly to MasterData including the Currency
 column and a live Value (PLN) formula identical to manually entered rows.

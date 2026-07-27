@@ -100,12 +100,12 @@ Minimum `.env` values:
 TELEGRAM_BOT_TOKEN=your_token_here
 ALLOWED_TELEGRAM_IDS=your_telegram_user_id
 STORAGE_BACKEND=local
-XLSX_PATH=data/Expenses_Improved.xlsx
+XLSX_PATH=data/Expenses.xlsx
 DISPLAY_CURRENCY=PLN
 TIMEZONE=Europe/Warsaw
 ```
 
-If `data/Expenses_Improved.xlsx` does not exist, the bot creates it
+If `data/Expenses.xlsx` does not exist, the bot creates it
 automatically from the repository template at `data/Expenses_Template.xlsx`.
 The bot polls Telegram — no public IP or port forwarding needed. `Ctrl+C` stops it.
 
@@ -122,7 +122,7 @@ right there — no cloud storage credentials needed.
 
 ```
 STORAGE_BACKEND=local
-XLSX_PATH=/home/ubuntu/budget-bot/data/Expenses_Improved.xlsx
+XLSX_PATH=/home/ubuntu/budget-bot/data/Expenses.xlsx
 TELEGRAM_BOT_TOKEN=your_token
 ALLOWED_TELEGRAM_IDS=your_id
 DISPLAY_CURRENCY=PLN
@@ -276,8 +276,8 @@ cleaned up automatically after each test.
 | `ALLOWED_TELEGRAM_IDS` | bot + reports | ✅ | — (first ID is the primary/owner user — see DOCUMENTATION.md) |
 | `GCS_BUCKET_NAME` | bot + reports | for GCS | — |
 | `GCS_KEY_JSON` | bot + reports | for GCS | — |
-| `GCS_OBJECT_NAME` | bot + reports | — | `Expenses_Improved.xlsx` |
-| `XLSX_PATH` | local mode only | — | `data/Expenses_Improved.xlsx` |
+| `GCS_OBJECT_NAME` | bot + reports | — | `Expenses.xlsx` |
+| `XLSX_PATH` | local mode only | — | `data/Expenses.xlsx` |
 | `DISPLAY_CURRENCY` | bot + reports | — | `PLN` |
 | `TIMEZONE` | bot + reports | — | `Europe/Warsaw` |
 | `BUDGET_CYCLE` | bot | — | `0` — set to `1` for salary-to-salary budget cycles (cycle-scoped `/summary` and `/budget`) |
@@ -309,7 +309,7 @@ line in `.env`. No code changes needed.
 1. [console.cloud.google.com](https://console.cloud.google.com) → create a
    project → **Cloud Storage → Buckets → Create bucket** (region
    `us-central1` is in the Always Free zone; storage class Standard).
-2. Upload `Expenses_Improved.xlsx` to the bucket.
+2. Upload `Expenses.xlsx` to the bucket.
 3. **IAM & Admin → Service Accounts → Create service account**, role
    **Storage Object Admin**.
 4. Open the service account → **Keys → Add key → Create new key → JSON** —
@@ -320,7 +320,7 @@ line in `.env`. No code changes needed.
 ```
 STORAGE_BACKEND=s3
 S3_BUCKET_NAME=your-bucket-name
-S3_OBJECT_NAME=Expenses_Improved.xlsx
+S3_OBJECT_NAME=Expenses.xlsx
 S3_ENDPOINT_URL=https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
 S3_ACCESS_KEY=your-access-key
 S3_SECRET_KEY=your-secret-key
@@ -336,7 +336,7 @@ names: `us-ashburn-1`, `us-phoenix-1`, `eu-frankfurt-1`, `eu-amsterdam-1`,
 **Updating the Excel file from your computer** (any cloud backend), using
 the sync script:
 ```bash
-export XLSX_PATH="$HOME/Documents/Expenses_Improved.xlsx"
+export XLSX_PATH="$HOME/Documents/Expenses.xlsx"
 export GCS_BUCKET_NAME="your-bucket-name"
 export GCS_KEY_JSON="$(cat /path/to/service-account-key.json)"
 ./scripts/sync_data.sh
@@ -448,7 +448,7 @@ separate login (`${{ secrets.GITHUB_TOKEN }}` is automatic).
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER   # log out and back in after this
 nano ~/budget-bot.env           # paste your env vars, same as .env
-scp Expenses_Improved.xlsx ubuntu@YOUR_SERVER_IP:~/data/
+scp Expenses.xlsx ubuntu@YOUR_SERVER_IP:~/data/
 docker login                    # or the GHCR equivalent, so it can pull the private image
 ```
 
