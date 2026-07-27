@@ -1531,6 +1531,18 @@ Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
 
 - [ ] **Scripts inventory missing from DOCUMENTATION.md** — `sync_cycle_dashboard.py` (and the pre-existing scripts `fix_formula_bounds.py`, `fix_import_errors.py`, etc.) are undocumented at the doc level. Create a "Maintenance Scripts" table in DOCUMENTATION.md covering all scripts in `scripts/` (purpose, when to run, flags). (`DOCUMENTATION.md`)
 
+## Follow-up: Wave 2 Group B (PR #64, 2026-07-27)
+
+- [ ] **Hardcoded PLN fallbacks sweep** — `row.get("currency", "PLN")`-style
+  defaults are hardcoded across the codebase (`handlers/bulk_conv.py`,
+  `validators.py` `_dedup_key_parts`, `models.py`, formatters, etc.) even
+  though `DISPLAY_CURRENCY` already exists in settings/.env. Sweep every
+  hardcoded `"PLN"` fallback and route it through `settings.DISPLAY_CURRENCY`
+  (or a new `DEFAULT_CURRENCY` setting if display and entry defaults should
+  diverge). PR #64 already did this for the AI prompt reference block; the
+  rest of the code still assumes PLN. Locale-neutrality follow-up to the
+  earlier PLN-hardcoding sweep.
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
