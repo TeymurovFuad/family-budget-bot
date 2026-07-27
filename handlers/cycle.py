@@ -15,7 +15,8 @@ from formatters import format_base_as_currency
 from log_decorators import log_call
 from cycles import (
     async_record_cycle_start, async_remove_cycle_start, current_cycle_start,
-    cycle_label, cycle_detect_keywords, detect_cycle_candidates, load_cycles,
+    cycle_label, cycle_detect_keywords, detect_cycle_candidates,
+    fallback_income_candidates, load_cycles,
     record_cycle_starts_batch, should_prompt_new_cycle,
 )
 
@@ -219,29 +220,50 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         None, lambda: detect_cycle_candidates(df, cycles, extra_keywords)
     )
 
-    if not candidates:
-        await update.message.reply_text(
-            "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
-            "If a salary is missing, add its transfer title as a search word: "
-            "`/cycle detect wynagrodzenie`\\.",
-            parse_mode="MarkdownV2",
-        )
-        return
-
     ccy = get_display_currency(update.effective_user.id)
 
     def _fmt_amount(a: float) -> str:
         return format_base_as_currency(a, ccy, rates)
 
-    ctx.user_data["detect_candidates"] = [
-        {
-            "date_str": c["date"].isoformat(),
-            "amounts": c["amounts"],
-            "amounts_fmt": [_fmt_amount(a) for a in c["amounts"]],
-            "unambiguous": c["unambiguous"],
-        }
-        for c in candidates
-    ]
+    def _entries(cands: list[dict]) -> list[dict]:
+        return [
+            {
+                "date_str": c["date"].isoformat(),
+                "amounts": c["amounts"],
+                "amounts_fmt": [_fmt_amount(a) for a in c["amounts"]],
+                "unambiguous": c["unambiguous"],
+            }
+            for c in cands
+        ]
+
+    if not candidates:
+        # No salary-category rows — offer the largest Income rows in the
+        # ±20-day window around the 1st of the current month as candidates.
+        # Catches salaries filed under non-salary categories.
+        anchor = now_utc().date().replace(day=1)
+        fallback = await loop.run_in_executor(
+            None, lambda: fallback_income_candidates(df, anchor, cycles)
+        )
+        if not fallback:
+            await update.message.reply_text(
+                "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
+                "If a salary is missing, add its transfer title as a search word: "
+                "`/cycle detect wynagrodzenie`\\.",
+                parse_mode="MarkdownV2",
+            )
+            return
+        ctx.user_data["detect_queue"] = [_entries(fallback)]
+        ctx.user_data["detect_total"] = 1
+        ctx.user_data["detect_recorded"] = 0
+        await update.message.reply_text(
+            f"🔍 No salary\\-category rows found\\. Largest income near "
+            f"{_esc(anchor.strftime('%b %Y'))} — maybe one of these started the cycle:",
+            parse_mode="MarkdownV2",
+        )
+        await _send_detect_prompt(update.message, ctx)
+        return
+
+    ctx.user_data["detect_candidates"] = _entries(candidates)
 
     n = len(candidates)
     lines = []
@@ -267,34 +289,91 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
+def _group_by_month(entries: list[dict]) -> list[list[dict]]:
+    """Group review entries into per-calendar-month lists, order preserved."""
+    groups: list[list[dict]] = []
+    for e in entries:
+        key = e["date_str"][:7]
+        if groups and groups[-1][0]["date_str"][:7] == key:
+            groups[-1].append(e)
+        else:
+            groups.append([e])
+    return groups
+
+
+def _month_of(group: list[dict]) -> str:
+    return date.fromisoformat(group[0]["date_str"]).strftime("%b %Y")
+
+
 async def _send_detect_prompt(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a Yes/Skip/Stop prompt for the next candidate in the review queue."""
+    """
+    Prompt for the next month group in the review queue. A single candidate
+    gets Yes/Skip; several candidates in one month get one button per
+    candidate (largest first). Both get "No cycle this month" — extending the
+    previous cycle is valid data, not an error.
+    """
     queue = ctx.user_data.get("detect_queue", [])
     if not queue:
         return
-    entry = queue[0]
+    group = queue[0]
     total = ctx.user_data.get("detect_total", len(queue))
     idx = total - len(queue) + 1
+    month = group[0]["date_str"][:7]
 
-    d = _esc(entry["date_str"])
-    amounts_fmt = entry.get("amounts_fmt") or [f"{a:,.0f}" for a in entry["amounts"]]
-    if entry["unambiguous"]:
-        amounts_str = _esc(amounts_fmt[0])
-        text = f"💰 *{idx} of {total}* — {d}\nSalary · {amounts_str}\n\nDoes this start a new budget cycle?"
-    else:
-        amounts_str = " \\+ ".join(_esc(a) for a in amounts_fmt)
-        text = (
-            f"💰 *{idx} of {total}* — {d}\n"
-            f"{len(amounts_fmt)} salary payments: {amounts_str}\n\n"
-            "Does this date start a new budget cycle?"
-        )
+    def _fmt(entry):
+        return entry.get("amounts_fmt") or [f"{a:,.0f}" for a in entry["amounts"]]
 
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Yes",  callback_data=f"detect:pick:{entry['date_str']}"),
-        InlineKeyboardButton("⏭ Skip", callback_data=f"detect:skip:{entry['date_str']}"),
+    none_row = [InlineKeyboardButton(
+        "🚫 No cycle this month", callback_data=f"detect:none:{month}"
+    )]
+
+    if len(group) == 1:
+        entry = group[0]
+        d = _esc(entry["date_str"])
+        amounts_fmt = _fmt(entry)
+        if entry["unambiguous"]:
+            amounts_str = _esc(amounts_fmt[0])
+            text = f"💰 *{idx} of {total}* — {d}\nSalary · {amounts_str}\n\nDoes this start a new budget cycle?"
+        else:
+            amounts_str = " \\+ ".join(_esc(a) for a in amounts_fmt)
+            text = (
+                f"💰 *{idx} of {total}* — {d}\n"
+                f"{len(amounts_fmt)} salary payments: {amounts_str}\n\n"
+                "Does this date start a new budget cycle?"
+            )
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Yes",  callback_data=f"detect:pick:{entry['date_str']}"),
+                InlineKeyboardButton("⏭ Skip", callback_data=f"detect:skip:{entry['date_str']}"),
+                InlineKeyboardButton("🛑 Stop", callback_data="detect:stop"),
+            ],
+            none_row,
+        ])
+        await message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        return
+
+    # Several candidate dates in one month — one tap picks the boundary.
+    ordered = sorted(group, key=lambda e: max(e["amounts"]), reverse=True)
+    text = (
+        f"💰 *{idx} of {total}* — {_esc(_month_of(group))}\n"
+        f"{len(group)} salary candidates this month\\. "
+        "Which one starts the budget cycle?"
+    )
+    rows = []
+    for entry in ordered:
+        d = date.fromisoformat(entry["date_str"])
+        amounts_str = " + ".join(_fmt(entry))
+        rows.append([InlineKeyboardButton(
+            f"{_day_month(d)} — {amounts_str}",
+            callback_data=f"detect:pick:{entry['date_str']}",
+        )])
+    rows.append(none_row)
+    rows.append([
+        InlineKeyboardButton("📅 Custom date", callback_data="detect:custom"),
         InlineKeyboardButton("🛑 Stop", callback_data="detect:stop"),
-    ]])
-    await message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    ])
+    await message.reply_text(text, parse_mode="MarkdownV2",
+                             reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def _advance_detect_queue(message, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -344,8 +423,9 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
 
     if data == "detect:review":
         candidates = ctx.user_data.pop("detect_candidates", None) or []
-        ctx.user_data["detect_queue"] = list(candidates)
-        ctx.user_data["detect_total"] = len(candidates)
+        groups = _group_by_month(candidates)
+        ctx.user_data["detect_queue"] = groups
+        ctx.user_data["detect_total"] = len(groups)
         ctx.user_data["detect_recorded"] = 0
         await query.edit_message_reply_markup(reply_markup=None)
         await _send_detect_prompt(query.message, ctx)
@@ -377,6 +457,31 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
         date_str = data[len("detect:skip:"):]
         await query.edit_message_text(
             f"⏭ Skipped — {_esc(date_str)} stays in the previous cycle as regular income\\.",
+            parse_mode="MarkdownV2",
+        )
+        await _advance_detect_queue(query.message, ctx)
+        return
+
+    if data.startswith("detect:none:"):
+        # "No cycle this month" — a valid answer, not a skip: the previous
+        # cycle simply runs longer (a 60-day cycle is data, not an error).
+        month_key = data[len("detect:none:"):]
+        try:
+            month_label = date.fromisoformat(month_key + "-01").strftime("%b %Y")
+        except ValueError:
+            month_label = month_key
+        await query.edit_message_text(
+            f"🚫 No cycle in {_esc(month_label)} — the previous cycle "
+            f"extends through it\\.",
+            parse_mode="MarkdownV2",
+        )
+        await _advance_detect_queue(query.message, ctx)
+        return
+
+    if data == "detect:custom":
+        await query.edit_message_text(
+            "📅 Send `/cycle started YYYY\\-MM\\-DD` with the date the cycle "
+            "should start from\\.",
             parse_mode="MarkdownV2",
         )
         await _advance_detect_queue(query.message, ctx)

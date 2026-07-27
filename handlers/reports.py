@@ -3,7 +3,7 @@
 import calendar
 import io
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import matplotlib
 matplotlib.use("Agg")
@@ -14,8 +14,12 @@ from telegram.ext import ApplicationHandlerStop, ContextTypes
 from telegram.helpers import escape_markdown
 
 import settings
+from settings import TIMEZONE
 from config import auth, get_display_currency, SAVINGS_TARGET, log
-from cycles import load_cycles, current_cycle_start, cycle_totals
+from cycles import (
+    BEFORE_CYCLES_LABEL, load_cycles, current_cycle_start, cycle_totals,
+    cycle_periods, detect_missing_boundaries,
+)
 from log_decorators import log_call
 from data import (
     load_data, load_rates, load_budgets, load_reference_data,
@@ -38,7 +42,9 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
     """(start, today, label) for the current cycle, or None → calendar fallback."""
     if not settings.BUDGET_CYCLE:
         return None
-    today = now_utc().date()
+    # Local calendar date, consistent with handlers/cycle.py — a UTC date can
+    # lag/lead the user's day around midnight.
+    today = datetime.now(TIMEZONE).date()
     current = current_cycle_start(today)
     if current is None:
         return None
@@ -49,6 +55,24 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
 async def _send_cycle_summary(msg, ccy: str, df, rates,
                               start: date, end: date, label: str) -> None:
     """msg is anything with reply_text — update.message or query.message."""
+    if label == BEFORE_CYCLES_LABEL:
+        # Implicit bucket for rows older than the first boundary — it has no
+        # salary anchor, so salary/unaccounted math is excluded on purpose.
+        totals  = cycle_totals(df, start, end)
+        income  = totals["income"]
+        expense = totals["expense"]
+        savings = totals["savings"]
+        net     = income - expense - savings
+        await msg.reply_text(
+            f"📊 *{BEFORE_CYCLES_LABEL} — Summary* ({ccy})\n"
+            f"_{start.isoformat()} → {end.isoformat()} (before the first recorded cycle)_\n\n"
+            f"💰 Income:   `{format_base_as_currency(income, ccy, rates)}`\n"
+            f"💸 Expenses: `{format_base_as_currency(expense, ccy, rates)}`\n"
+            f"🏦 Savings:  `{format_base_as_currency(savings, ccy, rates)}`\n"
+            f"📈 Net:      `{format_base_as_currency(net, ccy, rates)}`",
+            parse_mode="Markdown",
+        )
+        return
     totals  = cycle_totals(df, start, end)
     income  = totals["income"]
     expense = totals["expense"]
@@ -124,6 +148,64 @@ def _summary_months(df, year: int) -> list[int]:
                    if str(n).lower() in MONTHS_BY_NAME})
 
 
+def _resolve_ledger_first(resolution: dict, cycles, today: date) -> dict:
+    """
+    Item: past-period walk. '/summary aug 2025' resolves against the cycle
+    ledger first — a month+year resolution whose label matches a recorded
+    cycle ('Aug 2025') maps to that cycle; calendar month otherwise.
+    """
+    if not cycles or resolution.get("kind") != "month":
+        return resolution
+    from handlers.summary_picker import cycle_bounds
+    wanted = date(resolution["year"], resolution["month"], 1).strftime("%b %Y")
+    for i in range(len(cycles) - 1, -1, -1):
+        if cycles[i][0] <= today and cycles[i][1] == wanted:
+            start, end = cycle_bounds(cycles, i, today)
+            return {"kind": "cycle", "start": start, "end": end, "label": cycles[i][1]}
+    return resolution
+
+
+async def _maybe_prompt_backfill(msg, ctx, resolution: dict, cycles) -> bool:
+    """
+    Lazy backfill: when a range/entire-period report covers months with no
+    recorded cycle boundary, ask once before rendering. Returns True when a
+    prompt was sent (rendering deferred to the sum:bf callback).
+    """
+    if not settings.BUDGET_CYCLE or not cycles:
+        return False
+    if resolution.get("kind") not in ("range", "entire"):
+        return False
+    missing = detect_missing_boundaries(resolution["start"], resolution["end"], cycles)
+    if not missing:
+        return False
+    ctx.user_data["sum_pending"] = resolution
+    months = ", ".join(m.strftime("%b %Y") for m in missing[:6])
+    if len(missing) > 6:
+        months += f" (+{len(missing) - 6} more)"
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes, fill them in", callback_data="sum:bf:yes"),
+        InlineKeyboardButton("⏭ Skip", callback_data="sum:bf:skip"),
+    ]])
+    await msg.reply_text(
+        f"🔍 Found missing cycle boundaries for {months} — fill them in first?",
+        reply_markup=keyboard,
+    )
+    return True
+
+
+async def _send_entire_period(msg, ccy: str, df, rates, cycles, today: date) -> None:
+    """One summary per cycle, oldest first, incl. the 'Before cycles' bucket."""
+    periods = [p for p in cycle_periods(df, cycles, today) if p[0] <= today]
+    if not periods:
+        await msg.reply_text(
+            "No cycles recorded yet — use `/cycle started` or `/cycle detect` first.",
+            parse_mode="Markdown",
+        )
+        return
+    for start, end, label in periods:
+        await _send_cycle_summary(msg, ccy, df, rates, start, end, label)
+
+
 async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict) -> None:
     """Dispatch a parse_summary_args() result to the right report."""
     kind = resolution["kind"]
@@ -133,6 +215,10 @@ async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict)
     elif kind == "cycle":
         await _send_cycle_summary(msg, ccy, df, rates,
                                   resolution["start"], resolution["end"], resolution["label"])
+    elif kind == "entire":
+        today = now_utc().date()
+        cycles = load_cycles() if settings.BUDGET_CYCLE else []
+        await _send_entire_period(msg, ccy, df, rates, cycles, today)
     else:  # range
         budgets = load_budgets()
         text = _build_range_report(df, rates, budgets, ccy,
@@ -170,6 +256,17 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         cycles = None
         if settings.BUDGET_CYCLE:
             cycles = load_cycles()
+
+        if ctx.args[0].lower() in ("all", "entire") and settings.BUDGET_CYCLE:
+            # Entire-period walk over the whole cycle ledger.
+            dates = pd.to_datetime(df["Date"], errors="coerce").dt.date.dropna()
+            earliest = dates.min() if not dates.empty else today
+            resolution = {"kind": "entire", "start": earliest, "end": today}
+            if await _maybe_prompt_backfill(update.message, ctx, resolution, cycles):
+                return
+            await _send_entire_period(update.message, ccy, df, rates, cycles or [], today)
+            return
+
         resolution = parse_summary_args(ctx.args, today, cycles)
         if resolution is None:
             await update.message.reply_text(
@@ -177,6 +274,9 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "`/summary 08.2025`, `/summary jul`, or `/summary aug 2025 - jan 2026`.",
                 parse_mode="Markdown",
             )
+            return
+        resolution = _resolve_ledger_first(resolution, cycles, today)
+        if await _maybe_prompt_backfill(update.message, ctx, resolution, cycles):
             return
         await _render_summary_resolution(update.message, ccy, df, rates, resolution)
         return
@@ -212,6 +312,23 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     today = now_utc().date()
     parts = query.data.split(":")
     action = parts[1]
+
+    if action == "bf":
+        # Lazy-backfill prompt answer (item: missing cycle boundaries).
+        pending = ctx.user_data.pop("sum_pending", None)
+        if parts[2] == "yes":
+            await msg.edit_text(
+                "🔍 Run /cycle detect to review and record the missing "
+                "boundaries, then rerun the report."
+            )
+            return
+        # Skip → render the deferred report with the gaps as they are.
+        await msg.edit_reply_markup(reply_markup=None)
+        if pending is None:
+            await msg.reply_text("Nothing pending to render — run the report again.")
+            return
+        await _render_summary_resolution(msg, ccy, df, rates, pending)
+        return
 
     if action in ("tm", "lm"):
         year, month = current_year_and_month()
@@ -499,22 +616,46 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
 
-    now  = now_utc()
-    month_labels = []
-    rate_values  = []
-    for delta in range(5, -1, -1):
-        m  = (now.month - delta - 1) % 12
-        y  = now.year + ((now.month - delta - 1) // 12)
-        ms = month_name(m + 1)
-        sub    = df[(df["Year"] == y) & (df["Month"] == ms) & df["IsDone"]]
-        income  = sub[sub["Type"] == "Income"]["_base"].sum()
-        expense = sub[sub["Type"] == "Expense"]["_base"].sum()
-        savings_amt = sub[sub["Type"] == "Savings"]["_base"].sum()
-        rate    = savings_amt / income * 100 if income > 0 else 0
-        month_labels.append(ms[:3])   # abbreviated month name
-        rate_values.append(round(rate, 1))
+    labels: list[str] = []
+    rate_values: list[float] = []
+    period_word = "month"
+    title = "Savings Rate — Last 6 Months"
 
-    buf = _build_savings_chart(month_labels, rate_values)
+    cycles = load_cycles() if settings.BUDGET_CYCLE else []
+    if cycles:
+        # Cycle mode: last 6 recorded cycles (the "Before cycles" bucket has
+        # no salary anchor and is skipped for trend purposes).
+        today = datetime.now(TIMEZONE).date()
+        periods = [
+            p for p in cycle_periods(df, cycles, today)
+            if p[2] != BEFORE_CYCLES_LABEL and p[0] <= today
+        ][-6:]
+        for start, end, label in periods:
+            totals = cycle_totals(df, start, end)
+            income = totals["income"]
+            rate   = totals["savings"] / income * 100 if income > 0 else 0
+            labels.append(label)
+            rate_values.append(round(rate, 1))
+        period_word = "cycle"
+        title = f"Savings Rate — Last {len(labels)} Cycle{'s' if len(labels) != 1 else ''}"
+    else:
+        now = now_utc()
+        for delta in range(5, -1, -1):
+            m  = (now.month - delta - 1) % 12
+            y  = now.year + ((now.month - delta - 1) // 12)
+            ms = month_name(m + 1)
+            sub    = df[(df["Year"] == y) & (df["Month"] == ms) & df["IsDone"]]
+            income  = sub[sub["Type"] == "Income"]["_base"].sum()
+            savings_amt = sub[sub["Type"] == "Savings"]["_base"].sum()
+            rate    = savings_amt / income * 100 if income > 0 else 0
+            labels.append(ms[:3])   # abbreviated month name
+            rate_values.append(round(rate, 1))
+
+    if not rate_values:
+        await update.message.reply_text("No data to chart yet.")
+        return
+
+    buf = _build_savings_chart(labels, rate_values, title=title)
 
     current_rate = rate_values[-1]
     prior_rate   = rate_values[-2] if len(rate_values) >= 2 else current_rate
@@ -525,8 +666,8 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         arrow = "→"
     caption = (
-        f"Savings rate this month: {current_rate:.1f}% {arrow}\n"
-        f"vs prior month: {prior_rate:.1f}%"
+        f"Savings rate this {period_word}: {current_rate:.1f}% {arrow}\n"
+        f"vs prior {period_word}: {prior_rate:.1f}%"
     )
     await update.message.reply_photo(photo=buf, caption=caption)
 
@@ -729,8 +870,10 @@ def _bar_color(spend: float, budget: float) -> str:
     return "#F44336"
 
 
-def _build_savings_chart(months: list, rates: list) -> io.BytesIO:
-    """Build a 6-month savings rate line chart and return a PNG BytesIO buffer."""
+def _build_savings_chart(
+    months: list, rates: list, title: str = "Savings Rate — Last 6 Months"
+) -> io.BytesIO:
+    """Build a savings-rate line chart and return a PNG BytesIO buffer."""
     target = int(SAVINGS_TARGET * 100)
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -738,7 +881,7 @@ def _build_savings_chart(months: list, rates: list) -> io.BytesIO:
     ax.axhline(target, color="grey", linestyle="--", linewidth=1.5, label=f"Target {target}%")
     ax.set_ylim(0, max(100, max(rates) + 10) if rates else 100)
     ax.set_ylabel("Savings rate (%)")
-    ax.set_title("Savings Rate — Last 6 Months", fontsize=13, fontweight="bold")
+    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.legend(fontsize=9)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
