@@ -1,7 +1,8 @@
 """Centralized logging setup.
 
 Creates a daily rotating log file and console output. Keeps the last
-20 log files (approx 20 days) and deletes older files on startup.
+20 log files (approx 20 days) and deletes rotated files older than
+180 days on startup.
 
 Usage:
     from logger import init_logging, get_logger
@@ -17,6 +18,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 import settings
+
+_LOG_RETENTION_DAYS = 180
 
 
 class SafeStreamHandler(logging.StreamHandler):
@@ -49,10 +52,10 @@ def _ensure_log_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _cleanup_old_logs(path: Path, keep_days: int = 20) -> None:
-    """Delete log files older than `keep_days` days in `path`."""
+def _cleanup_old_logs(path: Path, keep_days: int = _LOG_RETENTION_DAYS) -> None:
+    """Delete rotated log files (budget-bot.log.YYYY-MM-DD) older than keep_days days."""
     cutoff = datetime.now() - timedelta(days=keep_days)
-    for p in path.glob("*.log"):
+    for p in path.glob("budget-bot.log.*"):
         try:
             mtime = datetime.fromtimestamp(p.stat().st_mtime)
             if mtime < cutoff:
@@ -73,7 +76,7 @@ def init_logging(level: int | str = None, *, keep_days: int | None = None) -> No
     _ensure_log_dir(log_dir)
     if keep_days is None:
         keep_days = settings.LOG_KEEP_DAYS
-    _cleanup_old_logs(log_dir, keep_days=keep_days)
+    _cleanup_old_logs(log_dir)
 
     root = logging.getLogger()
     if level is None:
