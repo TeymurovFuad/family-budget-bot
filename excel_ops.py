@@ -15,6 +15,7 @@ from excel_schema import (
     ensure_monthly_summary_row,
     ensure_monthly_summary_rows_from_masterdata,
 )
+from audit import audit_span
 from file_storage import (
     ExcelFileContext,
     append_transactions_batch,
@@ -24,9 +25,15 @@ from file_storage import (
     append_to_recovery_queue,
     flush_recovery_queue,
     delete_recovery_queue_file,
+    requeue_rows,
     _excel_write_lock,
 )
 from models import Transaction
+
+
+def _invalidate_reference_cache() -> None:
+    from data import invalidate_reference_cache
+    invalidate_reference_cache()
 
 
 @log_call()
@@ -46,33 +53,41 @@ def _do_append_transaction(transaction: Transaction) -> None:
 
 
 @log_call()
-async def append_transaction(transaction: Transaction) -> None:
+async def append_transaction(transaction: Transaction, user=None) -> None:
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
-        try:
-            await loop.run_in_executor(None, _do_append_transaction, transaction)
-        except Exception as e:
-            log.error("Upload failed — saving to recovery queue: %s", e)
-            append_to_recovery_queue(transaction.to_row())
-            raise
+        with audit_span("append", rows=1, user=user):
+            try:
+                await loop.run_in_executor(None, _do_append_transaction, transaction)
+            except Exception as e:
+                log.error("Upload failed — saving to recovery queue: %s", e)
+                append_to_recovery_queue(transaction.to_row())
+                raise
+        _invalidate_reference_cache()
 
 
-async def async_delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
+async def async_delete_transaction_row(row_idx: int, expected: dict | None = None, user=None) -> None:
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
-        await loop.run_in_executor(None, delete_transaction_row, row_idx, expected)
+        with audit_span("delete", rows=1, user=user):
+            await loop.run_in_executor(None, delete_transaction_row, row_idx, expected)
+        _invalidate_reference_cache()
 
 
-async def async_update_currency_rates(new_rates: dict) -> None:
+async def async_update_currency_rates(new_rates: dict, user=None) -> None:
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
-        await loop.run_in_executor(None, update_currency_rates_in_excel, new_rates)
+        with audit_span("update_rates", rows=len(new_rates), user=user):
+            await loop.run_in_executor(None, update_currency_rates_in_excel, new_rates)
+        _invalidate_reference_cache()
 
 
-async def async_append_batch(transactions: list) -> None:
+async def async_append_batch(transactions: list, user=None) -> None:
     loop = asyncio.get_running_loop()
     async with _excel_write_lock:
-        await loop.run_in_executor(None, append_transactions_batch, transactions)
+        with audit_span("append_batch", rows=len(transactions), user=user):
+            await loop.run_in_executor(None, append_transactions_batch, transactions)
+        _invalidate_reference_cache()
 
 
 def replay_recovery_queue() -> None:
@@ -106,6 +121,9 @@ def replay_recovery_queue() -> None:
         if isinstance(row.get("is_recurring"), str):
             row["is_recurring"] = row["is_recurring"].lower() in {"true", "1", "yes"}
     failed: list[dict] = []
+    outcome = "ok"
+    import time as _time
+    _start = _time.perf_counter()
     try:
         with ExcelFileContext() as excel_path:
             wb = load_workbook(excel_path)
@@ -127,9 +145,17 @@ def replay_recovery_queue() -> None:
     except Exception as e:
         log.error("Recovery queue: replay aborted, re-queueing all rows: %s", e)
         failed = pending
+        outcome = "error"
 
     # Replay attempt is fully finished (success or failure) — safe to drop
-    # the old queue file now and persist only the rows that still failed.
+    # the old journal now and persist only the rows that still failed, in a
+    # single atomic write.
     delete_recovery_queue_file()
-    for row in failed:
-        append_to_recovery_queue(row)
+    requeue_rows(failed)
+
+    from audit import audit_save
+    audit_save(source="replay_recovery_queue", rows=len(pending) - len(failed),
+               outcome=outcome if not failed else f"{outcome}_requeued_{len(failed)}",
+               duration_ms=(_time.perf_counter() - _start) * 1000)
+    if len(pending) - len(failed) > 0:
+        _invalidate_reference_cache()

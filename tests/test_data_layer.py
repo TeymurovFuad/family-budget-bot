@@ -1200,3 +1200,110 @@ class TestLoadReferenceData:
         for key in ("months", "txn_types", "categories", "persons", "years"):
             assert key in ref
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# data.py — reference-data TTL cache
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestReferenceDataCache:
+
+    def _setup(self, excel_path, monkeypatch):
+        import data as data_mod
+        data_mod.invalidate_reference_cache()
+        monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
+        return data_mod
+
+    def test_second_call_does_not_reread_workbook(self, excel_path, monkeypatch):
+        data_mod = self._setup(excel_path, monkeypatch)
+        calls = {"n": 0}
+        real_load_lists = data_mod.load_lists
+
+        def counting_load_lists(path):
+            calls["n"] += 1
+            return real_load_lists(path)
+
+        monkeypatch.setattr(data_mod, "load_lists", counting_load_lists)
+        first = data_mod.load_reference_data()
+        second = data_mod.load_reference_data()
+        assert calls["n"] == 1, "cached call must not re-read the workbook"
+        assert first == second
+
+    def test_rates_cached_between_calls(self, excel_path, monkeypatch):
+        data_mod = self._setup(excel_path, monkeypatch)
+        calls = {"n": 0}
+        real = data_mod.load_currency_rates_from_path
+
+        def counting(path):
+            calls["n"] += 1
+            return real(path)
+
+        monkeypatch.setattr(data_mod, "load_currency_rates_from_path", counting)
+        data_mod.load_rates()
+        data_mod.load_rates()
+        assert calls["n"] == 1
+
+    def test_workbook_write_invalidates_local_cache(self, excel_path, monkeypatch):
+        """Local backend keys the cache on mtime — a save must trigger a re-read."""
+        data_mod = self._setup(excel_path, monkeypatch)
+        ref1 = data_mod.load_reference_data()
+        assert "NewCat" not in ref1["categories"]
+
+        wb = openpyxl.load_workbook(excel_path)
+        ws = wb["Lists"]
+        # Append right below the last category so read_col picks it up
+        row = 2
+        while ws.cell(row, 3).value is not None:
+            row += 1
+        ws.cell(row, 3).value = "NewCat"
+        wb.save(excel_path)
+
+        ref2 = data_mod.load_reference_data()
+        assert "NewCat" in ref2["categories"]
+
+    def test_invalidate_reference_cache_forces_reload(self, excel_path, monkeypatch):
+        data_mod = self._setup(excel_path, monkeypatch)
+        calls = {"n": 0}
+        real_load_lists = data_mod.load_lists
+
+        def counting_load_lists(path):
+            calls["n"] += 1
+            return real_load_lists(path)
+
+        monkeypatch.setattr(data_mod, "load_lists", counting_load_lists)
+        data_mod.load_reference_data()
+        data_mod.invalidate_reference_cache()
+        data_mod.load_reference_data()
+        assert calls["n"] == 2
+
+    def test_cached_result_is_copy_not_shared(self, excel_path, monkeypatch):
+        """Callers mutating the returned lists must not poison the cache."""
+        data_mod = self._setup(excel_path, monkeypatch)
+        ref1 = data_mod.load_reference_data()
+        ref1["categories"].append("MutatedCat")
+        ref2 = data_mod.load_reference_data()
+        assert "MutatedCat" not in ref2["categories"]
+
+    def test_budgets_cached_between_calls(self, excel_path, monkeypatch):
+        data_mod = self._setup(excel_path, monkeypatch)
+        calls = {"n": 0}
+        real = data_mod.load_budgets_from_excel
+
+        def counting(path):
+            calls["n"] += 1
+            return real(path)
+
+        monkeypatch.setattr(data_mod, "load_budgets_from_excel", counting)
+        data_mod.load_budgets()
+        data_mod.load_budgets()
+        assert calls["n"] == 1
+
+    def test_write_through_excel_ops_invalidates_cache(self, excel_path, monkeypatch):
+        """excel_ops write paths must clear the cache (matters on remote backends)."""
+        import excel_ops
+        data_mod = self._setup(excel_path, monkeypatch)
+        data_mod.load_reference_data()
+        assert data_mod._ref_cache  # populated
+        excel_ops._invalidate_reference_cache()
+        assert not data_mod._ref_cache
+

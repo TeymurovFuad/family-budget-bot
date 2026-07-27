@@ -460,3 +460,232 @@ class TestAtomicSaveBackupPolicy:
         atomic_save(wb, path)
 
         assert (tmp_path / "workbook.xlsx.bak").exists()
+
+
+# ── backend selection: explicit STORAGE_BACKEND must win ─────────────────────
+
+
+class TestActiveBackendOverride:
+
+    def test_explicit_local_wins_over_stray_gcs_bucket(self, monkeypatch):
+        """A leftover GCS_BUCKET_NAME must not flip an explicit local backend."""
+        import settings
+        monkeypatch.setattr(settings, "STORAGE_BACKEND_EXPLICIT", True)
+        monkeypatch.setattr(file_storage, "STORAGE_BACKEND", "local")
+        monkeypatch.setattr(file_storage, "GCS_BUCKET_NAME", "stray-bucket")
+        assert file_storage._active_backend() == "local"
+
+    def test_explicit_local_wins_over_stray_s3_bucket(self, monkeypatch):
+        import settings
+        monkeypatch.setattr(settings, "STORAGE_BACKEND_EXPLICIT", True)
+        monkeypatch.setattr(file_storage, "STORAGE_BACKEND", "local")
+        monkeypatch.setattr(file_storage, "S3_BUCKET_NAME", "stray-bucket")
+        assert file_storage._active_backend() == "local"
+
+    def test_bucket_name_still_selects_backend_when_not_explicit(self, monkeypatch):
+        """Backward compat: with no explicit STORAGE_BACKEND, a bucket var selects the backend."""
+        import settings
+        monkeypatch.setattr(settings, "STORAGE_BACKEND_EXPLICIT", False)
+        monkeypatch.setattr(file_storage, "STORAGE_BACKEND", "local")
+        monkeypatch.setattr(file_storage, "GCS_BUCKET_NAME", "my-bucket")
+        assert file_storage._active_backend() == "gcs"
+
+    def test_default_is_local(self, monkeypatch):
+        import settings
+        monkeypatch.setattr(settings, "STORAGE_BACKEND_EXPLICIT", False)
+        monkeypatch.setattr(file_storage, "STORAGE_BACKEND", "local")
+        monkeypatch.setattr(file_storage, "GCS_BUCKET_NAME", "")
+        monkeypatch.setattr(file_storage, "S3_BUCKET_NAME", "")
+        assert file_storage._active_backend() == "local"
+
+
+# ── recovery queue: append-only JSONL journal ─────────────────────────────────
+
+
+class TestRecoveryQueueJsonl:
+
+    def _patch_queue(self, tmp_path, monkeypatch):
+        queue_path = tmp_path / "recovery_queue.json"
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+        return queue_path
+
+    def test_append_is_one_jsonl_line_per_call(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        file_storage.append_to_recovery_queue({"value": 1.0})
+        file_storage.append_to_recovery_queue({"value": 2.0})
+        lines = [l for l in queue_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        assert len(lines) == 2
+        first = json.loads(lines[0])
+        assert first["op"] == "append"
+        assert first["row"] == {"value": 1.0}
+
+    def test_flush_returns_rows_from_jsonl(self, tmp_path, monkeypatch):
+        self._patch_queue(tmp_path, monkeypatch)
+        file_storage.append_to_recovery_queue({"value": 1.0})
+        file_storage.append_to_recovery_queue({"value": 2.0})
+        rows = file_storage.flush_recovery_queue()
+        assert rows == [{"value": 1.0}, {"value": 2.0}]
+
+    def test_flush_migrates_legacy_json_list(self, tmp_path, monkeypatch):
+        """Old-format queue (whole-file JSON array) must still be readable."""
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        queue_path.write_text(json.dumps([{"value": 1.0}, {"value": 2.0}]), encoding="utf-8")
+        rows = file_storage.flush_recovery_queue()
+        assert rows == [{"value": 1.0}, {"value": 2.0}]
+
+    def test_flush_reads_legacy_then_jsonl_appends_mixed(self, tmp_path, monkeypatch):
+        """Appending to a file that still holds the legacy array must lose nothing."""
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        queue_path.write_text(json.dumps([{"value": 1.0}]) + "\n", encoding="utf-8")
+        file_storage.append_to_recovery_queue({"value": 2.0})
+        rows = file_storage.flush_recovery_queue()
+        assert rows == [{"value": 1.0}, {"value": 2.0}]
+
+    def test_flush_skips_unsupported_ops(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        queue_path.write_text(
+            json.dumps({"op": "append", "row": {"value": 1.0}}) + "\n"
+            + json.dumps({"op": "frobnicate", "row": {"value": 9.0}}) + "\n",
+            encoding="utf-8",
+        )
+        rows = file_storage.flush_recovery_queue()
+        assert rows == [{"value": 1.0}]
+
+    def test_flush_does_not_delete_file(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        file_storage.append_to_recovery_queue({"value": 1.0})
+        file_storage.flush_recovery_queue()
+        assert queue_path.exists()
+
+    def test_delete_removes_file(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        file_storage.append_to_recovery_queue({"value": 1.0})
+        file_storage.delete_recovery_queue_file()
+        assert not queue_path.exists()
+
+    def test_requeue_rows_writes_readable_queue(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        file_storage.requeue_rows([{"value": 3.0}])
+        assert queue_path.exists()
+        assert file_storage.flush_recovery_queue() == [{"value": 3.0}]
+
+    def test_requeue_empty_writes_nothing(self, tmp_path, monkeypatch):
+        queue_path = self._patch_queue(tmp_path, monkeypatch)
+        file_storage.requeue_rows([])
+        assert not queue_path.exists()
+
+
+# ── lost-update protection (remote backends) ──────────────────────────────────
+
+
+class _FakeBlob:
+    """Records download/upload calls and mimics GCS generation semantics."""
+
+    def __init__(self, generation=7, fail_upload_with=None):
+        self.generation = generation
+        self.upload_kwargs = None
+        self.uploaded_from = None
+        self._fail_upload_with = fail_upload_with
+
+    def download_to_filename(self, filename):
+        openpyxl.Workbook().save(filename)
+
+    def reload(self):
+        pass
+
+    def upload_from_filename(self, filename, **kwargs):
+        if self._fail_upload_with is not None:
+            raise self._fail_upload_with
+        self.uploaded_from = filename
+        self.upload_kwargs = kwargs
+
+
+class _FakeGcsClient:
+    def __init__(self, blob):
+        self._blob = blob
+
+    def bucket(self, name):
+        return self
+
+    def blob(self, name):
+        return self._blob
+
+
+class PreconditionFailed(Exception):
+    """Stand-in for google.api_core.exceptions.PreconditionFailed (matched by name)."""
+
+
+class TestLostUpdateProtection:
+
+    def _gcs_env(self, monkeypatch, blob):
+        import settings
+        import storage_backends
+        monkeypatch.setattr(settings, "STORAGE_BACKEND_EXPLICIT", True)
+        monkeypatch.setattr(file_storage, "STORAGE_BACKEND", "gcs")
+        monkeypatch.setattr(file_storage, "GCS_BUCKET_NAME", "bucket")
+        monkeypatch.setattr(storage_backends, "_gcs_client",
+                            lambda: _FakeGcsClient(blob))
+
+    def test_upload_carries_generation_precondition(self, monkeypatch):
+        """The generation captured at download must gate the upload."""
+        blob = _FakeBlob(generation=7)
+        self._gcs_env(monkeypatch, blob)
+
+        with file_storage.ExcelFileContext() as path:
+            assert path.exists()
+        assert blob.upload_kwargs == {"if_generation_match": 7}
+
+    def test_conflict_raises_concurrent_modification_error(self, monkeypatch):
+        """A precondition failure means another writer won — never overwrite."""
+        blob = _FakeBlob(generation=7, fail_upload_with=PreconditionFailed("409"))
+        self._gcs_env(monkeypatch, blob)
+
+        with pytest.raises(file_storage.ConcurrentModificationError):
+            with file_storage.ExcelFileContext():
+                pass
+
+    def test_upload_without_generation_is_unconditional(self, monkeypatch, tmp_path):
+        """If the generation could not be determined, upload proceeds (old behaviour)."""
+        import storage_backends
+        blob = _FakeBlob(generation=7)
+        self._gcs_env(monkeypatch, blob)
+
+        some_file = tmp_path / "wb.xlsx"
+        openpyxl.Workbook().save(some_file)
+        storage_backends._upload_from_local_file(some_file, generation=None)
+        assert blob.upload_kwargs == {}
+
+
+# ── audit log lines ───────────────────────────────────────────────────────────
+
+
+class TestAuditLog:
+
+    def test_audit_span_emits_ok_line(self, caplog):
+        import logging
+        from audit import audit_span
+
+        with caplog.at_level(logging.INFO, logger="audit"):
+            with audit_span("append", rows=1, user=123):
+                pass
+        lines = [r.getMessage() for r in caplog.records if "AUDIT save" in r.getMessage()]
+        assert len(lines) == 1
+        assert "user=123" in lines[0]
+        assert "source=append" in lines[0]
+        assert "rows=1" in lines[0]
+        assert "outcome=ok" in lines[0]
+        assert "duration_ms=" in lines[0]
+
+    def test_audit_span_emits_error_line_and_reraises(self, caplog):
+        import logging
+        from audit import audit_span
+
+        with caplog.at_level(logging.INFO, logger="audit"):
+            with pytest.raises(ValueError):
+                with audit_span("append_batch", rows=3):
+                    raise ValueError("boom")
+        lines = [r.getMessage() for r in caplog.records if "AUDIT save" in r.getMessage()]
+        assert len(lines) == 1
+        assert "outcome=error" in lines[0]
+        assert "rows=3" in lines[0]
+        assert "user=-" in lines[0]
