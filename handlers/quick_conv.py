@@ -17,17 +17,20 @@ from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
 from models import Transaction
 from states import QUICK_CONFIRM
-from validators import MAX_PAST_DAYS, validate_parsed_row
+from validators import MAX_PAST_DAYS, parse_amount, validate_parsed_row
 
 RECURRING_YES_BUTTON = "Yes — recurring 🔁"
 
-# "<words> <amount> [CCY]" or a bare "<amount>" — the token-free fast path.
-_FAST_RE = re.compile(
-    r"^(?P<desc>.*?)\s*(?P<amount>\d+(?:[.,]\d{1,2})?)\s*(?P<ccy>[A-Za-z]{3})?$"
-)
+# A bare "<amount>" message ("89.50") — needs only a category pick.
+_BARE_AMOUNT_RE = re.compile(r"^\d+(?:[.,]\d{1,2})?$")
+
+# Single quick-add grammar, shared with the merchant-memory fast path
+# ("[YYYY-MM-DD] <merchant words> <amount> [CCY]") so the two zero-token
+# parsers can never drift apart.
+_QUICK_SHAPE_RE = merchant_map._QUICK_RE
 
 
-def _local_fast_parse(text: str, lists: dict) -> tuple[dict | None, bool]:
+def _local_fast_parse(text: str, lists: dict, rates: dict) -> tuple[dict | None, bool]:
     """
     Zero-AI pre-parser for the most common quick-add shapes.
 
@@ -37,21 +40,33 @@ def _local_fast_parse(text: str, lists: dict) -> tuple[dict | None, bool]:
       - ("89.50")         → partial row + needs_category=True so the caller
         can offer the category keyboard — still no AI call.
       - anything else     → (None, False): fall through to the AI.
+
+    Reuses merchant_map's quick-add grammar so the two zero-token paths
+    (merchant memory and category words) can never drift apart.
     """
-    match = _FAST_RE.match(str(text or "").strip())
+    raw = str(text or "").strip()
+    if _BARE_AMOUNT_RE.match(raw):
+        value, _ = parse_amount(raw)
+        return {
+            "date": "", "value": value, "currency": "PLN", "type": "Expense",
+            "category": "", "description": "", "person": "", "is_recurring": False,
+        }, True
+    match = _QUICK_SHAPE_RE.match(raw)
     if not match:
         return None, False
-    desc = (match.group("desc") or "").strip()
-    ccy = (match.group("ccy") or "").upper()
-    if ccy and ccy not in load_rates():
+    date_s, desc, amount_s, ccy = match.groups()
+    desc = (desc or "").strip()
+    ccy = (ccy or "").upper()
+    if ccy and ccy not in rates:
         # Trailing 3-letter word isn't a currency — treat it as ambiguous text.
         return None, False
     try:
-        value = float(match.group("amount").replace(",", "."))
-    except ValueError:
+        # Shared normalizer — same separator handling as /add and /bulk.
+        value, _ = parse_amount(amount_s)
+    except (ValueError, TypeError):
         return None, False
     row = {
-        "date": "",
+        "date": date_s or "",
         "value": value,
         "currency": ccy or "PLN",
         "type": "Expense",
@@ -60,8 +75,6 @@ def _local_fast_parse(text: str, lists: dict) -> tuple[dict | None, bool]:
         "person": "",
         "is_recurring": False,
     }
-    if not desc:
-        return row, True  # bare amount — needs a category pick
     cat_map = {str(c).strip().lower(): str(c).strip() for c in lists.get("categories", [])}
     category = cat_map.get(desc.lower())
     if category is None:
@@ -87,12 +100,14 @@ async def _propose_recurring(normalized: dict) -> bool:
         return False
 
 
-async def _send_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE, normalized: dict):
+async def _send_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+                             normalized: dict, rates: dict | None = None):
     """Store the row and ask the user to confirm it. Returns QUICK_CONFIRM."""
     ctx.user_data["quick_parsed"] = normalized
 
     ccy = get_display_currency(update.effective_user.id)
-    rates = load_rates()
+    if rates is None:
+        rates = load_rates()
     val_base = normalized["value"]
     if normalized["currency"] != "PLN" and normalized["currency"] in rates:
         val_base = normalized["value"] * rates[normalized["currency"]]
@@ -160,21 +175,22 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
     try:
         loop = asyncio.get_running_loop()
+        rates = await loop.run_in_executor(None, load_rates)
         # Known merchant + amount → deterministic parse from merchant memory,
         # zero AI tokens. Falls through to the AI for anything unrecognized.
         parsed = await loop.run_in_executor(
             None, lambda: merchant_map.try_local_quick_parse(text)
         )
-        from_local = parsed is not None
-        from_memory = from_local
+        source = "memory" if parsed is not None else "ai"
         if parsed is None:
             # Regex fast path: "groceries 89", "89.50" — still zero AI tokens.
-            parsed, needs_category = _local_fast_parse(text, lists)
-            from_local = parsed is not None
-            if parsed is not None and needs_category:
-                return await _offer_category_fix(
-                    update, ctx, parsed, lists, "Got the amount — no category yet."
-                )
+            parsed, needs_category = _local_fast_parse(text, lists, rates)
+            if parsed is not None:
+                source = "fast"
+                if needs_category:
+                    return await _offer_category_fix(
+                        update, ctx, parsed, lists, "Got the amount — no category yet."
+                    )
         if parsed is None:
             parsed = await loop.run_in_executor(None, lambda: parse_quick(text, lists))
     except Exception:
@@ -195,7 +211,7 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     valid, reason, normalized, corrections = validate_parsed_row(
         parsed, lists, max_past_days=MAX_PAST_DAYS
     )
-    if not valid and from_local:
+    if not valid and source != "ai":
         # Stale memory (e.g. category renamed in Lists) must never block the
         # user — fall back to the AI and report the detour.
         log.warning("Local quick parse failed validation (%s) — falling back to AI", reason)
@@ -205,7 +221,7 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
         except Exception:
             parsed = None
-        from_memory = False
+        source = "ai"
         if parsed is not None:
             valid, reason, normalized, corrections = validate_parsed_row(
                 parsed, lists, max_past_days=MAX_PAST_DAYS
@@ -238,7 +254,7 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # statement noise regardless of entry path.
     normalized["description"] = sanitize_description(str(normalized.get("description") or ""))
 
-    if from_memory:
+    if source == "memory":
         await update.message.reply_text(
             "🧠 Categorized from merchant memory — no AI call needed."
         )
@@ -249,7 +265,7 @@ async def handle_quick_add(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🛡 Auto-corrected:\n{shown}")
         log.info("Quick-add auto-corrections: %s", "; ".join(corrections))
 
-    return await _send_confirm_card(update, ctx, normalized)
+    return await _send_confirm_card(update, ctx, normalized, rates=rates)
 
 
 @auth
@@ -257,9 +273,10 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     response = update.message.text.strip()
 
     # Category-fix leg: the user is picking a category for a partial parse.
-    fix = ctx.user_data.pop("quick_fix", None)
+    fix = ctx.user_data.get("quick_fix")
     if fix is not None:
         if response.lower() == "cancel":
+            del ctx.user_data["quick_fix"]
             await update.message.reply_text("Cancelled.", reply_markup=ReplyKeyboardRemove())
             return ConversationHandler.END
         lists = ctx.user_data.get("lists") or load_reference_data()
@@ -269,17 +286,18 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         if not valid:
             if "category" in reason.lower():
-                ctx.user_data["quick_fix"] = fix  # stay — pick from the keyboard
-                await update.message.reply_text(
+                await update.message.reply_text(  # stay — pick from the keyboard
                     "Please pick a category from the keyboard.",
                     reply_markup=_category_keyboard(lists),
                 )
                 return QUICK_CONFIRM
+            del ctx.user_data["quick_fix"]
             await update.message.reply_text(
                 f"❌ {reason}\nUse /add to enter it manually.",
                 reply_markup=ReplyKeyboardRemove(),
             )
             return ConversationHandler.END
+        del ctx.user_data["quick_fix"]
         normalized["description"] = sanitize_description(str(normalized.get("description") or ""))
         return await _send_confirm_card(update, ctx, normalized)
 

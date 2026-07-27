@@ -1796,12 +1796,12 @@ class TestAddFlowIntegration:
             # Open the field picker
             r = await add_confirm(make_update("✏️ Edit a field"), ctx)
             assert r == states.ADD_CONFIRM
-            assert ctx.user_data["add_edit"] == {"stage": "field"}
+            assert ctx.user_data["add_edit"] == ""  # picking a field
 
             # Pick Person
             r = await add_confirm(make_update("Person"), ctx)
             assert r == states.ADD_CONFIRM
-            assert ctx.user_data["add_edit"] == {"stage": "value", "field": "Person"}
+            assert ctx.user_data["add_edit"] == "Person"  # awaiting the value
 
             # Enter the value — back to the confirm card
             r = await add_confirm(make_update("Alice"), ctx)

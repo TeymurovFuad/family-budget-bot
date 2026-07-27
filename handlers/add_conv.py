@@ -78,18 +78,81 @@ def _apply_defaults(state: AddTransactionState) -> None:
         state.is_recurring = False
 
 
-async def _detect_recurring(state: AddTransactionState) -> bool:
-    """Best-effort 🔁 proposal from MasterData history — never blocks /add."""
+# ── Shared per-field setters ──────────────────────────────────────────────────
+# One validation rule per field, used by BOTH the edit-from-confirm flow and
+# the legacy step handlers — a rule change can never land in only one place.
+
+def _set_amount(state: AddTransactionState, text: str) -> str | None:
+    try:
+        # Shared normalizer — handles `1 234,56`, `1.234,56`, `1,234.56` alike.
+        value, _ = parse_amount(text)
+        if value <= 0:
+            raise ValueError
+    except (ValueError, TypeError):
+        return "❌ Please enter a valid positive number:"
+    state.value = value
+    return None
+
+
+def _set_currency(state: AddTransactionState, text: str) -> str | None:
+    ccy = text.strip().upper()
+    if ccy not in state.rates:
+        return "❌ Unknown currency. Pick from the keyboard:"
+    state.currency = ccy
+    return None
+
+
+def _set_type(state: AddTransactionState, lists: dict, text: str) -> str | None:
+    if text not in lists.get("txn_types", []):
+        return f"Please choose {' | '.join(lists.get('txn_types', []))}."
+    state.transaction_type = text
+    return None
+
+
+def _set_category(state: AddTransactionState, lists: dict, text: str) -> str | None:
+    if text not in lists.get("categories", []):
+        return "Please choose from the list."
+    state.category = text
+    return None
+
+
+def _set_date(state: AddTransactionState, text: str) -> str | None:
+    today = datetime.now(TIMEZONE).date()
+    if text.strip().lower() in ("today", ""):
+        state.date = today
+        return None
+    try:
+        parsed = date.fromisoformat(text.strip().lower())
+    except ValueError:
+        return "❌ Use YYYY-MM-DD format or 'today':"
+    if parsed > today:
+        return "⚠️ Future dates aren't allowed. Enter a date or 'today':"
+    state.date = parsed
+    return None
+
+
+async def _detect_recurring(ctx: ContextTypes.DEFAULT_TYPE, state: AddTransactionState) -> bool:
+    """
+    Best-effort 🔁 proposal from MasterData history — never blocks /add.
+    Cached per (description, value) so re-rendering the confirm card after an
+    unrelated field edit doesn't re-read the workbook.
+    """
     if state.is_recurring or not (state.description or "").strip():
         return False
+    key = (state.description, state.value)
+    cached = ctx.user_data.get("_recur_cache")
+    if cached and cached[0] == key:
+        return cached[1]
     try:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, lambda: merchant_map.detect_recurring(state.description, state.value)
         )
     except Exception:
         log.debug("Recurring detection failed", exc_info=True)
-        return False
+        result = False
+    ctx.user_data["_recur_cache"] = (key, result)
+    return result
 
 
 async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +160,7 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state: AddTransactionState = ctx.user_data["state"]
     _apply_defaults(state)
 
-    proposed = await _detect_recurring(state)
+    proposed = await _detect_recurring(ctx, state)
     if proposed:
         state.is_recurring = True  # proposal — one tap away from override
         ctx.user_data["recurring_proposed"] = True
@@ -129,18 +192,12 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    try:
-        # Shared normalizer — handles `1 234,56`, `1.234,56`, `1,234.56` alike.
-        value, _ = parse_amount(text)
-        if value <= 0:
-            raise ValueError
-    except (ValueError, TypeError):
-        await update.message.reply_text("❌ Please enter a valid positive number:")
+    state: AddTransactionState = ctx.user_data["state"]
+    error = _set_amount(state, update.message.text.strip())
+    if error:
+        await update.message.reply_text(error)
         return ADD_VALUE
 
-    state: AddTransactionState = ctx.user_data["state"]
-    state.value = value
     lists = ctx.user_data.get("lists") or load_reference_data()
     cat_list = lists.get("categories", [])
 
@@ -154,7 +211,7 @@ async def add_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     kb = [[c] for c in cat_list]
     await update.message.reply_text(
-        f"Got *{value:,.2f}*. Which *category*?",
+        f"Got *{state.value:,.2f}*. Which *category*?",
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardMarkup(kb, one_time_keyboard=True, resize_keyboard=True),
     )
@@ -162,13 +219,12 @@ async def add_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    cat   = update.message.text.strip()
     lists = ctx.user_data.get("lists") or load_reference_data()
     state: AddTransactionState = ctx.user_data["state"]
-    if cat not in lists.get("categories", []):
-        await update.message.reply_text("Please choose from the list.")
+    error = _set_category(state, lists, update.message.text.strip())
+    if error:
+        await update.message.reply_text(error)
         return ADD_CATEGORY
-    state.category = cat
     # Everything else is defaulted — jump straight to the confirm card
     # (2 round-trips instead of 9 for the common case).
     return await _show_confirm_card(update, ctx)
@@ -203,7 +259,7 @@ async def _prompt_field_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE, fi
             [["Yes — recurring", "No — one-off"]], one_time_keyboard=True, resize_keyboard=True)),
     }
     text, kb = prompts[field]
-    ctx.user_data["add_edit"] = {"stage": "value", "field": field}
+    ctx.user_data["add_edit"] = field  # now awaiting this field's value
     await update.message.reply_text(text, parse_mode="Markdown", reply_markup=kb)
     return ADD_CONFIRM
 
@@ -214,45 +270,17 @@ async def _apply_field_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE, fie
     state: AddTransactionState = ctx.user_data["state"]
     lists = ctx.user_data.get("lists") or load_reference_data()
 
-    if field == "Amount":
-        try:
-            value, _ = parse_amount(text)
-            if value <= 0:
-                raise ValueError
-        except (ValueError, TypeError):
-            await update.message.reply_text("❌ Please enter a valid positive number:")
+    if field in ("Amount", "Currency", "Type", "Category", "Date"):
+        error = {
+            "Amount":   lambda: _set_amount(state, text),
+            "Currency": lambda: _set_currency(state, text),
+            "Type":     lambda: _set_type(state, lists, text),
+            "Category": lambda: _set_category(state, lists, text),
+            "Date":     lambda: _set_date(state, text),
+        }[field]()
+        if error:
+            await update.message.reply_text(error)
             return ADD_CONFIRM
-        state.value = value
-    elif field == "Currency":
-        ccy = text.upper()
-        if ccy not in state.rates:
-            await update.message.reply_text("❌ Unknown currency. Pick from the keyboard:")
-            return ADD_CONFIRM
-        state.currency = ccy
-    elif field == "Type":
-        if text not in lists.get("txn_types", []):
-            await update.message.reply_text("Please choose from the keyboard.")
-            return ADD_CONFIRM
-        state.transaction_type = text
-    elif field == "Category":
-        if text not in lists.get("categories", []):
-            await update.message.reply_text("Please choose from the list.")
-            return ADD_CONFIRM
-        state.category = text
-    elif field == "Date":
-        today = datetime.now(TIMEZONE).date()
-        if text.lower() == "today":
-            state.date = today
-        else:
-            try:
-                parsed = date.fromisoformat(text)
-            except ValueError:
-                await update.message.reply_text("❌ Use YYYY-MM-DD format or 'today':")
-                return ADD_CONFIRM
-            if parsed > today:
-                await update.message.reply_text("⚠️ Future dates aren't allowed. Enter a date or 'today':")
-                return ADD_CONFIRM
-            state.date = parsed
     elif field == "Description":
         state.description = "" if text == "-" else sanitize_description(text)
         # Detection re-runs in _show_confirm_card with the new text.
@@ -267,13 +295,20 @@ async def _apply_field_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE, fie
     return await _show_confirm_card(update, ctx)
 
 
+# ctx.user_data["add_edit"] tracks the edit-from-confirm mini-flow: absent =
+# normal confirm, PICKING_FIELD = choosing which field, "<Field>" = awaiting
+# that field's new value. (bot.py's state table couldn't be extended, so this
+# lives inside the ADD_CONFIRM state.)
+PICKING_FIELD = ""
+
+
 async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     # Field-edit mini-flow (stays inside the ADD_CONFIRM state).
-    edit = ctx.user_data.get("add_edit")
-    if edit:
-        if edit["stage"] == "field":
+    if "add_edit" in ctx.user_data:
+        field = ctx.user_data["add_edit"]
+        if field == PICKING_FIELD:
             if text == BACK_BUTTON:
                 ctx.user_data.pop("add_edit", None)
                 return await _show_confirm_card(update, ctx)
@@ -281,19 +316,25 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Pick a field from the keyboard.")
                 return ADD_CONFIRM
             return await _prompt_field_value(update, ctx, text)
-        return await _apply_field_value(update, ctx, edit["field"])
+        return await _apply_field_value(update, ctx, field)
 
-    if "edit" in text.lower():
-        ctx.user_data["add_edit"] = {"stage": "field"}
+    if text == EDIT_BUTTON:
+        ctx.user_data["add_edit"] = PICKING_FIELD
         await update.message.reply_text(
             "Which field do you want to change?", reply_markup=_field_picker_keyboard()
         )
         return ADD_CONFIRM
 
-    if "save" not in text.lower():
+    if "cancel" in text.lower():
         await update.message.reply_text("❌ Cancelled.", reply_markup=ReplyKeyboardRemove())
         ctx.user_data.clear()
         return ConversationHandler.END
+
+    if "save" not in text.lower():
+        # Unrecognized input must not silently discard the transaction —
+        # re-show the card and keep waiting for a button.
+        await update.message.reply_text("Please use the buttons below.")
+        return await _show_confirm_card(update, ctx)
 
     state: AddTransactionState = ctx.user_data["state"]
     uid = update.effective_user.id
@@ -358,44 +399,30 @@ async def add_cancel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # for any conversation resumed mid-flight (and for import compatibility).
 
 async def add_currency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    ccy   = update.message.text.strip().upper()
     state: AddTransactionState = ctx.user_data["state"]
-    if ccy not in state.rates:
-        await update.message.reply_text("❌ Unknown currency. Pick from the keyboard:")
+    error = _set_currency(state, update.message.text)
+    if error:
+        await update.message.reply_text(error)
         return ADD_CURRENCY
-    state.currency = ccy
     return await _show_confirm_card(update, ctx)
 
 
 async def add_type(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    t     = update.message.text.strip()
     lists = ctx.user_data.get("lists") or load_reference_data()
-    if t not in lists["txn_types"]:
-        await update.message.reply_text(
-            f"Please choose {' | '.join(lists['txn_types'])}."
-        )
-        return ADD_TYPE
     state: AddTransactionState = ctx.user_data["state"]
-    state.transaction_type = t
+    error = _set_type(state, lists, update.message.text.strip())
+    if error:
+        await update.message.reply_text(error)
+        return ADD_TYPE
     return await _show_confirm_card(update, ctx)
 
 
 async def add_date(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text  = update.message.text.strip().lower()
     state: AddTransactionState = ctx.user_data["state"]
-    today = datetime.now(TIMEZONE).date()
-    if text in ("today", ""):
-        state.date = today
-    else:
-        try:
-            parsed = date.fromisoformat(text)
-        except ValueError:
-            await update.message.reply_text("❌ Use YYYY-MM-DD format or 'today':")
-            return ADD_DATE
-        if parsed > today:
-            await update.message.reply_text("⚠️ Future dates (UTC) aren't allowed. Enter a date or 'today':")
-            return ADD_DATE
-        state.date = parsed
+    error = _set_date(state, update.message.text)
+    if error:
+        await update.message.reply_text(error)
+        return ADD_DATE
     return await _show_confirm_card(update, ctx)
 
 

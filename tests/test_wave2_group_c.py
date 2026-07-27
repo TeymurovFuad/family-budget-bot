@@ -121,33 +121,34 @@ class TestEditCurrencyKeyboard:
 
 class TestLocalFastParse:
     def test_category_word_and_amount_fully_resolves(self):
-        with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES):
-            row, needs_cat = _local_fast_parse("groceries 89", SAMPLE_LISTS)
+        row, needs_cat = _local_fast_parse("groceries 89", SAMPLE_LISTS, SAMPLE_RATES)
         assert not needs_cat
         assert row["value"] == 89.0
         assert row["category"] == "Groceries"
         assert row["currency"] == "PLN"
 
     def test_bare_amount_needs_category(self):
-        with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES):
-            row, needs_cat = _local_fast_parse("89.50", SAMPLE_LISTS)
+        row, needs_cat = _local_fast_parse("89.50", SAMPLE_LISTS, SAMPLE_RATES)
         assert needs_cat
         assert row["value"] == 89.5
 
     def test_currency_suffix_recognized(self):
-        with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES):
-            row, _ = _local_fast_parse("transport 45 eur", SAMPLE_LISTS)
+        row, _ = _local_fast_parse("transport 45 eur", SAMPLE_LISTS, SAMPLE_RATES)
         assert row["currency"] == "EUR"
         assert row["category"] == "Transport"
 
+    def test_date_prefix_supported(self):
+        # Shared grammar with the merchant-memory path — dates must not drop.
+        row, _ = _local_fast_parse("2026-05-24 groceries 89", SAMPLE_LISTS, SAMPLE_RATES)
+        assert row["date"] == "2026-05-24"
+        assert row["category"] == "Groceries"
+
     def test_unknown_merchant_falls_to_ai(self):
-        with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES):
-            row, needs_cat = _local_fast_parse("lunch 45", SAMPLE_LISTS)
+        row, needs_cat = _local_fast_parse("lunch 45", SAMPLE_LISTS, SAMPLE_RATES)
         assert row is None and not needs_cat
 
     def test_non_currency_suffix_falls_to_ai(self):
-        with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES):
-            row, _ = _local_fast_parse("groceries 45 abc", SAMPLE_LISTS)
+        row, _ = _local_fast_parse("groceries 45 abc", SAMPLE_LISTS, SAMPLE_RATES)
         assert row is None
 
     async def test_fast_path_skips_ai_entirely(self):
