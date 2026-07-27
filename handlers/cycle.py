@@ -33,8 +33,8 @@ _CYCLE_USAGE = (
     "arrivals and backfill missing cycle boundaries; you review and "
     "confirm every date before anything is written\n"
     "`/cycle detect <word> ...` — add extra search words for the scan, "
-    "e.g. `/cycle detect wynagrodzenie premia` if your bank titles the "
-    "salary transfer in another language\n"
+    "e.g. `/cycle detect wages bonus` if your bank titles the "
+    "salary transfer differently\n"
     "`/cycle list` — show every recorded cycle boundary\n"
     "`/cycle remove YYYY-MM-DD` — delete a wrongly recorded boundary "
     "(fix a wrong date with remove + `/cycle started` the right one)\n\n"
@@ -248,7 +248,7 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(
                 "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
                 "If a salary is missing, add its transfer title as a search word: "
-                "`/cycle detect wynagrodzenie`\\.",
+                "`/cycle detect wages`\\.",
                 parse_mode="MarkdownV2",
             )
             return

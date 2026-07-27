@@ -4,6 +4,67 @@ Findings from the whole-team review (Architect, Designer, Developer, PO, fresh-e
 of 2026-07-21 on branch `feat/bulk-import-draft-ordering`. Grouped by planned follow-up PR.
 Items marked **[PR #3]** should land in the current bulk-import PR before merge.
 
+## Wave 3 — Next work
+
+Open items after Wave 2, regrouped by theme.
+
+### Group 1 — Statement & import pipeline
+
+Statement parsing, bulk preview, dedup UX, and person attribution.
+
+- [ ] **Statement profile saved with wrong decimal separator corrupts every amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400 rows imported with 100× inflated values. Three compounding gaps: (a) profile list (`/bulk profile`) doesn't show the separator; (b) debit/credit-split proposal message omits the separator entirely; (c) "Fix a column" can only remap columns — separator, date format, and sign convention cannot be corrected in the confirm flow. Also add a sanity check: sample amount values like `79.99` (2 digits after ".") contradict comma-decimal — validate proposal against samples before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
+- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement` returns no category; `_normalize_parsed_rows` defaults empties to "Other"; merchant memory only helps for known merchants (empty on first import). The AI-categorization step for unknown merchants (BACKLOG "known format" design: "AI only for unknown merchants") was never wired into the statement path. 1400 rows imported as Other. (`handlers/bulk_conv.py` `_finish_profile_parse`)
+- [ ] **Bulk preview separator orphan at page break** — when a page boundary falls between a row and its following `──────────` rule, the rule appears as the first line of the next page. Fix: skip appending the separator if it would be the first item on a new page. (`handlers/bulk_conv.py` `_format_bulk_preview`)
+- [ ] **Report chunking can break Markdown entities** — `cmd_report` raw 4000-char split; reuse the paginated-send helper from bulk_conv.
+- [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never improvised"). Deliberate re-alignment pass, not urgent.
+- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays. /add: move person out of the mandatory flow (default household, edit from confirm card).
+- [ ] **Bulk draft archival instead of naming change** — drafts (`data/bulk_drafts/{uid}.json`) ARE deleted after successful save and on cancel (verified). Improvement: on save, move to `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` instead of deleting — cheap audit trail of what each import contained; prune archive >6 months on startup.
+
+### Group 2 — Cycles, reports & data quality
+
+Cycle correctness, PLN neutrality, schema cleanup, and reporting gaps.
+
+- [ ] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — boundaries found with per-scan words whose keyword is not in `CYCLE_DETECT_KEYWORDS` produce cycles whose salary rows count as plain income in the unaccounted math. Docs advise the .env route; consider persisting per-scan words or warning when they find matches. (`cycles.py`) *(partially done in PR #49: the detect reply now warns that per-scan keywords apply to that scan only and points at /keywords; routing the ad-hoc keywords into `cycle_totals` remains open.)*
+- [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!` can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed. (`cycles.py` `salary_mask`)
+- [ ] **Duplicate boundary still re-uploads on remote backends** — `record_cycle_start` returning False inside `ExcelFileContext` triggers an unnecessary upload of an unchanged workbook.
+- [ ] **Callback "yes" date not re-validated against future dates** — currently unreachable but cheap to harden. (handlers/cycle.py)
+- [ ] **Sync workbook I/O in async handlers** — `load_cycles()` / `should_prompt_new_cycle()` block the event loop; matters mainly on remote storage backends.
+- [ ] **lists_currency_range caps at row 100** — currencies beyond Lists row 100 silently ignored in every written Value (PLN) formula → #N/A. Derive the end row from actual data or use a named range. (Overlaps with "unit-less magic numbers" sweep.)
+- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`), setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm messages. `handlers/add_conv.py`: PLN equivalent note shown during /add. `handlers/reports.py`: rates display lines (`PLN per 1 unit`, `{r:.4f} PLN`). Decide per-string: use display currency where possible; keep PLN where it is the factually correct base-currency label.
+- [ ] **Default-currency fallback hardcodes PLN** — `data.py` (`fillna("PLN")`), `models.py` / `states.py` transaction defaults, `scheduled_report.py` fallback, `excel_schema.py` writer default (`row.get("currency", "PLN")`). For a public repo the fallback must come from the `DISPLAY_CURRENCY` setting (already prompted in `setup_bot.py`), not a hardcoded currency — swapping PLN for EUR/USD would repeat the same mistake. One source of truth: `settings.DISPLAY_CURRENCY`.
+- [ ] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — `excel_schema.py:236`: `goal_pln: Any = col("Goal (PLN)")` — the Pydantic field name and the Excel column header both embed "PLN". Any non-PLN user sees a "Goal (PLN)" column header in their spreadsheet and the schema attribute name is misleading. Expected: rename column header to "Goal" (or "Goal (base)") and field to `goal_base`; migration script or `ensure_lists_sheet` rename on first open so existing workbooks are upgraded transparently.
+- [ ] **Derive Year/Month from Date by formula** — MasterData carries Date + Year + Month as three independent columns; Year/Month should be formulas (`=YEAR(A2)`, `=TEXT(A2,"mmm")`) or removed entirely with Dashboard SUMIFS rewritten against Date ranges. Touches every Dashboard formula, the writers, and the schema — do as its own PR with a migration script for existing rows.
+- [ ] **Category rename support (simplify category names)** — user decision: category + description is enough granularity; e.g. rename "Gifts & Shopping" → "Shopping" (description says what kind). Needs a rename script that updates: Lists Categories cell, all matching MasterData rows, Budget row on Dashboard, and the merchant-map once it exists — otherwise historical rows and budget VLOOKUPs silently stop matching. Also update the bulk validator's fuzzy map.
+- [ ] **Enforce the 50-row limit post-merge, not pre-merge** (Copilot PR review) — `_draft_limit_reached` checks the EXISTING draft before merging, so a draft at exactly 50 can still merge a 185-row import and blow past the documented maximum. Decide the rule (cap total? reject overflow rows? paginate drafts?) and enforce it after `_merge_bulk_draft` with a clear message about what was and wasn't added.
+- [ ] **Report every silent decision to the user, briefly** — standing principle: whenever the bot skips, corrects, deduplicates, or drops anything, the user gets one short line about it. Already done for validator corrections (🛡 auto-corrected list). Still needed: dedup skips ("↺ 3 rows skipped as already imported: …"), rows dropped at save due to Transaction validation errors (currently only shown as "Saved N of M" + first 5 errors), recovery-queue replays on startup ("re-applied 2 queued transactions"), and draft archival.
+- [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet; same layout, same category rows, same budget targets (shared Lists budget column — one edit updates both). Filter is a single cycle selector (dropdown fed by the ledger) instead of Year+Month; all SUMIFS filter on Date >= cycle start AND Date < next start — for the LAST ledger row (no next start) the upper bound is open-ended: TODAY()+1 in formulas, today in bot queries. Adds the salary/expenses/savings/unaccounted block and shows the cycle's day count (24-33 days — budgets are not pro-rated, matching the old manual system). The calendar Dashboard and Month/Year columns stay untouched — cycles are purely additive; disabling the flag corrupts nothing.
+
+### Group 3 — Infrastructure, schema & quality
+
+Test coverage gaps, module size, AI output contract, and tooling quality.
+
+- [ ] **DeepSeek output as typed model** — validate provider output into a Pydantic `ParsedTransaction` at the parse boundary so drafts store validated data.
+- [ ] **Off-peak batching** — DeepSeek is 50-75% cheaper 16:30-00:30 UTC; schedule any non-interactive batch work in that window.
+- [ ] **Hard cap 300 lines per production module** — a file exceeding 300 lines almost always contains two concerns; split by cohesion, not by line count alone. Exempt: test files (a thorough test suite for one module legitimately runs long) and generated/schema files.
+- [ ] **/start hostile-name test doesn't run the balance checks** — `_RESERVED` excludes `*`/`_`, and the balance assertions live only in the /help test; factor into a shared helper run by both. (`tests/test_help_markdown.py`)
+- [ ] **No test for empty first_name → "there" fallback.** (`tests/test_help_markdown.py`)
+- [ ] **Escape-stripping order vs backslashes inside code spans** — the validator strips `\X` pairs before locating code spans; a legal `` \` `` inside a code span would mis-pair the remaining backticks. Not hit by current text. (`tests/test_help_markdown.py`)
+- [ ] **Extend the markdown validator to every static MarkdownV2 reply** — /help and /start are covered; `cmd_setcurrency`'s unknown-currency reply and all `<cmd> help` subcommand texts are not. Extract `_find_unescaped_reserved` into a shared test helper and parametrize. (`tests/test_help_markdown.py`, `handlers/*.py`)
+- [ ] **`test_cleanup_old_logs_removes_rotated_files` missing negative-path assertions** — the test only exercises the deletion path (a rotated file older than 180 days is removed). Add two additional assertions: (1) a recent rotated file (mtime < 180 days) matching `budget-bot.log.*` is NOT deleted; (2) the live `budget-bot.log` file (which does not match the `budget-bot.log.*` glob) is NOT deleted even if its mtime is old. Prevents a future glob regression from silently passing the test suite. (`tests/test_logger.py`, `logger.py`)
+- [ ] **`_decode_positional_array` null-amount contract undefined** — `_decode_positional_array(["2026-01-01", None])` returns `{"date": "2026-01-01", "value": None}` instead of `None`: a `None` value at the amount position passes silently to downstream validators. Add a test that either: (a) asserts the function returns `None` for a null amount, or (b) documents that validators are the correct rejection point and adds a test there. Clarify which contract is intended.
+- [ ] **`_salvage_rows` fallback path untested** — a response in legacy object format (pre-array migration) that reaches `_salvage_rows` via the `_salvage_json_objects` branch has no test. Add one to ensure the fallback path keeps working as array format rolls out.
+- [ ] **[PR #3] Preview edits not persisted to draft file** *(PR #3 bulk-import bugs)*
+- [ ] **`CATEGORY_TYPE_HINTS` dict: implement as part of this PR or as a follow-up to the data-validation PR**
+- [ ] **Monthly Summary sheet never updated by the bot** *(fixed PR #38 — but Monthly Summary priority update: verify the fix covers bulk-imported rows spanning multiple months)*
+
+### Group F — SQLite + web UI (deferred)
+
+Full SQLite shadow store and web UI — phased integration, deferred until bot core is stable.
+
+See "Roadmap: Web UI + SQLite — phased integration" below for the full Cycle W1–W4 design.
+
+---
+
 ## Planned runs — grouped 2026-07-25
 
 150 open items grouped into 3 runs. Items belong to the run they are **first meaningfully addressed in**; detail lives in the sections below.
@@ -736,18 +797,18 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 ## Follow-up PR: infra & performance
 
 - [x] **.bak leak on remote backends** *(fixed PR #48 — .bak skipped for temp files)*
-- [ ] **Reference-data TTL cache** — every message triggers 2-4 full workbook reads
+- [x] **Reference-data TTL cache** — every message triggers 2-4 full workbook reads
       (`load_reference_data` = `load_lists` + `load_rates`, two full parses of the same file).
       60-300s module-level cache in data.py, invalidated by writes in excel_ops.
       On remote backends each read also re-downloads the workbook.
-- [ ] **Recovery queue as append-only JSONL journal** — current read-append-write JSON with no lock;
+- [x] **Recovery queue as append-only JSONL journal** — current read-append-write JSON with no lock;
       enqueue batches/deletes/edits as typed operations; periodic replay job in APScheduler
       instead of startup-only.
-- [ ] **Lost-update protection for remote backends** — `ExcelFileContext` does blind
+- [x] **Lost-update protection for remote backends** — `ExcelFileContext` does blind
       download→modify→upload; use GCS generation / S3 ETag preconditions and retry on conflict.
 - [ ] **_load_bulk_drafts reads every user's file** — called 3× per message just to fetch one
       user's draft; read `_user_draft_path(uid)` directly.
-- [ ] **Split file_storage god module** — backends / workbook repo / template concerns;
+- [x] **Split file_storage god module** — backends / workbook repo / template concerns;
       backend selection should honor `STORAGE_BACKEND` strictly (a stray `GCS_BUCKET_NAME`
       env var currently overrides `STORAGE_BACKEND=local`).
 - [ ] **DeepSeek output as typed model** — validate provider output into a Pydantic
@@ -758,10 +819,10 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 - [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once
       "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays.
       /add: move person out of the mandatory flow (default household, edit from confirm card).
-- [ ] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
+- [x] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.
-- [ ] **/add default-and-confirm** — 9 round-trips today; pre-fill PLN/Expense/today/non-recurring
+- [x] **/add default-and-confirm** — 9 round-trips today; pre-fill PLN/Expense/today/non-recurring
       after amount+category and jump to the confirm card with "Edit a field…" (reuse edit_conv picker).
 - [x] **Discoverability** — `/bulk`, `/delete`, `/help`, `/setcurrency` absent from menus and /start;
       add 📥 Import + 🗑 Delete buttons; rewrite /start to show the three entry methods;
@@ -771,7 +832,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       post_init hook) — better, no manual BotFather step, guarded by a drift test.*
 - [ ] **Bulk edit UX** — `skip N` / `delete N` commands to drop a mis-parsed row without cancelling
       everything; on invalid edit, list the editable fields; validate category values against Lists.
-- [ ] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category
+- [x] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category
       keyboard instead of ejecting to the 9-step /add.
 - [ ] **Bulk preview separator orphan at page break** — when a page boundary falls between a row and its following `──────────` rule, the rule appears as the first line of the next page. Fix: skip appending the separator if it would be the first item on a new page. (`handlers/bulk_conv.py` `_format_bulk_preview`)
 - [ ] **Report chunking can break Markdown entities** — `cmd_report` raw 4000-char split;
@@ -841,7 +902,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       logger.init_logging(): delete `budget-bot.log.*` older than 180 days.
       Decision: keep by-day grouping (one file per transaction would mean thousands of files —
       per-operation detail belongs INSIDE the daily file as structured lines).
-- [ ] **Per-operation audit line** — one structured log line per save attempt
+- [x] **Per-operation audit line** — one structured log line per save attempt
       (user, source, rows, outcome, duration) so a day's file answers "what was saved today"
       without reading debug noise. Consider a separate `audit.log` with the same daily rotation.
 
@@ -878,7 +939,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 Found by BOTH reviewers independently — highest confidence:
 
-- [ ] **Recovery-queue corruption bricks startup** — `append_to_recovery_queue` writes non-atomically
+- [x] **Recovery-queue corruption bricks startup** — `append_to_recovery_queue` writes non-atomically
       (file_storage.py:118-123) and `flush_recovery_queue` does an unguarded `json.loads`; a crash
       mid-write leaves invalid JSON and `replay_recovery_queue()` at bot.py:83 raises on every start
       until the file is hand-deleted. Also flush unlinks the file BEFORE replay completes — a crash
@@ -892,7 +953,7 @@ Found by BOTH reviewers independently — highest confidence:
       lost-update if the bot writes concurrently; on gcs/s3 they modify a local file the bot never
       uploads. Fix: scripts refuse to run when backend != local, take the lock file (once one exists),
       use atomic_save.
-- [ ] **Dual logging setup** — config.py calls logging.basicConfig at import while logger.init_logging
+- [x] **Dual logging setup** — config.py calls logging.basicConfig at import while logger.init_logging
       installs its own handlers → duplicate console lines, LOG_LEVEL partially overridden.
       One owner: remove the basicConfig from config.py.
 - [ ] **Draft limit porous** — already tracked under "draft limit semantics"; reviewers add: no cap on
@@ -952,10 +1013,10 @@ write paths — commit 309df08.
 
 ## Follow-up: budget cycles review notes (pre-PR verify, 2026-07-24)
 
-- [ ] **Bare `/cycle` (read-only status) is write-gated** — non-owner allowed users
+- [x] **Bare `/cycle` (read-only status) is write-gated** — non-owner allowed users
       cannot view the current cycle; consider `@auth` for the no-arg path and
       `auth_write` only for `started`. (handlers/cycle.py)
-- [ ] **Timezone inconsistency** — reports.`_current_cycle_bounds` uses
+- [x] **Timezone inconsistency** — reports.`_current_cycle_bounds` uses
       `now_utc().date()` while handlers/cycle.py uses `datetime.now(TIMEZONE)`;
       near midnight the "today" bound and the prompt-day can disagree by one day.
 - [ ] **Sync workbook I/O in async handlers** — `load_cycles()` /

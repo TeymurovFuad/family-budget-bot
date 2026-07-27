@@ -86,9 +86,9 @@ def test_load_strips_lowercases_and_skips_blanks(excel_path):
     ws.cell(1, kw_col, header_of(ListsSchema, "salary_keyword"))
     ws.cell(2, kw_col, "  Payroll ")
     ws.cell(3, kw_col, "")
-    ws.cell(4, kw_col, "WYNAGRODZENIE")
+    ws.cell(4, kw_col, "WAGES")
     wb.save(excel_path)
-    assert load_salary_keywords(excel_path) == ["payroll", "wynagrodzenie"]
+    assert load_salary_keywords(excel_path) == ["payroll", "wages"]
 
 
 def test_load_unreadable_workbook_returns_empty(tmp_path):
@@ -156,8 +156,8 @@ def test_delete_unknown_keyword_returns_false(excel_path):
 # ── cycle_detect_keywords fallback ─────────────────────────────────────────────
 
 def test_detect_keywords_fall_back_to_env(excel_path, monkeypatch):
-    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wynagrodzenie"])
-    assert cycle_detect_keywords() == ["salary", "wynagrodzenie"]
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wages"])
+    assert cycle_detect_keywords() == ["salary", "wages"]
 
 
 def test_detect_keywords_prefer_excel_over_env(excel_path, monkeypatch):
