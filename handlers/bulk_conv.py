@@ -1287,6 +1287,14 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
             f"{dup_suffix}{loose_suffix}{identical_suffix}{dropped_suffix}"
         )
 
+    sep = "──────────────────────"
+    rows_with_sep = []
+    for idx, line in enumerate(row_lines):
+        rows_with_sep.append(line)
+        if idx < len(row_lines) - 1:
+            rows_with_sep.append(sep)
+    row_lines = rows_with_sep
+
     messages = []
     current = [f"Found *{len(parsed)}* transaction(s):\n"]
     current_len = len(current[0])
