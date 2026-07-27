@@ -174,6 +174,59 @@ def seed_from_master() -> dict:
     return result
 
 
+# ── Recurring detection from history ─────────────────────────────────────────
+
+# Amount tolerance for "same subscription, slightly different bill".
+_RECURRING_AMOUNT_TOLERANCE = 0.10
+# Distinct months required before a merchant looks recurring.
+_RECURRING_MIN_MONTHS = 2
+
+
+def detect_recurring(description, value) -> bool:
+    """
+    True when this merchant appears in MasterData in >= 2 distinct months
+    with a similar amount (±10%). Used to PROPOSE is_recurring on confirm
+    cards — never to set it silently. Returns False on any read problem.
+    """
+    key = merchant_key(description)
+    try:
+        target = abs(float(value))
+    except (TypeError, ValueError):
+        return False
+    if not key or not target:
+        return False
+
+    try:
+        df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
+    except Exception as e:
+        log.debug("Recurring detection skipped — could not read MasterData: %s", e)
+        return False
+
+    desc_h = header_of(MasterDataSchema, "description")
+    val_h = header_of(MasterDataSchema, "value")
+    date_h = header_of(MasterDataSchema, "date")
+    if not all(h in df.columns for h in (desc_h, val_h, date_h)):
+        return False
+
+    months: set[tuple[int, int]] = set()
+    for i in df.index:
+        if merchant_key(df.at[i, desc_h]) != key:
+            continue
+        try:
+            row_val = abs(float(df.at[i, val_h]))
+        except (TypeError, ValueError):
+            continue
+        if abs(row_val - target) > target * _RECURRING_AMOUNT_TOLERANCE:
+            continue
+        d = pd.to_datetime(df.at[i, date_h], errors="coerce")
+        if pd.isna(d):
+            continue
+        months.add((d.year, d.month))
+        if len(months) >= _RECURRING_MIN_MONTHS:
+            return True
+    return False
+
+
 # ── Zero-token quick-add fast path ────────────────────────────────────────────
 
 # "[YYYY-MM-DD] <merchant words> <amount> [CCY]"  e.g. "biedronka 45",
