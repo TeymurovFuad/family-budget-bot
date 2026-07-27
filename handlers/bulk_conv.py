@@ -1504,6 +1504,9 @@ def _apply_bulk_edit(
             return False, (
                 f"Unknown category '{value}'. Valid categories: {', '.join(categories)}."
             ), []
+        elif categories:
+            canonical = next(c for c in categories if c.lower() == value.lower())
+            value = canonical
 
     notes: list[str] = []
     if field == "value":

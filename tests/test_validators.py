@@ -398,8 +398,8 @@ class TestParseAmountAmbiguityNote:
         assert value == 1234.0
         assert len(notes) == 1
         assert notes[0] == (
-            "Interpreted 1,234 as 1234. Use 1234 if you meant the whole number, "
-            "or 1.234 if you meant a decimal."
+            "Interpreted 1,234 as 1234. "
+            "Resend as 1.234 if you meant a decimal."
         )
 
     def test_lone_dot_three_trailing_digits_warns(self):

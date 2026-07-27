@@ -56,9 +56,8 @@ def parse_amount(raw) -> tuple[float, list[str]]:
         value = float(whole)
         result = round(-value if negative else value, 2)
         warnings.append(
-            f"Interpreted {str(raw).strip()} as {whole}. Use {whole} if you meant "
-            f"the whole number, or {ambiguous.group(1)}.{ambiguous.group(2)} if you "
-            f"meant a decimal."
+            f"Interpreted {str(raw).strip()} as {whole}. "
+            f"Resend as {ambiguous.group(1)}.{ambiguous.group(2)} if you meant a decimal."
         )
         return result, warnings
 

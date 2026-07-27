@@ -216,9 +216,10 @@ def test_reference_block_empty_lists_uses_defaults():
     assert "Expense" in block
 
 
-def test_system_prompts_have_no_dynamic_reference_data():
+def test_system_prompts_contain_reference_data_sentinel():
     # byte-identical for prompt cache — no per-user category/currency lists.
     for prompt in (_PARSE_SYSTEM_PROMPT, _QUICK_SYSTEM_PROMPT):
+        # Verifies the sentinel phrase is present — actual dynamic data lives in the user message, not here
         assert "Reference data for this request" in prompt
 
 
