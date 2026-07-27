@@ -314,12 +314,19 @@ def _build_reference_block(lists: dict) -> str:
     """
     all_cats   = ", ".join(lists.get("categories", []))
     txn_types  = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
-    currency_list = lists.get("currencies") or ["PLN"]
+    currency_list = lists.get("currencies") or [settings.DISPLAY_CURRENCY]
     currencies = " | ".join(currency_list)
+    # The user's configured currency (DISPLAY_CURRENCY in .env) is the default
+    # when it is an allowed currency; otherwise fall back to the first allowed.
+    default_ccy = (
+        settings.DISPLAY_CURRENCY
+        if settings.DISPLAY_CURRENCY in currency_list
+        else currency_list[0]
+    )
     return (
         "Reference data for this request:\n"
         f"Allowed currencies: {currencies}\n"
-        f"Default currency: {currency_list[0]}\n"
+        f"Default currency: {default_ccy}\n"
         f"Allowed transaction types: {txn_types}\n"
         f"Allowed categories: {all_cats}"
     )

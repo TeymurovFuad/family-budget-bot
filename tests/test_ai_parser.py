@@ -212,8 +212,23 @@ def test_reference_block_includes_currencies_and_default():
 
 def test_reference_block_empty_lists_uses_defaults():
     block = _build_reference_block({})
-    assert "PLN" in block
+    import settings
+    assert settings.DISPLAY_CURRENCY in block
     assert "Expense" in block
+
+
+def test_reference_block_default_currency_prefers_display_currency(monkeypatch):
+    import settings
+    monkeypatch.setattr(settings, "DISPLAY_CURRENCY", "EUR")
+    block = _build_reference_block({"currencies": ["GEL", "EUR"]})
+    assert "Default currency: EUR" in block
+
+
+def test_reference_block_default_falls_back_to_first_allowed(monkeypatch):
+    import settings
+    monkeypatch.setattr(settings, "DISPLAY_CURRENCY", "THB")  # not in Lists
+    block = _build_reference_block({"currencies": ["GEL", "EUR"]})
+    assert "Default currency: GEL" in block
 
 
 def test_system_prompts_contain_reference_data_sentinel():
