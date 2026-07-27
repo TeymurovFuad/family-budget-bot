@@ -339,17 +339,18 @@ class TestAddConvValue:
         upd2.message.reply_text = AsyncMock()
         return await add_value(upd2, ctx), ctx
 
-    async def test_valid_integer_advances_to_currency(self):
+    async def test_valid_integer_advances_to_category(self):
+        # Two-tap flow: amount goes straight to the category picker.
         result, _ = await self._run("100")
-        assert result == states.ADD_CURRENCY
+        assert result == states.ADD_CATEGORY
 
-    async def test_valid_decimal_advances_to_currency(self):
+    async def test_valid_decimal_advances_to_category(self):
         result, _ = await self._run("49.99")
-        assert result == states.ADD_CURRENCY
+        assert result == states.ADD_CATEGORY
 
     async def test_valid_comma_decimal_advances(self):
         result, _ = await self._run("49,99")
-        assert result == states.ADD_CURRENCY
+        assert result == states.ADD_CATEGORY
 
     async def test_zero_stays_in_add_value(self):
         upd = make_update("/add")
@@ -376,7 +377,7 @@ class TestAddConvValue:
         # -50 strips to "50" via re.sub(r"[^\d.]", "", text) → 50.0 → positive → advances
         # This is documented behaviour: negative sign is stripped, value treated as 50
         # The test should reflect actual code behaviour
-        assert result in (states.ADD_VALUE, states.ADD_CURRENCY)
+        assert result in (states.ADD_VALUE, states.ADD_CATEGORY)
 
     async def test_text_stays_in_add_value(self):
         upd = make_update("/add")
@@ -413,12 +414,15 @@ class TestAddConvCurrency:
         ctx.user_data["lists"] = SAMPLE_LISTS
         return ctx
 
-    async def test_valid_currency_advances_to_type(self):
+    async def test_valid_currency_advances_to_confirm(self):
+        # Legacy step handler — now jumps straight to the defaults confirm card.
         ctx = self._make_ctx_with_state()
+        ctx.user_data["state"].category = "Groceries"
         upd = make_update("PLN")
-        with patch("handlers.add_conv.get_rate", return_value=1.0):
+        with patch("handlers.add_conv.get_rate", return_value=1.0), \
+             patch("merchant_map.detect_recurring", return_value=False):
             result = await add_currency(upd, ctx)
-        assert result == states.ADD_TYPE
+        assert result == states.ADD_CONFIRM
 
     async def test_invalid_currency_stays(self):
         ctx = self._make_ctx_with_state()
@@ -444,11 +448,13 @@ class TestAddConvType:
         ctx.user_data["lists"] = SAMPLE_LISTS
         return ctx
 
-    async def test_valid_type_with_categories_advances_to_category(self):
+    async def test_valid_type_with_categories_advances_to_confirm(self):
+        # Legacy step handler — now jumps straight to the defaults confirm card.
         ctx = self._make_ctx()
         upd = make_update("Expense")
-        result = await add_type(upd, ctx)
-        assert result == states.ADD_CATEGORY
+        with patch("merchant_map.detect_recurring", return_value=False):
+            result = await add_type(upd, ctx)
+        assert result == states.ADD_CONFIRM
 
     async def test_invalid_type_stays(self):
         ctx = self._make_ctx()
@@ -468,13 +474,15 @@ class TestAddConvType:
             "persons": [],
         }
         upd = make_update("Expense")
-        result = await add_type(upd, ctx)
-        assert result == states.ADD_DATE
+        with patch("merchant_map.detect_recurring", return_value=False):
+            result = await add_type(upd, ctx)
+        assert result == states.ADD_CONFIRM
 
     async def test_type_is_stored(self):
         ctx = self._make_ctx()
         upd = make_update("Income")
-        await add_type(upd, ctx)
+        with patch("merchant_map.detect_recurring", return_value=False):
+            await add_type(upd, ctx)
         assert ctx.user_data["state"].transaction_type == "Income"
 
 
@@ -489,12 +497,13 @@ class TestAddConvCategory:
         ctx.user_data["lists"] = SAMPLE_LISTS
         return ctx
 
-    async def test_valid_category_advances_straight_to_date(self):
-        # Person step retired — category goes directly to the date prompt.
+    async def test_valid_category_advances_straight_to_confirm(self):
+        # Two-tap flow: category is the last prompt — everything else defaults.
         ctx = self._make_ctx()
         upd = make_update("Groceries")
-        result = await add_category(upd, ctx)
-        assert result == states.ADD_DATE
+        with patch("merchant_map.detect_recurring", return_value=False):
+            result = await add_category(upd, ctx)
+        assert result == states.ADD_CONFIRM
         assert ctx.user_data["state"].person == ""
 
     async def test_invalid_category_stays(self):
@@ -506,7 +515,8 @@ class TestAddConvCategory:
     async def test_category_stored(self):
         ctx = self._make_ctx()
         upd = make_update("Transport")
-        await add_category(upd, ctx)
+        with patch("merchant_map.detect_recurring", return_value=False):
+            await add_category(upd, ctx)
         assert ctx.user_data["state"].category == "Transport"
 
 
@@ -521,19 +531,18 @@ class TestAddConvDate:
         )
         return ctx
 
-    async def test_today_keyword_advances_to_desc(self):
+    async def test_today_keyword_advances_to_confirm(self):
         ctx = self._make_ctx()
         upd = make_update("today")
         result = await add_date(upd, ctx)
-        assert result == states.ADD_DESC
+        assert result == states.ADD_CONFIRM
 
-    async def test_valid_date_advances_to_desc(self):
+    async def test_valid_date_advances_to_confirm(self):
         ctx = self._make_ctx()
-        # Use a recent date (within 90 days) to avoid the old-date warning branch
         recent = date.today().replace(day=1)
         upd = make_update(str(recent))
         result = await add_date(upd, ctx)
-        assert result == states.ADD_DESC
+        assert result == states.ADD_CONFIRM
         assert ctx.user_data["state"].date == recent
 
     async def test_future_date_stays(self):
@@ -548,17 +557,14 @@ class TestAddConvDate:
         result = await add_date(upd, ctx)
         assert result == states.ADD_DATE
 
-    async def test_old_date_warns_first_then_confirms(self):
+    async def test_old_date_accepted_directly(self):
+        # The 90-day double-confirm was dropped with the two-tap flow — the
+        # confirm card itself is the review step for unusual dates.
         ctx = self._make_ctx()
         upd = make_update("2020-01-01")
-        # First attempt — should warn
         result = await add_date(upd, ctx)
-        assert result == states.ADD_DATE
-        assert ctx.user_data.get("_date_confirmed") is True
-        # Second attempt with same date — should confirm
-        upd2 = make_update("2020-01-01")
-        result2 = await add_date(upd2, ctx)
-        assert result2 == states.ADD_DESC
+        assert result == states.ADD_CONFIRM
+        assert ctx.user_data["state"].date == date(2020, 1, 1)
 
 
 class TestAddConvDesc:
@@ -572,17 +578,18 @@ class TestAddConvDesc:
         )
         return ctx
 
-    async def test_desc_advances_to_recurring(self):
+    async def test_desc_advances_to_confirm(self):
         ctx = self._make_ctx()
         upd = make_update("weekly shop")
-        result = await add_desc(upd, ctx)
-        assert result == states.ADD_RECURRING
+        with patch("merchant_map.detect_recurring", return_value=False):
+            result = await add_desc(upd, ctx)
+        assert result == states.ADD_CONFIRM
 
-    async def test_skip_desc_advances_to_recurring(self):
+    async def test_skip_desc_advances_to_confirm(self):
         ctx = self._make_ctx()
         upd = make_update("/skip")
         result = await add_skip_desc(upd, ctx)
-        assert result == states.ADD_RECURRING
+        assert result == states.ADD_CONFIRM
         assert ctx.user_data["state"].description == ""
 
     async def test_desc_stored_via_sanitize(self):
@@ -1452,7 +1459,9 @@ class TestQuickConvHandleQuickAdd:
         assert ctx.user_data["quick_parsed"]["type"] == "Expense"
         assert ctx.user_data["quick_parsed"]["currency"] == "PLN"
 
-    async def test_parse_rejects_unknown_category(self):
+    async def test_unknown_category_offers_one_tap_recovery(self):
+        # One-tap recovery: a bad category no longer ejects the user to /add —
+        # the amount is kept and a category keyboard is offered instead.
         upd = make_update("50 PLN unknowncat")
         ctx = make_ctx()
         parsed = {"value": 50, "currency": "PLN", "category": "UnknownCat",
@@ -1460,10 +1469,11 @@ class TestQuickConvHandleQuickAdd:
         with patch("handlers.quick_conv.load_reference_data", return_value=SAMPLE_LISTS), \
              patch("handlers.quick_conv.parse_quick", return_value=parsed):
             result = await handle_quick_add(upd, ctx)
-        assert result is None
+        assert result == states.QUICK_CONFIRM
+        assert ctx.user_data["quick_fix"]["value"] == 50
         sent = upd.message.reply_text.call_args.args[0]
-        assert "❌" in sent or "❌" in sent  # specific reason surfaced
-        assert "/add" in sent
+        assert "category" in sent.lower()
+        assert "50" in sent
 
     async def test_parse_rejects_invalid_parsed_date(self):
         upd = make_update("2026-13-01 groceries 89")
@@ -1721,13 +1731,8 @@ class TestAddFlowIntegration:
     """Carry a single ctx through the full /add happy path."""
 
     async def test_full_add_happy_path(self):
+        # Two-tap flow: /add → amount → category → confirm card with defaults.
         ctx = make_ctx()
-
-        patches = {
-            "handlers.add_conv.load_rates":         SAMPLE_RATES,
-            "handlers.add_conv.load_reference_data": SAMPLE_LISTS,
-            "handlers.add_conv.get_display_currency": "PLN",
-        }
 
         with patch("handlers.add_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.add_conv.load_reference_data", return_value=SAMPLE_LISTS), \
@@ -1736,7 +1741,7 @@ class TestAddFlowIntegration:
              patch("handlers.add_conv.append_transaction", AsyncMock()) as mock_append, \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
              patch("handlers.add_conv._last_saved", {}), \
-             patch("handlers.add_conv.sanitize_description", side_effect=lambda t: t.strip()):
+             patch("merchant_map.detect_recurring", return_value=False):
 
             # Step 1 — /add
             upd = make_update("/add")
@@ -1746,50 +1751,63 @@ class TestAddFlowIntegration:
             # Step 2 — amount
             upd = make_update("100")
             r = await add_value(upd, ctx)
-            assert r == states.ADD_CURRENCY
-
-            # Step 3 — currency
-            upd = make_update("PLN")
-            r = await add_currency(upd, ctx)
-            assert r == states.ADD_TYPE
-
-            # Step 4 — type
-            upd = make_update("Expense")
-            r = await add_type(upd, ctx)
             assert r == states.ADD_CATEGORY
 
-            # Step 5 — category (person step retired — jumps straight to date)
+            # Step 3 — category → confirm card with defaults pre-filled
             upd = make_update("Groceries")
             r = await add_category(upd, ctx)
-            assert r == states.ADD_DATE
-            assert ctx.user_data["state"].person == ""
-
-            # Step 6 — date
-            upd = make_update("today")
-            r = await add_date(upd, ctx)
-            assert r == states.ADD_DESC
-
-            # Step 8 — desc
-            upd = make_update("weekly shop")
-            r = await add_desc(upd, ctx)
-            assert r == states.ADD_RECURRING
-
-            # Step 9 — recurring
-            upd = make_update("No — one-off")
-            r = await add_recurring(upd, ctx)
             assert r == states.ADD_CONFIRM
+            state = ctx.user_data["state"]
+            assert state.currency == "PLN"          # display currency default
+            assert state.transaction_type == "Expense"  # from category hint
+            assert state.person == ""               # household default
+            assert state.description == ""
+            assert state.is_recurring is False
+            card = upd.message.reply_text.call_args.args[0]
+            assert "Groceries" in card and "100" in card
 
-            # Step 10 — confirm save
+            # Step 4 — confirm save
             upd = make_update("✅ Save")
             r = await add_confirm(upd, ctx)
             assert r == ConversationHandler.END
 
-            # Person field is retired — the saved transaction always carries "".
+            # Person field defaults to household — saved transaction carries "".
             saved_txn = mock_append.await_args.args[0]
             assert saved_txn.person == ""
 
         # After full flow user_data must be cleared
         assert ctx.user_data == {}
+
+    async def test_add_edit_field_from_confirm(self):
+        # The "Edit a field" mini-flow: pick Person, set it, land back on confirm.
+        ctx = make_ctx()
+
+        with patch("handlers.add_conv.load_rates", return_value=SAMPLE_RATES), \
+             patch("handlers.add_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
+             patch("handlers.add_conv.get_rate", return_value=1.0), \
+             patch("merchant_map.detect_recurring", return_value=False):
+
+            await cmd_add(make_update("/add"), ctx)
+            await add_value(make_update("100"), ctx)
+            r = await add_category(make_update("Groceries"), ctx)
+            assert r == states.ADD_CONFIRM
+
+            # Open the field picker
+            r = await add_confirm(make_update("✏️ Edit a field"), ctx)
+            assert r == states.ADD_CONFIRM
+            assert ctx.user_data["add_edit"] == ""  # picking a field
+
+            # Pick Person
+            r = await add_confirm(make_update("Person"), ctx)
+            assert r == states.ADD_CONFIRM
+            assert ctx.user_data["add_edit"] == "Person"  # awaiting the value
+
+            # Enter the value — back to the confirm card
+            r = await add_confirm(make_update("Alice"), ctx)
+            assert r == states.ADD_CONFIRM
+            assert ctx.user_data["state"].person == "Alice"
+            assert "add_edit" not in ctx.user_data
 
 
 class TestBulkSaveCommandAndDestination:
@@ -2074,9 +2092,10 @@ class TestBulkFormulaInjectionGuard:
         from models import AddTransactionState
         ctx = make_ctx()
         ctx.user_data["state"] = AddTransactionState(display_currency="PLN", rates=SAMPLE_RATES)
+        ctx.user_data["lists"] = SAMPLE_LISTS
         upd = make_update("1.234,56")
         result = await add_value(upd, ctx)
-        assert result == states.ADD_CURRENCY
+        assert result == states.ADD_CATEGORY
         assert ctx.user_data["state"].value == 1234.56
 
     async def test_bulk_edit_correction_reported_with_shield_note(self):

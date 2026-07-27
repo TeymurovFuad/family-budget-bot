@@ -99,7 +99,10 @@ async def edit_field(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Current: `{current}`\nPick new category:", parse_mode="Markdown", reply_markup=keyboard)
     elif text == "Currency":
         ccy_list = sorted(load_rates().keys())
-        keyboard = ReplyKeyboardMarkup([ccy_list[:3], ccy_list[3:], ["Cancel"]], one_time_keyboard=True, resize_keyboard=True)
+        # Rows derived from the actual currency count (2 per row) — a fixed
+        # 3-column split breaks whenever there aren't exactly 6 currencies.
+        rows = [ccy_list[i:i + 2] for i in range(0, len(ccy_list), 2)]
+        keyboard = ReplyKeyboardMarkup(rows + [["Cancel"]], one_time_keyboard=True, resize_keyboard=True)
         await update.message.reply_text(f"Current: `{current}`\nPick new currency:", parse_mode="Markdown", reply_markup=keyboard)
     else:
         await update.message.reply_text(f"Current: `{current}`\nEnter new value:", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
