@@ -32,6 +32,7 @@ init_logging()
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram import BotCommand
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application, CallbackQueryHandler, CommandHandler, ConversationHandler,
     MessageHandler, filters,
@@ -161,7 +162,8 @@ async def register_commands(app: Application) -> None:
 def build_application() -> Application:
     """Build the Application and wire every handler. Split from main() so tests
     can inspect the registered handlers without starting the bot."""
-    app = Application.builder().token(BOT_TOKEN).post_init(register_commands).build()
+    request = HTTPXRequest(read_timeout=30, write_timeout=30, connect_timeout=10)
+    app = Application.builder().token(BOT_TOKEN).request(request).post_init(register_commands).build()
     app.add_error_handler(error_handler)
 
     # ── /setup onboarding conversation ────────────────────────────────────────
