@@ -143,7 +143,8 @@ async def _offer_category_fix(update, ctx, row: dict, lists: dict, intro: str):
     await update.message.reply_text(
         f"{intro}\n"
         f"Amount: *{float(row['value']):,.2f} {ccy}*"
-        + (f" — _{row['description']}_" if row.get("description") else "")
+        # Code span, not italic — user text may contain Markdown chars like `_`.
+        + (f" — `{row['description']}`" if row.get("description") else "")
         + "\n\nWhich *category*?",
         parse_mode="Markdown",
         reply_markup=_category_keyboard(lists),

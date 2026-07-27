@@ -270,6 +270,15 @@ class TestDetectRecurring:
         ])
         assert self._detect(df) is False
 
+    def test_no_matching_merchant_returns_false(self):
+        # Rows exist but none match the queried merchant — the loop must
+        # terminate with an empty months set and return False.
+        df = _master_df([
+            ["2026-05-10", "Spotify", 45.0],
+            ["2026-06-10", "Biedronka", 45.0],
+        ])
+        assert self._detect(df, description="Netflix", value=45.0) is False
+
     def test_blank_description_is_never_recurring(self):
         assert merchant_map.detect_recurring("", 45.0) is False
 
@@ -400,3 +409,43 @@ class TestAddTwoTapDefaults:
             r = await add_confirm(make_update("No — one-off"), ctx)
         assert r == states.ADD_CONFIRM
         assert ctx.user_data["state"].is_recurring is False
+
+    async def test_recurring_decline_sticks_with_description_set(self):
+        # Regression: with a non-empty description, detection used to re-fire
+        # on the card re-render and silently flip the user's "No" back to Yes.
+        ctx = make_ctx()
+        await self._to_confirm(ctx, detect=True)
+        ctx.user_data["state"].description = "Netflix"
+        ctx.user_data["state"].is_recurring = True
+        ctx.user_data["recurring_proposed"] = True
+        with patch("merchant_map.detect_recurring", return_value=True):
+            await add_confirm(make_update("✏️ Edit a field"), ctx)
+            await add_confirm(make_update("Recurring"), ctx)
+            r = await add_confirm(make_update("No — one-off"), ctx)
+        assert r == states.ADD_CONFIRM
+        assert ctx.user_data["state"].is_recurring is False
+        # And it stays declined across another unrelated re-render.
+        with patch("merchant_map.detect_recurring", return_value=True):
+            await add_confirm(make_update("✏️ Edit a field"), ctx)
+            await add_confirm(make_update("Person"), ctx)
+            await add_confirm(make_update("Alice"), ctx)
+        assert ctx.user_data["state"].is_recurring is False
+
+    async def test_add_confirm_cancel_ends_conversation(self):
+        # New dispatch: the ❌ Cancel button (not just "anything non-save")
+        # ends the conversation and wipes the draft.
+        ctx = make_ctx()
+        r = await self._to_confirm(ctx)
+        assert r == states.ADD_CONFIRM
+        result = await add_confirm(make_update("❌ Cancel"), ctx)
+        assert result == ConversationHandler.END
+        assert ctx.user_data == {}
+
+    async def test_add_confirm_unrecognized_text_keeps_transaction(self):
+        # Typos no longer silently cancel — the card is re-shown.
+        ctx = make_ctx()
+        await self._to_confirm(ctx)
+        with patch("merchant_map.detect_recurring", return_value=False):
+            result = await add_confirm(make_update("hmm what"), ctx)
+        assert result == states.ADD_CONFIRM
+        assert "state" in ctx.user_data

@@ -160,7 +160,11 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state: AddTransactionState = ctx.user_data["state"]
     _apply_defaults(state)
 
-    proposed = await _detect_recurring(ctx, state)
+    # Never re-propose over an explicit "No — one-off" from the user.
+    if ctx.user_data.get("recurring_declined"):
+        proposed = False
+    else:
+        proposed = await _detect_recurring(ctx, state)
     if proposed:
         state.is_recurring = True  # proposal — one tap away from override
         ctx.user_data["recurring_proposed"] = True
@@ -290,6 +294,11 @@ async def _apply_field_value(update: Update, ctx: ContextTypes.DEFAULT_TYPE, fie
     elif field == "Recurring":
         state.is_recurring = "yes" in text.lower()
         ctx.user_data.pop("recurring_proposed", None)  # explicit user choice
+        if state.is_recurring:
+            ctx.user_data.pop("recurring_declined", None)
+        else:
+            # An explicit "No" must stick — block re-proposal on re-render.
+            ctx.user_data["recurring_declined"] = True
 
     ctx.user_data.pop("add_edit", None)
     return await _show_confirm_card(update, ctx)
