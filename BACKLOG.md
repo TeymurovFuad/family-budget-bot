@@ -760,6 +760,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       everything; on invalid edit, list the editable fields; validate category values against Lists.
 - [ ] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category
       keyboard instead of ejecting to the 9-step /add.
+- [ ] **Bulk preview separator orphan at page break** — when a page boundary falls between a row and its following `──────────` rule, the rule appears as the first line of the next page. Fix: skip appending the separator if it would be the first item on a new page. (`handlers/bulk_conv.py` `_format_bulk_preview`)
 - [ ] **Report chunking can break Markdown entities** — `cmd_report` raw 4000-char split;
       reuse the paginated-send helper from bulk_conv.
 - [ ] **edit_conv currency keyboard hardcodes 3/3 split** — breaks visually with >6 currencies.
