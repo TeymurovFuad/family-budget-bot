@@ -552,3 +552,331 @@ async def test_budget_bars_cycle_scoped(excel_path, monkeypatch):
     assert "Cycle Jun 2026" in text
     # 999 PLN pre-cycle expense excluded: only the 1 500 in-cycle row counts
     assert "1,500" in text.replace(" ", ",")
+
+
+# ── Wave 2 Group D: cycle_periods / before-cycles bucket ──────────────────────
+
+def _periods_df():
+    return pd.DataFrame({
+        "Date":   ["2026-05-01", "2026-06-26", "2026-07-05"],
+        "Type":   ["Expense",    "Expense",    "Expense"],
+        "Category": ["Groceries", "Groceries", "Groceries"],
+        "_base":   [100.0,        200.0,        300.0],
+        "IsDone": [True, True, True],
+    })
+
+
+def test_cycle_periods_before_cycles_bucket():
+    ledger = [(date(2026, 6, 25), "Jun 2026"), (date(2026, 7, 23), "Jul 2026")]
+    periods = cycles.cycle_periods(_periods_df(), ledger, today=date(2026, 7, 30))
+    assert periods[0] == (date(2026, 5, 1), date(2026, 6, 24), cycles.BEFORE_CYCLES_LABEL)
+    assert periods[1] == (date(2026, 6, 25), date(2026, 7, 22), "Jun 2026")
+    assert periods[2] == (date(2026, 7, 23), date(2026, 7, 30), "Jul 2026")
+
+
+def test_cycle_periods_no_older_rows_no_bucket():
+    ledger = [(date(2026, 4, 1), "Apr 2026")]
+    periods = cycles.cycle_periods(_periods_df(), ledger, today=date(2026, 7, 30))
+    assert [p[2] for p in periods] == ["Apr 2026"]
+
+
+def test_cycle_periods_empty_ledger_returns_empty():
+    assert cycles.cycle_periods(_periods_df(), [], today=date(2026, 7, 30)) == []
+
+
+# ── Wave 2 Group D: detect_missing_boundaries ─────────────────────────────────
+
+def test_detect_missing_boundaries_finds_gaps():
+    ledger = [(date(2025, 7, 1), "Jul 2025"), (date(2025, 10, 2), "Oct 2025")]
+    missing = cycles.detect_missing_boundaries(date(2025, 7, 1), date(2025, 10, 31), ledger)
+    assert missing == [date(2025, 8, 1), date(2025, 9, 1)]
+
+
+def test_detect_missing_boundaries_none_missing():
+    ledger = [(date(2025, 7, 1), "Jul 2025"), (date(2025, 8, 1), "Aug 2025")]
+    assert cycles.detect_missing_boundaries(date(2025, 7, 1), date(2025, 8, 31), ledger) == []
+
+
+# ── Wave 2 Group D: fallback income candidates ────────────────────────────────
+
+def _fallback_df():
+    return pd.DataFrame({
+        "Date":     ["2024-07-28", "2024-08-01", "2024-08-05", "2024-08-10", "2024-09-15"],
+        "Type":     ["Income",     "Income",     "Income",     "Income",     "Income"],
+        "Category": ["Refund",     "Transfer",   "Gift",       "Other",      "Other"],
+        "Description": ["", "", "", "", ""],
+        "_base":     [500.0,        9000.0,       50.0,         2000.0,       7000.0],
+        "IsDone":   [True, True, True, True, True],
+    })
+
+
+def test_fallback_income_candidates_top3_in_window():
+    got = cycles.fallback_income_candidates(_fallback_df(), date(2024, 8, 1), [])
+    assert [c["date"] for c in got] == [date(2024, 8, 1), date(2024, 8, 10), date(2024, 7, 28)]
+    assert got[0]["amounts"] == [9000.0]
+    # 2024-09-15 is outside the +/-20-day window
+    assert all(c["date"] != date(2024, 9, 15) for c in got)
+
+
+def test_fallback_income_candidates_skips_recorded_and_empty_df():
+    got = cycles.fallback_income_candidates(
+        _fallback_df(), date(2024, 8, 1), [(date(2024, 8, 1), "Aug 2024")]
+    )
+    assert all(c["date"] != date(2024, 8, 1) for c in got)
+    assert cycles.fallback_income_candidates(pd.DataFrame(), date(2024, 8, 1), []) == []
+
+
+# ── Wave 2 Group D: detect review — none-this-month and multi-salary picker ───
+
+def _detect_review_ctx(candidates):
+    ctx = make_ctx()
+    ctx.user_data["detect_candidates"] = [
+        {"date_str": c[0], "amounts": c[1], "amounts_fmt": [f"{a:,.0f} PLN" for a in c[1]],
+         "unambiguous": len(c[1]) == 1}
+        for c in candidates
+    ]
+    return ctx
+
+
+def _review_update():
+    upd = make_callback_update("detect:review")
+    upd.callback_query.edit_message_reply_markup = AsyncMock()
+    upd.callback_query.edit_message_text = AsyncMock()
+    return upd
+
+
+async def test_detect_single_candidate_offers_none_this_month(excel_path):
+    from handlers.cycle import handle_detect_callback
+    ctx = _detect_review_ctx([("2026-06-25", [5000.0])])
+    upd = _review_update()
+    await handle_detect_callback(upd, ctx)
+    markup = upd.callback_query.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "detect:pick:2026-06-25" in callbacks
+    assert "detect:none:2026-06" in callbacks
+
+
+async def test_detect_multi_candidates_one_button_each_largest_first(excel_path):
+    from handlers.cycle import handle_detect_callback
+    ctx = _detect_review_ctx([("2026-06-02", [3000.0]), ("2026-06-25", [8000.0])])
+    upd = _review_update()
+    await handle_detect_callback(upd, ctx)
+    markup = upd.callback_query.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    # largest amount first
+    assert callbacks[0] == "detect:pick:2026-06-25"
+    assert callbacks[1] == "detect:pick:2026-06-02"
+    assert "detect:none:2026-06" in callbacks
+    assert "detect:custom" in callbacks
+    assert "detect:stop" in callbacks
+    # both dates share the queue slot: one tap resolves the whole month
+    assert ctx.user_data["detect_total"] == 1
+
+
+async def test_detect_none_extends_previous_cycle(excel_path):
+    from handlers.cycle import handle_detect_callback
+    ctx = make_ctx()
+    ctx.user_data["detect_queue"] = [[{"date_str": "2026-06-25", "amounts": [5000.0],
+                                       "amounts_fmt": ["5,000 PLN"], "unambiguous": True}]]
+    ctx.user_data["detect_total"] = 1
+    upd = _review_update()
+    upd.callback_query.data = "detect:none:2026-06"
+    await handle_detect_callback(upd, ctx)
+    text = upd.callback_query.edit_message_text.call_args[0][0]
+    assert "No cycle in Jun 2026" in text
+    assert "previous cycle" in text
+    assert load_cycles() == []  # nothing recorded — "none" is a valid answer
+
+
+async def test_detect_fallback_window_when_no_salary_rows(excel_path, monkeypatch):
+    """No keyword hits -> largest income rows near the 1st offered as candidates."""
+    import handlers.cycle as hc
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_cycles", lambda: [])
+    monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: [])
+    fb = [{"date": date(2026, 7, 1), "amounts": [9000.0], "unambiguous": True},
+          {"date": date(2026, 7, 10), "amounts": [2000.0], "unambiguous": True}]
+    monkeypatch.setattr(hc, "fallback_income_candidates", lambda df, anchor, cyc: fb)
+
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["detect"]))
+
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    assert any("No salary" in t for t in texts), texts
+    markup = upd.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "detect:pick:2026-07-01" in callbacks
+    assert any(cb.startswith("detect:none:") for cb in callbacks)
+
+
+async def test_detect_no_candidates_and_no_fallback_reports_nothing(excel_path, monkeypatch):
+    import handlers.cycle as hc
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_cycles", lambda: [])
+    monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: [])
+    monkeypatch.setattr(hc, "fallback_income_candidates", lambda df, anchor, cyc: [])
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["detect"]))
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    assert any("Nothing to backfill" in t for t in texts), texts
+
+
+# ── Wave 2 Group D: reports — timezone, savings, before-cycles, backfill ─────
+
+def test_current_cycle_bounds_uses_local_timezone(excel_path, monkeypatch):
+    from datetime import datetime
+    import handlers.reports as reports
+    from settings import TIMEZONE
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 1, 1))
+    got = reports._current_cycle_bounds()
+    assert got is not None
+    start, end, label = got
+    assert end == datetime.now(TIMEZONE).date()
+
+
+async def test_savings_cycle_aware_caption(excel_path, monkeypatch):
+    import handlers.reports as reports
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_update()
+    upd.message.reply_photo = AsyncMock()
+    await reports.cmd_savings(upd, make_ctx())
+    caption = upd.message.reply_photo.call_args.kwargs["caption"]
+    assert "cycle" in caption and "month" not in caption
+
+
+async def test_savings_calendar_when_flag_off(excel_path, monkeypatch):
+    import handlers.reports as reports
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", False)
+    df = _cycle_df()
+    df["Year"] = 2026
+    df["Month"] = "Jul"
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    upd.message.reply_photo = AsyncMock()
+    await reports.cmd_savings(upd, make_ctx())
+    caption = upd.message.reply_photo.call_args.kwargs["caption"]
+    assert "month" in caption
+
+
+async def test_summary_entire_period_walk_includes_before_bucket(excel_path, monkeypatch):
+    from datetime import datetime, timezone as _tz
+    import handlers.reports as reports
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(reports, "now_utc",
+                        lambda: datetime(2026, 7, 27, 12, 0, tzinfo=_tz.utc))
+    record_cycle_start(date(2026, 6, 25))
+    record_cycle_start(date(2026, 7, 23))
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_update()
+    await cmd_summary(upd, make_ctx(["all"]))
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    # 2026-06-01 expense predates the first boundary -> Before cycles bucket
+    assert any("Before cycles" in t for t in texts), texts
+    assert any("Cycle Jun 2026" in t for t in texts), texts
+    # the before-cycles bucket has no salary anchor — no unaccounted math
+    before = next(t for t in texts if "Before cycles" in t)
+    assert "Unaccounted" not in before
+
+
+async def test_summary_month_year_resolves_ledger_first(excel_path, monkeypatch):
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    record_cycle_start(date(2026, 7, 23))
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_update()
+    await cmd_summary(upd, make_ctx(["jun", "2026"]))
+    text = upd.message.reply_text.call_args[0][0]
+    assert "Cycle Jun 2026" in text  # ledger cycle, not calendar June
+
+
+async def test_summary_month_year_calendar_when_no_ledger_label(excel_path, monkeypatch):
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 6, 25))
+    df = _cycle_df()
+    df["Year"] = 2026
+    df["Month"] = "Mar"
+    _patch_report_data(monkeypatch, df)
+    upd = make_update()
+    await cmd_summary(upd, make_ctx(["mar", "2026"]))
+    text = upd.message.reply_text.call_args[0][0]
+    assert "Mar 2026 — Summary" in text
+
+
+async def test_summary_range_prompts_lazy_backfill(excel_path, monkeypatch):
+    from handlers.reports import cmd_summary
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    record_cycle_start(date(2026, 5, 24))
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_update()
+    ctx = make_ctx(["may", "2026", "-", "jul", "2026"])
+    await cmd_summary(upd, ctx)
+    text = upd.message.reply_text.call_args[0][0]
+    assert "missing cycle boundaries" in text
+    assert "Jun 2026" in text and "Jul 2026" in text
+    markup = upd.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert callbacks == ["sum:bf:yes", "sum:bf:skip"]
+    assert ctx.user_data["sum_pending"]["kind"] == "range"
+
+
+async def test_summary_backfill_skip_renders_pending(excel_path, monkeypatch):
+    from handlers.reports import handle_summary_callback
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_callback_update("sum:bf:skip")
+    upd.callback_query.message.edit_reply_markup = AsyncMock()
+    ctx = make_ctx()
+    ctx.user_data["sum_pending"] = {
+        "kind": "range", "start": date(2026, 6, 1), "end": date(2026, 7, 31),
+        "label": "Jun 2026 - Jul 2026",
+    }
+    await handle_summary_callback(upd, ctx)
+    text = upd.callback_query.message.reply_text.call_args[0][0]
+    assert "Range Report" in text
+    assert "sum_pending" not in ctx.user_data
+
+
+async def test_summary_backfill_yes_points_to_detect(excel_path, monkeypatch):
+    from handlers.reports import handle_summary_callback
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    _patch_report_data(monkeypatch, _cycle_df())
+    upd = make_callback_update("sum:bf:yes")
+    upd.callback_query.message.edit_text = AsyncMock()
+    ctx = make_ctx()
+    ctx.user_data["sum_pending"] = {"kind": "entire", "start": date(2026, 1, 1),
+                                    "end": date(2026, 7, 31)}
+    await handle_summary_callback(upd, ctx)
+    text = upd.callback_query.message.edit_text.call_args[0][0]
+    assert "/cycle detect" in text
+    assert "sum_pending" not in ctx.user_data
+
+
+def test_detect_missing_boundaries_empty_ledger_returns_empty():
+    """Empty ledger = no boundaries to compare against = no gaps to fill."""
+    assert cycles.detect_missing_boundaries(date(2025, 1, 1), date(2025, 3, 31), []) == []
+
+
+def test_fallback_income_candidates_missing_base_column():
+    df = _fallback_df().drop(columns=["_base"])
+    assert cycles.fallback_income_candidates(df, date(2024, 8, 1), []) == []
+
+
+def test_group_by_month_order_independent():
+    from handlers.cycle import _group_by_month
+    entries = [
+        {"date_str": "2026-06-25"},
+        {"date_str": "2026-05-24"},
+        {"date_str": "2026-06-02"},
+    ]
+    groups = _group_by_month(entries)
+    assert [[e["date_str"] for e in g] for g in groups] == [
+        ["2026-05-24"], ["2026-06-02", "2026-06-25"],
+    ]

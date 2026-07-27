@@ -9,7 +9,7 @@ the flag; these helpers just read/write the ledger.
 
 import asyncio
 import re
-from datetime import date
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -27,6 +27,10 @@ log = get_logger(__name__)
 
 CYCLES_SHEET_NAME = "Cycles"
 LISTS_SHEET_NAME = "Lists"
+
+# Implicit bucket for transactions older than the first recorded boundary.
+# It has no salary anchor, so unaccounted math never applies to it.
+BEFORE_CYCLES_LABEL = "Before cycles"
 
 
 def cycle_label(start: date) -> str:
@@ -464,3 +468,106 @@ def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
         "salary": salary,
         "unaccounted": salary - expense - savings,
     }
+
+
+def cycle_periods(
+    df: pd.DataFrame,
+    cycles: list[tuple[date, str]] | None = None,
+    today: date | None = None,
+) -> list[tuple[date, date, str]]:
+    """
+    Every cycle as (start, end, label), oldest first. Each cycle ends the day
+    before the next begins; the newest ends today. When transactions exist
+    that are older than the first recorded boundary, an implicit
+    "Before cycles" bucket is prepended covering [earliest txn, first-1].
+    Returns [] when the ledger is empty.
+    """
+    if cycles is None:
+        cycles = load_cycles()
+    if today is None:
+        today = date.today()
+    if not cycles:
+        return []
+    periods: list[tuple[date, date, str]] = []
+    first_start = cycles[0][0]
+    dates = pd.to_datetime(df["Date"], errors="coerce").dt.date.dropna()
+    older = dates[dates < first_start]
+    if not older.empty:
+        periods.append((older.min(), first_start - timedelta(days=1), BEFORE_CYCLES_LABEL))
+    for i, (start, label) in enumerate(cycles):
+        end = cycles[i + 1][0] - timedelta(days=1) if i + 1 < len(cycles) else today
+        periods.append((start, end, label))
+    return periods
+
+
+def detect_missing_boundaries(
+    start: date,
+    end: date,
+    cycles: list[tuple[date, str]] | None = None,
+) -> list[date]:
+    """
+    First-of-month markers for calendar months inside [start, end] that have
+    no recorded cycle boundary. Used by reports to offer a lazy backfill
+    before rendering a period with gaps.
+    """
+    if cycles is None:
+        cycles = load_cycles()
+    if not cycles:
+        # No ledger at all → no boundaries to compare against, hence no gaps
+        # to backfill (an empty ledger means cycles are effectively unused).
+        return []
+    covered = {(c[0].year, c[0].month) for c in cycles}
+    missing: list[date] = []
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        if (y, m) not in covered:
+            missing.append(date(y, m, 1))
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+    return missing
+
+
+def fallback_income_candidates(
+    df: pd.DataFrame,
+    anchor: date,
+    existing_cycles: list[tuple[date, str]] | None = None,
+    window_days: int = 20,
+    limit: int = 3,
+) -> list[dict]:
+    """
+    When keyword detection finds nothing: the largest `limit` Income rows in
+    the ±window_days window around `anchor` (usually the 1st of the target
+    month), largest first. Catches salaries filed under non-salary categories.
+    Each entry: {date, amounts, unambiguous} — same shape as
+    detect_cycle_candidates() entries.
+    """
+    if existing_cycles is None:
+        existing_cycles = load_cycles()
+    existing_starts = {c[0] for c in existing_cycles}
+
+    df = df.copy()
+    if df.empty or "Date" not in df.columns or "_base" not in df.columns:
+        return []
+    df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+    lo, hi = anchor - timedelta(days=window_days), anchor + timedelta(days=window_days)
+    rows = df[
+        df["_date"].notna()
+        & df["IsDone"].astype(bool)
+        & (df["Type"] == "Income")
+        & (df["_date"] >= lo)
+        & (df["_date"] <= hi)
+        & (df["_date"] <= date.today())
+    ]
+    rows = rows[~rows["_date"].isin(existing_starts)]
+    if rows.empty:
+        return []
+    rows = rows.sort_values("_base", ascending=False).head(limit)
+    return [
+        {
+            "date": r["_date"],
+            "amounts": [round(float(r["_base"]), 2)],
+            "unambiguous": True,
+        }
+        for _, r in rows.iterrows()
+    ]
