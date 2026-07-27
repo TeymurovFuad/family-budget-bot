@@ -512,6 +512,10 @@ def detect_missing_boundaries(
     """
     if cycles is None:
         cycles = load_cycles()
+    if not cycles:
+        # No ledger at all → no boundaries to compare against, hence no gaps
+        # to backfill (an empty ledger means cycles are effectively unused).
+        return []
     covered = {(c[0].year, c[0].month) for c in cycles}
     missing: list[date] = []
     y, m = start.year, start.month
@@ -543,7 +547,7 @@ def fallback_income_candidates(
     existing_starts = {c[0] for c in existing_cycles}
 
     df = df.copy()
-    if df.empty or "Date" not in df.columns:
+    if df.empty or "Date" not in df.columns or "_base" not in df.columns:
         return []
     df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
     lo, hi = anchor - timedelta(days=window_days), anchor + timedelta(days=window_days)

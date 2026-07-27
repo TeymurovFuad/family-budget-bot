@@ -290,9 +290,10 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def _group_by_month(entries: list[dict]) -> list[list[dict]]:
-    """Group review entries into per-calendar-month lists, order preserved."""
+    """Group review entries into per-calendar-month lists, oldest first —
+    input order does not matter."""
     groups: list[list[dict]] = []
-    for e in entries:
+    for e in sorted(entries, key=lambda e: e["date_str"]):
         key = e["date_str"][:7]
         if groups and groups[-1][0]["date_str"][:7] == key:
             groups[-1].append(e)

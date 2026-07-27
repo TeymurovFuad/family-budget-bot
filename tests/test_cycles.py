@@ -857,3 +857,26 @@ async def test_summary_backfill_yes_points_to_detect(excel_path, monkeypatch):
     text = upd.callback_query.message.edit_text.call_args[0][0]
     assert "/cycle detect" in text
     assert "sum_pending" not in ctx.user_data
+
+
+def test_detect_missing_boundaries_empty_ledger_returns_empty():
+    """Empty ledger = no boundaries to compare against = no gaps to fill."""
+    assert cycles.detect_missing_boundaries(date(2025, 1, 1), date(2025, 3, 31), []) == []
+
+
+def test_fallback_income_candidates_missing_base_column():
+    df = _fallback_df().drop(columns=["_base"])
+    assert cycles.fallback_income_candidates(df, date(2024, 8, 1), []) == []
+
+
+def test_group_by_month_order_independent():
+    from handlers.cycle import _group_by_month
+    entries = [
+        {"date_str": "2026-06-25"},
+        {"date_str": "2026-05-24"},
+        {"date_str": "2026-06-02"},
+    ]
+    groups = _group_by_month(entries)
+    assert [[e["date_str"] for e in g] for g in groups] == [
+        ["2026-05-24"], ["2026-06-02", "2026-06-25"],
+    ]
