@@ -58,6 +58,27 @@ Cycles is half-done: /summary and /budget are cycle-scoped, reports aren't, pick
 ### Run 3 — "Quality, infra, and long tail" (~95 items)
 No hard deadline — work through these incrementally.
 
+#### Wave 2 — parallel agent grouping (planned 2026-07-27)
+
+Six groups by file domain — agents A–E chain sequentially (each PR targets the previous branch); F is independent and can run alongside any group.
+
+**Chain order: A → B → C → D → E** (merge A first, B targets A's branch, etc.)
+**F runs independently** at any time — all new files, zero collision.
+
+| Group | Files owned | Items |
+|---|---|---|
+| **A — Storage layer** | `file_storage.py`, `excel_schema.py`, `data.py` | Split file_storage, TTL cache, JSONL queue, lost-update protection, typed DeepSeek model, derive Year/Month formula, per-operation audit line |
+| **B — Bulk/import pipeline** | `handlers/bulk_conv.py`, `ai_parser.py`, `validators.py`, `statement_profiles.py` | Compact AI output, extraction/categorization split, dedup-before-parse, prompt caching, bulk drop/skip UX, PR#3 cosmetic cleanup, dedup wording drift, lone-separator, profile design |
+| **C — Conversation handlers** | `handlers/add_conv.py`, `handlers/quick_conv.py`, `handlers/edit_conv.py`, `handlers/delete_conv.py` | /add default-and-confirm, quick-add one-tap recovery, recurring detection, person attribution, local fast-path quick-add, empty SALARY_CATEGORY fix |
+| **D — Reports + cycles** | `handlers/reports.py`, `handlers/cycle.py`, `cycles.py`, `scheduled_report.py` | /savings cycle-aware, lazy backfill, none-this-month, candidate window, past/entire-period walk, before-first-boundary, multi-salary picker, timezone fix, report chunking |
+| **E — Infra + scripts** | `scripts/`, `logger.py`, `bot.py` (wiring only) | Log retention, draft archival, magic numbers sweep, 300-line cap, recovery replay Date fix, off-peak batching |
+| **F — Web UI** | `web/` (new), `sqlite_ops.py` (new) | SQLite shadow store → read API + UI → web write path → flip SQLite primary (Cycles W1–W4) |
+
+**Collision rules:**
+- `bot.py` — Group E only, wiring/constants changes only
+- `file_storage.py`, `excel_schema.py` — Group A exclusively; B/C/D call but never edit during the same run
+- Tests mirror their module: `tests/test_bulk_*` → B, `tests/test_handlers_*` → C, etc.
+
 ### /setup onboarding — agreed design (brainstorm 2026-07-27)
 
 Goal: user sets XLSX_PATH in .env, runs /setup (or /start with no file present), bot creates the workbook from the bundled template and walks through full configuration. No spreadsheet editing required.
