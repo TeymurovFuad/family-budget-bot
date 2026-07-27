@@ -8,7 +8,16 @@ import json
 import pytest
 from unittest.mock import patch
 
-from ai_parser import _strip_fences, DeepSeekProvider, _build_quick_prompt, _build_parse_prompt
+from ai_parser import (
+    _strip_fences,
+    DeepSeekProvider,
+    _build_reference_block,
+    _decode_positional_array,
+    _normalize_ai_rows,
+    _salvage_json_arrays,
+    _PARSE_SYSTEM_PROMPT,
+    _QUICK_SYSTEM_PROMPT,
+)
 
 
 # ── _strip_fences ──────────────────────────────────────────────────────────────
@@ -185,44 +194,50 @@ def test_parse_image_malformed_raises():
             provider.parse_image(b"FAKEIMAGE", lists={})
 
 
-# ── Prompt building ────────────────────────────────────────────────────────────
+# ── Prompt building (prompt-caching restructure) ──────────────────────────────
 
-def test_quick_prompt_includes_categories():
+def test_reference_block_includes_categories():
     lists = {"categories": ["Groceries", "Transport"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"]}
-    prompt = _build_quick_prompt(lists)
-    assert "Groceries" in prompt
-    assert "Transport" in prompt
+    block = _build_reference_block(lists)
+    assert "Groceries" in block
+    assert "Transport" in block
 
 
-def test_quick_prompt_includes_currencies():
-    lists = {"categories": ["Groceries", "Transport"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"]}
-    prompt = _build_quick_prompt(lists)
-    assert "PLN" in prompt
+def test_reference_block_includes_currencies_and_default():
+    lists = {"categories": ["Groceries"], "currencies": ["GEL", "EUR"], "txn_types": ["Expense"]}
+    block = _build_reference_block(lists)
+    assert "GEL" in block and "EUR" in block
+    assert "Default currency: GEL" in block
 
 
-def test_quick_prompt_omits_persons():
+def test_reference_block_empty_lists_uses_defaults():
+    block = _build_reference_block({})
+    assert "PLN" in block
+    assert "Expense" in block
+
+
+def test_system_prompts_have_no_dynamic_reference_data():
+    # byte-identical for prompt cache — no per-user category/currency lists.
+    for prompt in (_PARSE_SYSTEM_PROMPT, _QUICK_SYSTEM_PROMPT):
+        assert "Reference data for this request" in prompt
+
+
+def test_quick_system_prompt_omits_persons():
     # Person field retired — the prompt must not mention household persons.
-    lists = {"categories": ["Groceries", "Transport"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"], "persons": ["Alice", "Bob"]}
-    prompt = _build_quick_prompt(lists)
-    assert "Alice" not in prompt
-    assert "Bob" not in prompt
-    assert "person" not in prompt.lower()
+    assert "person" not in _QUICK_SYSTEM_PROMPT.lower()
 
 
-def test_quick_prompt_includes_date_instruction():
-    prompt = _build_quick_prompt({"categories": ["Groceries"], "currencies": ["PLN"], "txn_types": ["Expense"]})
-    assert "date" in prompt.lower()
-    assert "yyyy-mm-dd" in prompt.lower()
+def test_quick_system_prompt_includes_date_instruction():
+    assert "date" in _QUICK_SYSTEM_PROMPT.lower()
+    assert "yyyy-mm-dd" in _QUICK_SYSTEM_PROMPT.lower()
 
 
-def test_parse_prompt_includes_categories():
-    lists = {"categories": ["Groceries", "Transport"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"]}
-    prompt = _build_parse_prompt(lists)
-    assert "Groceries" in prompt
+def test_parse_system_prompt_requests_positional_arrays():
+    assert "[date, amount, currency, category, description, type, is_recurring]" in _PARSE_SYSTEM_PROMPT
 
 
-def test_parse_prompt_includes_statement_parsing_rules():
-    prompt = _build_parse_prompt({"categories": ["Groceries"], "currencies": ["PLN"], "txn_types": ["Expense", "Income"]})
+def test_parse_system_prompt_includes_statement_parsing_rules():
+    prompt = _PARSE_SYSTEM_PROMPT
     assert "statement" in prompt.lower()
     assert "one transaction per block" in prompt.lower()
     assert "ignore balance rows" in prompt.lower()
@@ -230,15 +245,141 @@ def test_parse_prompt_includes_statement_parsing_rules():
     assert "positive amounts" in prompt.lower()
 
 
-def test_quick_prompt_empty_lists_uses_defaults():
-    prompt = _build_quick_prompt({})
-    assert "PLN" in prompt
-    assert "Expense" in prompt
+def test_system_prompt_byte_identical_across_calls():
+    """Different reference lists must never change the system prompt bytes."""
+    provider = DeepSeekProvider()
+    captured = []
+
+    def fake_chat(self, messages, max_tokens=None):
+        captured.append(messages[0]["content"])
+        return "[]"
+
+    with patch.object(DeepSeekProvider, "_chat", fake_chat):
+        provider.parse_text("x 5", {"categories": ["Groceries"]})
+        provider.parse_text("y 7", {"categories": ["Zoo", "Rent"], "currencies": ["GEL"]})
+    assert captured[0] == captured[1] == _PARSE_SYSTEM_PROMPT
 
 
-def test_parse_prompt_empty_lists_uses_defaults():
-    prompt = _build_parse_prompt({})
-    assert "PLN" in prompt
+def test_dynamic_reference_data_lands_in_user_message():
+    provider = DeepSeekProvider()
+    captured = []
+
+    def fake_chat(self, messages, max_tokens=None):
+        captured.append(messages[1]["content"])
+        return "[]"
+
+    with patch.object(DeepSeekProvider, "_chat", fake_chat):
+        provider.parse_text("shop 5", {"categories": ["Groceries"]})
+    assert "Groceries" in captured[0]
+    assert captured[0].startswith("shop 5")
+    assert captured[0].rstrip().endswith("Allowed categories: Groceries")
+
+
+# ── Positional-array output format (compact AI format) ───────────────────────
+
+def test_decode_positional_array_maps_all_fields():
+    row = _decode_positional_array(
+        ["2026-05-19", 23.0, "EUR", "Groceries", "Lidl", "Expense", True])
+    assert row == {
+        "date": "2026-05-19", "value": 23.0, "currency": "EUR",
+        "category": "Groceries", "description": "Lidl", "type": "Expense",
+        "is_recurring": True,
+    }
+
+
+def test_decode_positional_array_short_row_partial_fields():
+    row = _decode_positional_array(["2026-05-19", 23.0, "EUR"])
+    assert row == {"date": "2026-05-19", "value": 23.0, "currency": "EUR"}
+
+
+def test_decode_positional_array_extra_positions_ignored():
+    row = _decode_positional_array(
+        ["2026-05-19", 1, "EUR", "Other", "x", "Expense", False, "junk", 42])
+    assert "junk" not in row.values() or len(row) == 7
+    assert set(row) == {"date", "value", "currency", "category", "description",
+                        "type", "is_recurring"}
+
+
+@pytest.mark.parametrize("bad", [None, "string", 42, {}, [], ["only-date"]])
+def test_decode_positional_array_rejects_malformed(bad):
+    assert _decode_positional_array(bad) is None
+
+
+def test_normalize_ai_rows_mixed_formats():
+    items = [
+        {"date": "2026-05-19", "value": 5},            # legacy dict — kept
+        ["2026-05-20", 7, "EUR"],                      # array — decoded
+        "garbage", 42, None,                            # dropped
+    ]
+    rows = _normalize_ai_rows(items)
+    assert len(rows) == 2
+    assert rows[1]["value"] == 7
+
+
+def test_parse_text_accepts_positional_array_response():
+    provider = DeepSeekProvider()
+    mock_resp = '[["2026-05-19", 89, "PLN", "Groceries", "shop", "Expense", false]]'
+    with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
+        result = provider.parse_text("shop 89", {})
+    assert result == [{
+        "date": "2026-05-19", "value": 89, "currency": "PLN",
+        "category": "Groceries", "description": "shop", "type": "Expense",
+        "is_recurring": False,
+    }]
+
+
+def test_parse_text_still_accepts_dict_response():
+    # Backward compat during rollout — dict elements pass through unchanged.
+    provider = DeepSeekProvider()
+    mock_resp = '[{"date": "2026-05-19", "value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "shop"}]'
+    with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
+        result = provider.parse_text("shop 89", {})
+    assert len(result) == 1 and result[0]["value"] == 89
+
+
+def test_parse_image_accepts_positional_array_response():
+    provider = DeepSeekProvider()
+    mock_resp = '[["2026-05-19", 50, "PLN", "Groceries", "receipt", "Expense", false]]'
+    with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
+        result = provider.parse_image(b"FAKEIMAGE", lists={})
+    assert len(result) == 1 and result[0]["description"] == "receipt"
+
+
+def test_parse_text_malformed_array_elements_dropped_not_fatal():
+    provider = DeepSeekProvider()
+    mock_resp = '[["2026-05-19", 89, "PLN", "Groceries", "shop", "Expense", false], ["x"], 42]'
+    with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
+        result = provider.parse_text("shop 89", {})
+    assert len(result) == 1
+
+
+def test_salvage_json_arrays_from_truncated_response():
+    full = json.dumps([
+        ["2026-05-19", 10.0 + i, "PLN", "Groceries", f"txn {i}", "Expense", False]
+        for i in range(30)
+    ])
+    truncated = full[:int(len(full) * 0.9)]  # cut mid-array
+    salvaged = _salvage_json_arrays(truncated)
+    assert len(salvaged) >= 20
+    assert all(r["date"] == "2026-05-19" for r in salvaged)
+
+
+def test_salvage_json_arrays_ignores_numeric_arrays_in_objects():
+    raw = '[{"description": "shop", "amounts": [1, 2, 3]}, {"value": 6'
+    assert _salvage_json_arrays(raw) == []
+
+
+def test_parse_text_salvages_truncated_array_response():
+    provider = DeepSeekProvider()
+    full = json.dumps([
+        ["2026-05-19", 10.0 + i, "PLN", "Groceries", f"txn {i}", "Expense", False]
+        for i in range(30)
+    ])
+    truncated = full[:int(len(full) * 0.9)]
+    with patch.object(DeepSeekProvider, "_chat", return_value=truncated):
+        result = provider.parse_text("statement text", {})
+    assert len(result) >= 20
+    assert all("value" in r for r in result)
 
 
 # ── Truncated-response salvage (root cause of July-08 bulk failures) ──────────

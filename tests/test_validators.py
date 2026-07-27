@@ -60,7 +60,8 @@ class TestParseAmount:
         ("50 PLN", 50.0),                   # currency suffix ignored
         ("zł 89", 89.0),
         (150.5, 150.5),                     # already numeric
-        ("10.567", 10.57),                  # rounded to 2 decimals
+        ("10.567", 10567.0),                # lone separator + 3 digits = thousands
+        ("10.5678", 10.57),                 # rounded to 2 decimals
     ])
     def test_parses(self, raw, expected):
         value, warnings = parse_amount(raw)
@@ -344,12 +345,29 @@ class TestApplyBulkEditValidation:
         assert rows[0]["type"] == "Expense"
         assert any("negative" in n for n in notes)  # correction is reported, not silent
 
-    def test_typo_category_edit_flagged_when_lists_known(self):
+    def test_typo_category_edit_rejected_with_valid_list(self):
         from handlers.bulk_conv import _apply_bulk_edit
         rows = [_row()]
         action, reason, notes = _apply_bulk_edit("1 category=Grocries", rows, LISTS)
+        assert not action
+        assert "Grocries" in reason
+        assert "Groceries" in reason  # valid category list is shown
+        assert rows[0]["category"] != "Grocries"  # row untouched
+
+    def test_skip_alias_drops_row(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        rows = [_row(), _row()]
+        action, reason, notes = _apply_bulk_edit("skip 2", rows)
         assert reason == "edited"
-        assert "Grocries" in rows[0]["invalid"]
+        assert rows[1].get("dropped") is True
+        assert not rows[0].get("dropped")
+
+    def test_delete_alias_drops_row(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        rows = [_row()]
+        action, reason, notes = _apply_bulk_edit("delete 1", rows)
+        assert reason == "edited"
+        assert rows[0].get("dropped") is True
 
     def test_valid_edit_clears_invalid_flag(self):
         from handlers.bulk_conv import _apply_bulk_edit
@@ -377,13 +395,22 @@ class TestApplyBulkEditValidation:
 class TestParseAmountAmbiguityNote:
     def test_lone_comma_three_trailing_digits_warns(self):
         value, notes = parse_amount("1,234")
-        assert value == 1.23
+        assert value == 1234.0
         assert len(notes) == 1
-        assert "1,234" in notes[0] and "1.23" in notes[0] and "1234" in notes[0]
+        assert notes[0] == (
+            "Interpreted 1,234 as 1234. Use 1234 if you meant the whole number, "
+            "or 1.234 if you meant a decimal."
+        )
 
     def test_lone_dot_three_trailing_digits_warns(self):
         value, notes = parse_amount("1.234")
-        assert value == 1.23
+        assert value == 1234.0
+        assert len(notes) == 1
+        assert "Interpreted 1.234 as 1234" in notes[0]
+
+    def test_negative_ambiguous_amount_stays_negative(self):
+        value, notes = parse_amount("-1,234")
+        assert value == -1234.0
         assert len(notes) == 1
 
     def test_two_decimals_no_warning(self):

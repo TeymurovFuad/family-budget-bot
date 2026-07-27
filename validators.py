@@ -38,8 +38,8 @@ def parse_amount(raw) -> tuple[float, list[str]]:
     thousands separator. Raises ValueError when no number can be extracted.
 
     A lone separator with exactly 3 trailing digits ("1,234") is genuinely
-    ambiguous — it is read as a decimal mark and a warning is returned so the
-    caller can surface the reinterpretation.
+    ambiguous — it is read as a thousands separator (whole number) and a
+    warning is returned so the caller can surface the reinterpretation.
     """
     warnings: list[str] = []
     s = str(raw or "").strip()
@@ -48,8 +48,19 @@ def parse_amount(raw) -> tuple[float, list[str]]:
     if not s.strip(".,"):
         raise ValueError(f"not a number: {raw!r}")
 
-    # "1,234" could mean 1.23 (decimal) or 1234 (thousands) — we pick decimal.
-    ambiguous = bool(re.fullmatch(r"\d+[.,]\d{3}", s))
+    # "1,234" could mean 1234 (thousands) or 1.234 (decimal) — we pick thousands
+    # and tell the user how to express the other reading.
+    ambiguous = re.fullmatch(r"(\d+)[.,](\d{3})", s)
+    if ambiguous:
+        whole = ambiguous.group(1) + ambiguous.group(2)
+        value = float(whole)
+        result = round(-value if negative else value, 2)
+        warnings.append(
+            f"Interpreted {str(raw).strip()} as {whole}. Use {whole} if you meant "
+            f"the whole number, or {ambiguous.group(1)}.{ambiguous.group(2)} if you "
+            f"meant a decimal."
+        )
+        return result, warnings
 
     if "." in s and "," in s:
         decimal_sep = "." if s.rfind(".") > s.rfind(",") else ","
@@ -62,11 +73,6 @@ def parse_amount(raw) -> tuple[float, list[str]]:
 
     value = float(s)
     result = round(-value if negative else value, 2)
-    if ambiguous:
-        warnings.append(
-            f"amount '{str(raw).strip()}' read as {result:.2f} — if the separator was a "
-            f"thousands mark (you meant {s.replace('.', '')}), resend it without the separator"
-        )
     return result, warnings
 
 
