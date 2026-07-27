@@ -20,12 +20,12 @@ async def replay_recovery_queue_job(app: Application | None = None):
     failed write could sit unrecovered until the next restart.
     """
     from excel_ops import replay_recovery_queue
-    from file_storage import _excel_write_lock, flush_recovery_queue
+    from file_storage import excel_write_lock, flush_recovery_queue
 
     if not flush_recovery_queue():   # cheap peek — nothing pending
         return
     loop = asyncio.get_running_loop()
-    async with _excel_write_lock:
+    async with excel_write_lock:
         try:
             await loop.run_in_executor(None, replay_recovery_queue)
         except Exception:

@@ -68,6 +68,10 @@ def _cache_signature():
     try:
         path = get_excel_path_for_reading()
         return (str(path), path.stat().st_mtime_ns)
+    except OSError as e:
+        # A persistently locked/unreadable workbook must be visible in logs.
+        log.debug("stat failed for reference-cache signature: %s", e)
+        return object()
     except Exception:
         # Cannot stat the workbook — return a unique object so the cache
         # never serves a possibly-stale entry.

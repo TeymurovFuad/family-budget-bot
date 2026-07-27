@@ -689,3 +689,55 @@ class TestAuditLog:
         assert "outcome=error" in lines[0]
         assert "rows=3" in lines[0]
         assert "user=-" in lines[0]
+
+
+# ── conflict errors must NOT be requeued (would duplicate on replay) ──────────
+
+
+class TestConflictNotRequeued:
+
+    def _txn(self):
+        import datetime
+        from models import Transaction
+        return Transaction(
+            date=datetime.date(2024, 1, 1), value=10.0,
+            currency="PLN", transaction_type="Expense", category="Groceries",
+        )
+
+    @pytest.mark.asyncio
+    async def test_concurrent_modification_is_not_requeued(self, tmp_path, monkeypatch):
+        """A lost-update conflict means the competing write may already hold this
+        data — replaying it later would append a duplicate row. Never queue it."""
+        import excel_ops
+        from storage_backends import ConcurrentModificationError
+
+        queue_path = tmp_path / "recovery_queue.json"
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        def boom(_txn):
+            raise ConcurrentModificationError("another writer won")
+
+        monkeypatch.setattr(excel_ops, "_do_append_transaction", boom)
+
+        with pytest.raises(ConcurrentModificationError):
+            await excel_ops.append_transaction(self._txn())
+        assert not queue_path.exists(), "conflict must not be queued for replay"
+
+    @pytest.mark.asyncio
+    async def test_transient_error_is_still_requeued(self, tmp_path, monkeypatch):
+        import excel_ops
+
+        queue_path = tmp_path / "recovery_queue.json"
+        monkeypatch.setattr(file_storage, "RECOVERY_QUEUE_PATH", queue_path)
+
+        def boom(_txn):
+            raise IOError("network blip")
+
+        monkeypatch.setattr(excel_ops, "_do_append_transaction", boom)
+
+        with pytest.raises(IOError):
+            await excel_ops.append_transaction(self._txn())
+        assert queue_path.exists()
+        rows = file_storage.flush_recovery_queue()
+        assert len(rows) == 1
+        assert rows[0]["value"] == 10.0

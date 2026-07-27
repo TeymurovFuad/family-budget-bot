@@ -121,6 +121,9 @@ from recovery_queue import (  # noqa: E402,F401
 )
 
 _excel_write_lock = asyncio.Lock()
+# Public alias — external modules (scheduled.py etc.) should use this name
+# rather than reaching for the underscore-private one.
+excel_write_lock = _excel_write_lock
 
 
 class RowMovedError(Exception):

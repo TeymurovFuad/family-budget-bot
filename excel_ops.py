@@ -16,6 +16,7 @@ from excel_schema import (
     ensure_monthly_summary_rows_from_masterdata,
 )
 from audit import audit_span
+from storage_backends import ConcurrentModificationError
 from file_storage import (
     ExcelFileContext,
     append_transactions_batch,
@@ -59,6 +60,13 @@ async def append_transaction(transaction: Transaction, user=None) -> None:
         with audit_span("append", rows=1, user=user):
             try:
                 await loop.run_in_executor(None, _do_append_transaction, transaction)
+            except ConcurrentModificationError:
+                # Conflict: another write won the race — do NOT requeue. The
+                # workbook may already contain the competing version of this
+                # data, and a replay would blindly re-append a duplicate row.
+                # Surface the failure so the user can retry intentionally.
+                log.error("Concurrent modification — transaction NOT queued for replay")
+                raise
             except Exception as e:
                 log.error("Upload failed — saving to recovery queue: %s", e)
                 append_to_recovery_queue(transaction.to_row())
@@ -143,6 +151,9 @@ def replay_recovery_queue() -> None:
                 log.info("Recovery queue: ensured %d Monthly Summary row(s)", added)
             atomic_save(wb, excel_path)
     except Exception as e:
+        # Requeueing here is safe even on ConcurrentModificationError: the
+        # replay's upload failed as a whole, so none of these rows were
+        # persisted — retrying later cannot produce duplicates.
         log.error("Recovery queue: replay aborted, re-queueing all rows: %s", e)
         failed = pending
         outcome = "error"
