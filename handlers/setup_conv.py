@@ -30,7 +30,7 @@ from config import auth, auth_write, log, set_display_currency
 from log_decorators import log_call
 from states import (
     SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
-    SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY,
+    SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY, SETUP_REMOVE,
 )
 
 # ── Default categories (name, type) seeded into a fresh workbook ──────────────
@@ -273,6 +273,7 @@ def _review_view(session: dict) -> tuple[str, InlineKeyboardMarkup]:
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ Rename a category", callback_data="setup:rename")],
         [InlineKeyboardButton("➕ Add a category", callback_data="setup:add")],
+        [InlineKeyboardButton("🗑️ Remove a category", callback_data="setup:remove")],
         [InlineKeyboardButton("✅ Done with categories", callback_data="setup:done")],
         [InlineKeyboardButton("Cancel", callback_data="setup:cancel")],
     ])
@@ -282,6 +283,17 @@ def _review_view(session: dict) -> tuple[str, InlineKeyboardMarkup]:
 def _rename_picker(session: dict) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(f"{_emoji(name)} {name}", callback_data=f"setup:ren:{i}")
+        for i, (name, _typ) in enumerate(session["categories"])
+    ]
+    rows = [buttons[i:i + _RENAME_BUTTONS_PER_ROW]
+            for i in range(0, len(buttons), _RENAME_BUTTONS_PER_ROW)]
+    rows.append([InlineKeyboardButton("Cancel", callback_data="setup:cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _remove_picker(session: dict) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(f"{_emoji(name)} {name}", callback_data=f"setup:del:{i}")
         for i, (name, _typ) in enumerate(session["categories"])
     ]
     rows = [buttons[i:i + _RENAME_BUTTONS_PER_ROW]
@@ -431,6 +443,13 @@ async def setup_review_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
         session["pending_add"] = None
         await query.message.reply_text("Send the new category name:")
         return SETUP_ADD
+    if query.data == "setup:remove":
+        if len(session["categories"]) <= 1:
+            await query.message.reply_text("You need at least 1 category.")
+            return await _show_review(update, ctx)
+        await query.message.reply_text(
+            "Tap the category to remove:", reply_markup=_remove_picker(session))
+        return SETUP_REMOVE
     if query.data == "setup:done":
         try:
             _commit_categories(session)
@@ -500,6 +519,25 @@ async def setup_rename_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> i
     session["pending_rename"] = None
     await update.message.reply_text(
         f"✅ *{old}* → *{new}*", parse_mode="Markdown")
+    return await _show_review(update, ctx)
+
+
+@log_call()
+async def setup_remove_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    session = _session(ctx)
+    if query.data == "setup:cancel":
+        return await setup_cancel(update, ctx)
+    try:
+        idx = int(query.data.rsplit(":", 1)[1])
+    except ValueError:
+        return await _show_review(update, ctx)
+    if not 0 <= idx < len(session["categories"]):
+        return await _show_review(update, ctx)
+    name, _typ = session["categories"].pop(idx)
+    session["budgets"].pop(name, None)
+    await query.message.reply_text(f"🗑️ Removed *{name}*.", parse_mode="Markdown")
     return await _show_review(update, ctx)
 
 
@@ -659,6 +697,7 @@ def setup_conversation_handler() -> ConversationHandler:
                 CallbackQueryHandler(setup_add_type_cb, pattern="^setup:"),
                 MessageHandler(text_only, setup_add_text),
             ],
+            SETUP_REMOVE: [CallbackQueryHandler(setup_remove_cb, pattern="^setup:")],
             SETUP_BUDGET:  [MessageHandler(text_only, setup_budget_text)],
             SETUP_CURRENCY: [
                 CallbackQueryHandler(setup_currency_cb, pattern="^setup:"),

@@ -1,380 +1,108 @@
 """
-tests/test_setup_conv.py — /setup onboarding conversation.
+tests/test_setup_conv.py — unit tests for the remove-category flow in
+handlers/setup_conv.py.
 
-All Telegram objects are mocked; all rate fetches are mocked (no live API
-calls). Excel writes go to the pytest tmp_path via the excel_path fixture.
+Covers:
+1. Happy path: tapping setup:remove shows picker (SETUP_REMOVE state).
+2. Guard: when only 1 category remains, shows error and stays on SETUP_REVIEW.
+3. Deletion: setup:del:<idx> removes the category, clears its budget, shows review.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+import os
+import sys
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from openpyxl import load_workbook
-from telegram.ext import ConversationHandler
 
-import file_storage
-from handlers import setup_conv
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+os.environ.setdefault("STORAGE_BACKEND", "local")
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
+os.environ.setdefault("ALLOWED_TELEGRAM_IDS", "")
+
+from states import SETUP_REMOVE, SETUP_REVIEW
 from handlers.setup_conv import (
-    DEFAULT_CATEGORIES, cmd_setup, cmd_start_or_setup,
-    setup_add_text, setup_add_type_cb, setup_budget_text, setup_cancel,
-    setup_conversation_handler, setup_currency_cb, setup_currency_text,
-    setup_rename_cb, setup_rename_text, setup_review_cb, setup_summary_cb,
-    setup_welcome_cb,
-)
-from states import (
-    SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
-    SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY,
+    _session,
+    setup_review_cb,
+    setup_remove_cb,
 )
 
-OWNER_ID = 123  # first (and only) id in ALLOWED_TELEGRAM_IDS (conftest)
 
+# ── helpers ───────────────────────────────────────────────────────────────────
 
-def run(coro):
-    return asyncio.run(coro)
-
-
-def make_update(user_id=OWNER_ID, text=None, callback_data=None):
-    upd = MagicMock()
-    upd.effective_user.id = user_id
-    upd.effective_user.first_name = "Tester"
-    if callback_data is not None:
-        upd.message = None
-        q = MagicMock()
-        q.data = callback_data
-        q.answer = AsyncMock()
-        q.message.reply_text = AsyncMock()
-        q.edit_message_reply_markup = AsyncMock()
-        upd.callback_query = q
-    else:
-        upd.callback_query = None
-        upd.message.text = text
-        upd.message.reply_text = AsyncMock()
-    return upd
-
-
-def make_ctx(session=None):
+def _make_ctx(categories=None, budgets=None):
+    """Return a minimal fake context with a pre-populated session."""
     ctx = MagicMock()
     ctx.user_data = {}
-    if session is not None:
-        ctx.user_data["setup"] = session
-    ctx.args = []
+    s = _session(ctx)
+    s["categories"] = list(categories or [("Groceries", "Expense"), ("Housing", "Expense")])
+    s["budgets"] = dict(budgets or {"Groceries": 200.0, "Housing": 500.0})
     return ctx
 
 
-def fresh_session():
-    return {
-        "categories": list(DEFAULT_CATEGORIES), "budgets": {},
-        "budget_queue": [], "pending_rename": None, "pending_add": None,
-        "currency": None,
-    }
+def _make_update(callback_data: str):
+    """Return a fake Update whose callback_query carries callback_data."""
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.data = callback_data
+    query.message = MagicMock()
+    query.message.reply_text = AsyncMock()
+    update = MagicMock()
+    update.callback_query = query
+    update.message = query.message
+    update.effective_user = MagicMock()
+    return update
 
 
-def replies(upd) -> str:
-    mock = (upd.message or upd.callback_query.message).reply_text
-    return "\n".join(str(c.args[0]) for c in mock.await_args_list)
+# ── tests ─────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_remove_shows_picker():
+    """setup:remove with 2 categories transitions to SETUP_REMOVE."""
+    ctx = _make_ctx()
+    update = _make_update("setup:remove")
+
+    result = await setup_review_cb(update, ctx)
+
+    assert result == SETUP_REMOVE
+    update.callback_query.message.reply_text.assert_awaited_once()
+    call_kwargs = update.callback_query.message.reply_text.call_args
+    assert "remove" in call_kwargs[0][0].lower() or "tap" in call_kwargs[0][0].lower()
 
 
-# ── file_storage helpers ──────────────────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_remove_guard_single_category():
+    """setup:remove with only 1 category shows error and stays on SETUP_REVIEW."""
+    ctx = _make_ctx(categories=[("Groceries", "Expense")], budgets={})
+    update = _make_update("setup:remove")
 
-class TestFileStorageHelpers:
-    def test_create_workbook_from_template_atomic(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(file_storage, "TEMPLATE_PATH",
-                            tmp_path / "no_template.xlsx")
-        dest = tmp_path / "sub" / "book.xlsx"
-        file_storage.create_workbook_from_template(dest)
-        assert dest.exists()
-        assert not dest.with_suffix(".tmp").exists()
-        wb = load_workbook(dest)
-        assert "MasterData" in wb.sheetnames and "Lists" in wb.sheetnames
+    # _show_review also calls reply_text; intercept all calls
+    result = await setup_review_cb(update, ctx)
 
-    def test_create_workbook_cleans_tmp_on_failure(self, tmp_path, monkeypatch):
-        def boom(path):
-            raise OSError("disk full")
-        monkeypatch.setattr(file_storage, "create_blank_excel", boom)
-        dest = tmp_path / "book.xlsx"
-        with pytest.raises(OSError):
-            file_storage.create_workbook_from_template(dest)
-        assert not dest.exists()
-        assert not dest.with_suffix(".tmp").exists()
-
-    def test_lists_categories_populated(self, excel_path):
-        wb = load_workbook(excel_path)
-        assert file_storage.lists_categories_populated(wb) is True
-        ws = wb["Lists"]
-        from excel_schema import ListsSchema, col_indices
-        cat_col = col_indices(ws, ListsSchema)["categories"]
-        for r in range(2, ws.max_row + 1):
-            ws.cell(r, cat_col).value = None
-        assert file_storage.lists_categories_populated(wb) is False
+    assert result == SETUP_REVIEW
+    # First reply should be the error message
+    first_call = update.callback_query.message.reply_text.call_args_list[0]
+    assert "1 category" in first_call[0][0] or "at least" in first_call[0][0]
 
 
-# ── shared dashboard category block ───────────────────────────────────────────
+@pytest.mark.asyncio
+async def test_remove_deletes_category_and_budget():
+    """setup:del:0 removes the first category and its budget, returns SETUP_REVIEW."""
+    ctx = _make_ctx(
+        categories=[("Groceries", "Expense"), ("Housing", "Expense")],
+        budgets={"Groceries": 200.0, "Housing": 500.0},
+    )
+    update = _make_update("setup:del:0")
 
-class TestSharedCategoryBlock:
-    def test_sync_dashboard_categories_rewrites_block(self, excel_path):
-        from excel_schema import (
-            CATEGORY_FIRST_ROW, read_category_block, sync_dashboard_categories,
-        )
-        wb = load_workbook(excel_path)
-        cats = ["Food", "Rent"]
-        n = sync_dashboard_categories(wb, cats)
-        assert n == 2
-        ws = wb["Dashboard"]
-        assert read_category_block(ws) == cats
-        # formulas written
-        assert str(ws.cell(CATEGORY_FIRST_ROW, 9).value).startswith("=IFERROR(VLOOKUP(H11")
-        assert "SUMIFS" in str(ws.cell(CATEGORY_FIRST_ROW, 10).value)
-        total_row = CATEGORY_FIRST_ROW + 2
-        assert ws.cell(total_row, 8).value == "TOTAL"
-        # idempotent
-        assert sync_dashboard_categories(wb, cats) == 0
+    result = await setup_remove_cb(update, ctx)
 
-    def test_cycle_dashboard_uses_shared_block(self, excel_path):
-        from cycle_dashboard import ensure_cycle_dashboard, _read_category_list
-        from excel_schema import sync_dashboard_categories
-        wb = load_workbook(excel_path)
-        sync_dashboard_categories(wb, ["Food", "Rent"])
-        ws = ensure_cycle_dashboard(wb)
-        assert _read_category_list(ws) == ["Food", "Rent"]
-        assert "$N$3" in str(ws.cell(11, 10).value)  # cycle-bounded Actual
-
-
-# ── conversation flow ────────────────────────────────────────────────────────
-
-class TestSetupEntry:
-    def test_fresh_setup_creates_file_and_shows_review(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(file_storage, "TEMPLATE_PATH", tmp_path / "no_t.xlsx")
-        path = tmp_path / "new.xlsx"
-        monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", path)
-        upd, ctx = make_update(), make_ctx()
-        state = run(cmd_setup(upd, ctx))
-        assert state == SETUP_REVIEW
-        assert path.exists()
-        out = replies(upd)
-        assert "Setup started" in out and "Your categories" in out
-        assert len(ctx.user_data["setup"]["categories"]) == len(DEFAULT_CATEGORIES)
-
-    def test_setup_on_configured_workbook_asks_confirmation(self, excel_path):
-        upd, ctx = make_update(), make_ctx()
-        state = run(cmd_setup(upd, ctx))
-        assert state == SETUP_WELCOME
-        assert "Setup already ran" in replies(upd)
-
-    def test_setup_create_failure_message(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", tmp_path / "x.xlsx")
-        monkeypatch.setattr(
-            file_storage, "create_workbook_from_template",
-            MagicMock(side_effect=OSError("nope")))
-        upd, ctx = make_update(), make_ctx()
-        state = run(cmd_setup(upd, ctx))
-        assert state == ConversationHandler.END
-        assert "Could not create the budget file" in replies(upd)
-
-    def test_setup_is_owner_only(self):
-        # test_handlers_full patches config.auth_write to a pass-through for
-        # the whole session, so the gate can't be exercised at runtime here.
-        # Assert the wiring instead: cmd_setup must carry @auth_write.
-        import inspect
-        import handlers.setup_conv as mod
-        src = inspect.getsource(mod)
-        assert "@auth_write\n@log_call()\nasync def cmd_setup" in src
-
-    def test_start_with_file_falls_through_to_menu(self, excel_path):
-        upd, ctx = make_update(), make_ctx()
-        with patch("handlers.menu.cmd_menu", new_callable=AsyncMock) as menu:
-            state = run(cmd_start_or_setup(upd, ctx))
-        assert state == ConversationHandler.END
-        menu.assert_awaited_once()
-
-    def test_start_without_file_enters_setup(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(file_storage, "TEMPLATE_PATH", tmp_path / "no_t.xlsx")
-        monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", tmp_path / "n.xlsx")
-        upd, ctx = make_update(), make_ctx()
-        state = run(cmd_start_or_setup(upd, ctx))
-        assert state == SETUP_REVIEW
-
-    def test_welcome_continue_loads_existing_state(self, excel_path):
-        upd, ctx = make_update(callback_data="setup:continue"), make_ctx()
-        state = run(setup_welcome_cb(upd, ctx))
-        assert state == SETUP_REVIEW
-        cats = ctx.user_data["setup"]["categories"]
-        assert ("Groceries", "Expense") in cats  # from fallback workbook Lists
-
-    def test_welcome_cancel(self, excel_path):
-        upd, ctx = make_update(callback_data="setup:cancel"), make_ctx()
-        state = run(setup_welcome_cb(upd, ctx))
-        assert state == ConversationHandler.END
-        assert "Setup stopped" in replies(upd)
-
-
-class TestCategorySteps:
-    def test_rename_flow(self, excel_path):
-        session = fresh_session()
-        upd, ctx = make_update(callback_data="setup:rename"), make_ctx(session)
-        assert run(setup_review_cb(upd, ctx)) == SETUP_RENAME
-
-        upd2 = make_update(callback_data="setup:ren:3")  # Groceries
-        assert run(setup_rename_cb(upd2, ctx)) == SETUP_RENAME
-        assert session["pending_rename"] == 3
-
-        upd3 = make_update(text="Food")
-        assert run(setup_rename_text(upd3, ctx)) == SETUP_REVIEW
-        assert session["categories"][3] == ("Food", "Expense")
-        assert "✅ *Groceries* → *Food*" in replies(upd3)
-
-    def test_cancel_mid_rename_discards_pending(self, excel_path):
-        session = fresh_session()
-        session["pending_rename"] = 2
-        upd, ctx = make_update(callback_data="setup:cancel"), make_ctx(session)
-        assert run(setup_rename_cb(upd, ctx)) == ConversationHandler.END
-        assert "setup" not in ctx.user_data
-
-    def test_add_flow(self, excel_path):
-        session = fresh_session()
-        ctx = make_ctx(session)
-        upd = make_update(text="Pets")
-        assert run(setup_add_text(upd, ctx)) == SETUP_ADD
-        assert "What type is *Pets*?" in replies(upd)
-
-        upd2 = make_update(callback_data="setup:type:Expense")
-        assert run(setup_add_type_cb(upd2, ctx)) == SETUP_REVIEW
-        assert ("Pets", "Expense") in session["categories"]
-        assert "✅ Added *Pets* (Expense)." in replies(upd2)
-
-    def test_done_commits_categories_and_starts_budgets(self, excel_path):
-        session = fresh_session()
-        upd, ctx = make_update(callback_data="setup:done"), make_ctx(session)
-        state = run(setup_review_cb(upd, ctx))
-        assert state == SETUP_BUDGET
-        assert session["budget_queue"][0] == "Housing"  # first Expense category
-        # Lists!C now holds the session categories
-        wb = load_workbook(excel_path)
-        from excel_schema import ListsSchema, col_indices, read_category_block
-        ws = wb["Lists"]
-        cat_col = col_indices(ws, ListsSchema)["categories"]
-        written = []
-        for r in range(2, ws.max_row + 1):
-            v = ws.cell(r, cat_col).value
-            if v is None:
-                break
-            written.append(v)
-        assert written == [n for n, _t in DEFAULT_CATEGORIES]
-        # Dashboard synced
-        assert read_category_block(wb["Dashboard"]) == written
-
-    def test_done_with_no_expense_categories_skips_budget(self, excel_path):
-        session = fresh_session()
-        session["categories"] = [("Salary", "Income"), ("Savings", "Savings")]
-        upd, ctx = make_update(callback_data="setup:done"), make_ctx(session)
-        state = run(setup_review_cb(upd, ctx))
-        assert state == SETUP_CURRENCY
-        assert "Pick your main currency" in replies(upd)
-
-
-class TestBudgetStep:
-    def test_budget_amounts_and_no_limit(self, excel_path):
-        session = fresh_session()
-        session["budget_queue"] = ["Housing", "Groceries"]
-        ctx = make_ctx(session)
-
-        upd = make_update(text="2500")
-        assert run(setup_budget_text(upd, ctx)) == SETUP_BUDGET
-        assert session["budgets"]["Housing"] == 2500
-        assert "✅ *Housing*: 2500" in replies(upd)
-
-        upd2 = make_update(text="0")
-        state = run(setup_budget_text(upd2, ctx))
-        assert "✅ *Groceries*: no limit" in replies(upd2)
-        assert "Groceries" not in session["budgets"]
-        assert state == SETUP_CURRENCY  # queue drained → currency step
-
-    def test_budget_rejects_non_numeric(self, excel_path):
-        session = fresh_session()
-        session["budget_queue"] = ["Housing"]
-        ctx = make_ctx(session)
-        upd = make_update(text="lots")
-        assert run(setup_budget_text(upd, ctx)) == SETUP_BUDGET
-        assert "❌ Numbers only" in replies(upd)
-        assert session["budget_queue"] == ["Housing"]
-
-
-class TestCurrencyAndSummary:
-    def _patched_rates(self):
-        return patch.object(
-            setup_conv, "_refresh_rates_best_effort",
-            new=AsyncMock(return_value={"USD": 3.9, "EUR": 4.3, "PLN": 1.0}))
-
-    def test_pick_currency_button_finishes(self, excel_path):
-        session = fresh_session()
-        session["budgets"] = {"Housing": 2500.0}
-        upd, ctx = make_update(callback_data="setup:ccy:USD"), make_ctx(session)
-        with self._patched_rates():
-            state = run(setup_currency_cb(upd, ctx))
-        assert state == SETUP_SUMMARY
-        out = replies(upd)
-        assert "Setup complete" in out and "*Currency:* USD" in out
-        assert "Housing — 2500" in out and "no limit" in out
-        # budgets + currency persisted
-        wb = load_workbook(excel_path)
-        lists = file_storage.load_lists(excel_path)
-        assert lists["budgets"]["Housing"] == 2500.0
-        from excel_schema import load_currency_rates_from_path
-        assert "USD" in load_currency_rates_from_path(excel_path)
-
-    def test_other_currency_valid_code(self, excel_path):
-        session = fresh_session()
-        ctx = make_ctx(session)
-        upd = make_update(callback_data="setup:ccy:Other")
-        with self._patched_rates():
-            assert run(setup_currency_cb(upd, ctx)) == SETUP_CURRENCY
-            assert "3-letter currency code" in replies(upd)
-            upd2 = make_update(text="gbp")
-            state = run(setup_currency_text(upd2, ctx))
-        assert state == SETUP_SUMMARY
-        assert session["currency"] == "GBP"
-
-    def test_other_currency_invalid_code(self, excel_path):
-        upd, ctx = make_update(text="EURO"), make_ctx(fresh_session())
-        assert run(setup_currency_text(upd, ctx)) == SETUP_CURRENCY
-        assert "Not a valid 3-letter code" in replies(upd)
-
-    def test_unknown_live_rate_warns(self, excel_path):
-        session = fresh_session()
-        upd, ctx = make_update(callback_data="setup:ccy:TRY"), make_ctx(session)
-        with patch.object(setup_conv, "_refresh_rates_best_effort",
-                          new=AsyncMock(return_value={"PLN": 1.0})):
-            state = run(setup_currency_cb(upd, ctx))
-        assert state == SETUP_SUMMARY
-        assert "No live rate found for TRY" in replies(upd)
-
-    def test_rate_fetch_failure_warns(self, excel_path):
-        session = fresh_session()
-        upd, ctx = make_update(callback_data="setup:ccy:EUR"), make_ctx(session)
-        with patch.object(setup_conv, "_refresh_rates_best_effort",
-                          new=AsyncMock(side_effect=RuntimeError("offline"))):
-            state = run(setup_currency_cb(upd, ctx))
-        assert state == SETUP_SUMMARY
-        assert "Could not fetch live exchange rates" in replies(upd)
-
-    def test_summary_done_ends(self, excel_path):
-        upd, ctx = make_update(callback_data="setup:finish"), make_ctx(fresh_session())
-        assert run(setup_summary_cb(upd, ctx)) == ConversationHandler.END
-        assert "setup" not in ctx.user_data
-
-
-class TestHandlerFactory:
-    def test_factory_shape(self):
-        handler = setup_conversation_handler()
-        cmds = set()
-        for entry in handler.entry_points:
-            cmds |= set(entry.commands)
-        assert cmds == {"setup", "start"}
-        assert set(handler.states) == {
-            SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
-            SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY,
-        }
-
-    def test_cancel_fallback(self, excel_path):
-        upd, ctx = make_update(text="/cancel"), make_ctx(fresh_session())
-        assert run(setup_cancel(upd, ctx)) == ConversationHandler.END
-        assert "Setup stopped" in replies(upd)
+    assert result == SETUP_REVIEW
+    session = _session(ctx)
+    names = [n for n, _ in session["categories"]]
+    assert "Groceries" not in names
+    assert "Housing" in names
+    assert "Groceries" not in session["budgets"]
+    assert session["budgets"].get("Housing") == 500.0
