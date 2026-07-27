@@ -10,7 +10,7 @@ load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
-DEFAULT_XLSX_PATH = DATA_DIR / "Expenses_Improved.xlsx"
+DEFAULT_XLSX_PATH = DATA_DIR / "Expenses.xlsx"
 DEFAULT_TEMPLATE_PATH = DATA_DIR / "Expenses_Template.xlsx"
 DEFAULT_LOG_DIR = PROJECT_ROOT / "logs"
 
@@ -41,10 +41,10 @@ else:
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
 USER_PREFS_PATH = Path(os.getenv("USER_PREFS_PATH", str(DATA_DIR / "user_prefs.json"))).expanduser()
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "")
-GCS_OBJECT_NAME = os.getenv("GCS_OBJECT_NAME", "Expenses_Improved.xlsx")
+GCS_OBJECT_NAME = os.getenv("GCS_OBJECT_NAME", "Expenses.xlsx")
 GCS_KEY_JSON = os.getenv("GCS_KEY_JSON", "")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "")
-S3_OBJECT_NAME = os.getenv("S3_OBJECT_NAME", "Expenses_Improved.xlsx")
+S3_OBJECT_NAME = os.getenv("S3_OBJECT_NAME", "Expenses.xlsx")
 S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "")
 S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "")

@@ -15,15 +15,15 @@ from telegram.ext import ConversationHandler
 import file_storage
 from handlers import setup_conv
 from handlers.setup_conv import (
-    DEFAULT_CATEGORIES, cmd_setup, cmd_start_or_setup,
+    DEFAULT_CATEGORIES, _session, cmd_setup, cmd_start_or_setup,
     setup_add_text, setup_add_type_cb, setup_budget_text, setup_cancel,
     setup_conversation_handler, setup_currency_cb, setup_currency_text,
-    setup_rename_cb, setup_rename_text, setup_review_cb, setup_summary_cb,
-    setup_welcome_cb,
+    setup_remove_cb, setup_rename_cb, setup_rename_text, setup_review_cb,
+    setup_summary_cb, setup_welcome_cb,
 )
 from states import (
     SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
-    SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY,
+    SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY, SETUP_REMOVE,
 )
 
 OWNER_ID = 123  # first (and only) id in ALLOWED_TELEGRAM_IDS (conftest)
@@ -297,6 +297,16 @@ class TestBudgetStep:
         assert "❌ Numbers only" in replies(upd)
         assert session["budget_queue"] == ["Housing"]
 
+    def test_budget_accepts_plain_integer(self, excel_path):
+        session = fresh_session()
+        session["budget_queue"] = ["Housing"]
+        ctx = make_ctx(session)
+        upd = make_update(text="100")
+        state = run(setup_budget_text(upd, ctx))
+        assert state == SETUP_CURRENCY  # queue drained
+        assert session["budgets"]["Housing"] == 100
+        assert "❌" not in replies(upd)
+
 
 class TestCurrencyAndSummary:
     def _patched_rates(self):
@@ -371,10 +381,73 @@ class TestHandlerFactory:
         assert cmds == {"setup", "start"}
         assert set(handler.states) == {
             SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
-            SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY,
+            SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY, SETUP_REMOVE,
         }
 
     def test_cancel_fallback(self, excel_path):
         upd, ctx = make_update(text="/cancel"), make_ctx(fresh_session())
         assert run(setup_cancel(upd, ctx)) == ConversationHandler.END
         assert "Setup stopped" in replies(upd)
+
+
+# ── remove-category flow ──────────────────────────────────────────────────────
+
+def _make_remove_ctx(categories=None, budgets=None):
+    """Return a minimal fake context with a pre-populated session."""
+    ctx = MagicMock()
+    ctx.user_data = {}
+    s = _session(ctx)
+    s["categories"] = list(categories or [("Groceries", "Expense"), ("Housing", "Expense")])
+    s["budgets"] = dict(budgets or {"Groceries": 200.0, "Housing": 500.0})
+    return ctx
+
+
+def _make_remove_update(callback_data: str):
+    """Return a fake Update whose callback_query carries callback_data."""
+    query = MagicMock()
+    query.answer = AsyncMock()
+    query.data = callback_data
+    query.message = MagicMock()
+    query.message.reply_text = AsyncMock()
+    update = MagicMock()
+    update.callback_query = query
+    update.message = query.message
+    update.effective_user = MagicMock()
+    return update
+
+
+class TestRemoveCategoryFlow:
+    def test_remove_shows_picker(self):
+        """setup:remove with 2 categories transitions to SETUP_REMOVE."""
+        ctx = _make_remove_ctx()
+        upd = _make_remove_update("setup:remove")
+        result = run(setup_review_cb(upd, ctx))
+        assert result == SETUP_REMOVE
+        upd.callback_query.message.reply_text.assert_awaited_once()
+        call_kwargs = upd.callback_query.message.reply_text.call_args
+        assert "remove" in call_kwargs[0][0].lower() or "tap" in call_kwargs[0][0].lower()
+
+    def test_remove_guard_single_category(self):
+        """setup:remove with only 1 category shows error and stays on SETUP_REVIEW."""
+        ctx = _make_remove_ctx(categories=[("Groceries", "Expense")], budgets={})
+        upd = _make_remove_update("setup:remove")
+        result = run(setup_review_cb(upd, ctx))
+        assert result == SETUP_REVIEW
+        first_call = upd.callback_query.message.reply_text.call_args_list[0]
+        assert "1 category" in first_call[0][0] or "at least" in first_call[0][0]
+
+    def test_remove_deletes_category_and_budget(self):
+        """setup:del:0 removes the first category and its budget, returns SETUP_REVIEW."""
+        ctx = _make_remove_ctx(
+            categories=[("Groceries", "Expense"), ("Housing", "Expense")],
+            budgets={"Groceries": 200.0, "Housing": 500.0},
+        )
+        upd = _make_remove_update("setup:del:0")
+        result = run(setup_remove_cb(upd, ctx))
+        assert result == SETUP_REVIEW
+        session = _session(ctx)
+        names = [n for n, _ in session["categories"]]
+        assert "Groceries" not in names
+        assert "Housing" in names
+        assert "Groceries" not in session["budgets"]
+        assert session["budgets"].get("Housing") == 500.0
