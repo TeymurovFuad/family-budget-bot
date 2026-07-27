@@ -28,7 +28,7 @@ from models import Transaction
 import statement_profiles as sp
 from states import (
     BULK_RECEIVE, BULK_CONFIRM,
-    BULK_STATEMENT, BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME,
+    BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME,
     BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD, BULK_PROFILE_FIX_SETTING,
 )
 from validators import (
@@ -775,6 +775,41 @@ def _row_loose_dedup_key(row: dict) -> str:
     return make_loose_dedup_key(row.get("date"), row.get("value"), row.get("currency", "PLN"))
 
 
+def _precheck_duplicate_counts(rows: list[dict]) -> tuple[int, int]:
+    """
+    Dedup-before-parse gate (Wave 2 Group B): count-aware check of freshly
+    extracted statement rows against MasterData BEFORE the expensive AI
+    pipeline runs. Uses the same load_dedup_evidence read as the preview-time
+    scan. Returns (matched_row_count, total_row_count); (0, 0) when rows is
+    empty or evidence can't be read (the gate never blocks an import).
+    """
+    if not rows:
+        return 0, 0
+    row_dates = []
+    for row in rows:
+        try:
+            row_dates.append(date.fromisoformat(str(row.get("date", "")).strip()[:10]))
+        except ValueError:
+            pass
+    try:
+        evidence = load_dedup_evidence(
+            min(row_dates) if row_dates else None,
+            max(row_dates) if row_dates else None,
+        )
+    except Exception:
+        log.exception("dedup-before-parse gate: evidence read failed")
+        return 0, len(rows)
+    strict = evidence.get("strict", {})
+    remaining = {k: len(v) for k, v in strict.items()}
+    matched = 0
+    for row in rows:
+        key = _row_dedup_key(row)
+        if remaining.get(key, 0) > 0:
+            remaining[key] -= 1
+            matched += 1
+    return matched, len(rows)
+
+
 def _fmt_row_numbers(nums: list[int]) -> str:
     """Render a list of 1-based row numbers as compact ranges: [4,5,6] -> '4-6'."""
     if not nums:
@@ -790,6 +825,11 @@ def _fmt_row_numbers(nums: list[int]) -> str:
         start = prev = n
     ranges.append(f"{start}-{prev}" if prev != start else str(start))
     return ", ".join(ranges)
+
+
+def _fmt_row_list(nums: list[int]) -> str:
+    """Render 1-based row numbers as a plain comma list: [3, 7, 12] -> '3, 7, 12'."""
+    return ", ".join(str(n) for n in sorted(nums))
 
 
 def _fmt_short_date(date_iso: str) -> str:
@@ -932,17 +972,17 @@ def _format_dedup_messages(summary: dict) -> list[str]:
     for entry in summary["skip_groups"]:
         g, m, skip_n = entry["group_size"], entry["master_count"], entry["skip_n"]
         saved = g - skip_n
+        all_rows = _fmt_row_list(entry["flagged_rows"] + entry["kept_rows"])
         messages.append(
-            f"↺ {g} identical rows found (rows {_fmt_row_numbers(entry['flagged_rows'] + entry['kept_rows'])}), "
-            f"{m} already in your sheet → saving {saved}, skipping {skip_n} "
-            f"(row(s) {_fmt_row_numbers(entry['flagged_rows'])}). "
-            f"Reply `keep {_fmt_row_numbers(entry['flagged_rows'])}` or `keep all flagged` "
-            f"if these are new payments."
+            f"↺ Rows {_fmt_row_list(entry['flagged_rows'])} skipped — already imported "
+            f"({g} identical rows in this batch: rows {all_rows}; "
+            f"{m} already in your sheet → saving {saved}, skipping {skip_n}). "
+            f"Reply `keep all flagged` if these are new payments."
         )
 
     for nums in summary["identical_groups"]:
         messages.append(
-            f"rows {_fmt_row_numbers(nums)} are identical — keeping all {len(nums)}; "
+            f"Rows {_fmt_row_list(nums)} are identical — keeping all {len(nums)}; "
             f"reply `drop N` if one is a scan error."
         )
 
@@ -1318,7 +1358,8 @@ async def _send_bulk_preview(update: Update, parsed: list[dict]) -> None:
 
 
 _RANGE_TOKEN_RE = re.compile(r"^(\d+)(?:-(\d+))?$")
-_ROW_COMMAND_RE = re.compile(r"^(drop|keep)\s+(.+)$", re.IGNORECASE)
+# `skip` and `delete` are aliases for `drop` — users type all three.
+_ROW_COMMAND_RE = re.compile(r"^(drop|delete|skip|keep)\s+(.+)$", re.IGNORECASE)
 
 
 def _parse_row_targets(args: str, n: int) -> tuple[list[int], list[int]] | None:
@@ -1366,6 +1407,8 @@ def _apply_row_command(text: str, parsed: list[dict]) -> tuple[bool, str, list[s
     if not m:
         return None
     verb = m.group(1).lower()
+    if verb in ("delete", "skip"):
+        verb = "drop"
     args = m.group(2).strip().lower()
     n = len(parsed)
 
@@ -1454,6 +1497,16 @@ def _apply_bulk_edit(
     if field not in {"date", "value", "currency", "type", "category", "description",
                      "is_recurring"}:
         return False, "invalid", []
+
+    if field == "category" and lists:
+        categories = lists.get("categories") or []
+        if categories and value.lower() not in {c.lower() for c in categories}:
+            return False, (
+                f"Unknown category '{value}'. Valid categories: {', '.join(categories)}."
+            ), []
+        elif categories:
+            canonical = next(c for c in categories if c.lower() == value.lower())
+            value = canonical
 
     notes: list[str] = []
     if field == "value":
@@ -1572,6 +1625,41 @@ async def cmd_bulk(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     parsed = []
     lists  = load_reference_data()
+
+    # ── Dedup-before-parse gate: answer to a pending Yes/Cancel prompt ────────
+    # Text-based confirmation within the already-registered BULK_RECEIVE state
+    # (no new handler registration in bot.py).
+    gate = ctx.user_data.get("_dedup_gate")
+    if gate:
+        if update.message.text:
+            answer = update.message.text.strip().lower().lstrip("/")
+            if answer in {"yes", "y"}:
+                ctx.user_data.pop("_dedup_gate", None)
+                ctx.user_data["lists"] = lists
+                await update.message.reply_text(
+                    f"📄 OK — parsing with profile '{gate['profile_name']}'…",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                return await _finish_profile_parse(
+                    update, ctx, gate["file_bytes"], gate["filename"],
+                    gate["profile"], gate["profile_name"],
+                )
+            if answer in {"cancel", "no"}:
+                ctx.user_data.pop("_dedup_gate", None)
+                await update.message.reply_text(
+                    "Import cancelled — nothing was parsed or saved.",
+                    reply_markup=ReplyKeyboardRemove(),
+                )
+                return ConversationHandler.END
+            await update.message.reply_text(
+                "Please reply `Yes` to import anyway, or `Cancel` to stop.",
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardMarkup([["Yes", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
+            )
+            return BULK_RECEIVE
+        # A new photo/document arrived instead of an answer — drop the gate.
+        ctx.user_data.pop("_dedup_gate", None)
+
     try:
         uid = update.effective_user.id
         src = 'unknown'
@@ -1600,8 +1688,33 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     matched = sp.match_profile(headers, profiles)
                     if matched:
                         profile_name = matched.get("name") or filename
-                        await update.message.reply_text(f"📄 Matched profile '{profile_name}', parsing…")
                         ctx.user_data["lists"] = lists
+                        # ── Dedup-before-parse gate: cheap deterministic row
+                        # extraction (no AI), checked against MasterData before
+                        # the AI categorization pipeline spends any tokens.
+                        gate_rows = await loop.run_in_executor(
+                            None, lambda: sp.parse_statement(file_bytes, filename, matched)
+                        )
+                        n_match, n_total = _precheck_duplicate_counts(gate_rows)
+                        if n_total and n_match * 2 > n_total:
+                            ctx.user_data["_dedup_gate"] = {
+                                "file_bytes": file_bytes,
+                                "filename": filename,
+                                "profile": matched,
+                                "profile_name": profile_name,
+                            }
+                            await update.message.reply_text(
+                                f"⚠️ {n_match} of {n_total} row(s) in this file match "
+                                f"transactions you already imported — this looks like a "
+                                f"re-upload.\n"
+                                f"Import anyway? Reply `Yes` to continue or `Cancel` to stop.",
+                                parse_mode="Markdown",
+                                reply_markup=ReplyKeyboardMarkup(
+                                    [["Yes", "Cancel"]], one_time_keyboard=True, resize_keyboard=True
+                                ),
+                            )
+                            return BULK_RECEIVE
+                        await update.message.reply_text(f"📄 Matched profile '{profile_name}', parsing…")
                         return await _finish_profile_parse(
                             update, ctx, file_bytes, filename, matched, profile_name
                         )
@@ -1797,8 +1910,21 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if reason == "invalid":
         await update.message.reply_text(
-            "Please reply with edits like `2 category=Transport` or `1 description=Lunch`.",
+            "I didn't understand that edit.\n"
+            "Editable fields: date, value, currency, type, category, description, "
+            "is_recurring.\n"
+            "Examples: `2 category=Transport`, `1 value=45.50`, `drop 3` "
+            "(also `skip 3` / `delete 3`), `keep 4-6`.\n"
+            "Send `save` to store them all, or `cancel` to stop.",
             parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
+        )
+        return BULK_CONFIRM
+
+    if reason and reason not in ("edited", "cancel"):
+        # A specific validation error (e.g. unknown category) — show it verbatim.
+        await update.message.reply_text(
+            reason,
             reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
         )
         return BULK_CONFIRM

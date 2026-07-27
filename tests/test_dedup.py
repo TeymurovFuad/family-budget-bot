@@ -1049,3 +1049,175 @@ class TestMergeBulkDraftReturnsPreMergeCount:
             assert pre == 0 and len(merged) == 1
             merged2, pre2 = _merge_bulk_draft(44444, [dict(row)])
             assert pre2 == 1 and len(merged2) == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dedup-before-parse gate (Wave 2 Group B)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestPrecheckDuplicateCounts:
+    def test_empty_rows_returns_zero(self):
+        from handlers.bulk_conv import _precheck_duplicate_counts
+        assert _precheck_duplicate_counts([]) == (0, 0)
+
+    def test_counts_strict_matches_count_aware(self):
+        from handlers.bulk_conv import _precheck_duplicate_counts
+
+        row = {"date": "2024-06-15", "value": 50, "currency": "PLN",
+               "description": "shop", "person": ""}
+        key = make_dedup_key("2024-06-15", 50, "PLN", "shop")
+        # 3 identical rows in the file, only 1 in MasterData → 1 match.
+        with patch("handlers.bulk_conv.load_dedup_evidence",
+                   return_value=evidence(strict={key: [("2024-06-15", "shop")]})):
+            matched, total = _precheck_duplicate_counts([dict(row) for _ in range(3)])
+        assert (matched, total) == (1, 3)
+
+    def test_evidence_read_failure_never_blocks(self):
+        from handlers.bulk_conv import _precheck_duplicate_counts
+
+        rows = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
+                 "description": "shop", "person": ""}]
+        with patch("handlers.bulk_conv.load_dedup_evidence",
+                   side_effect=RuntimeError("boom")):
+            assert _precheck_duplicate_counts(rows) == (0, 1)
+
+
+class TestDedupBeforeParseGate:
+    def _upload_update(self, csv_bytes=b"Date,Amount\n2024-06-15,50\n"):
+        upd = make_update(text=None)
+        upd.message.text = None
+        doc = MagicMock()
+        doc.file_name = "bank.csv"
+        doc.mime_type = "text/csv"
+        file = MagicMock()
+        file.download_as_bytearray = AsyncMock(return_value=bytearray(csv_bytes))
+        doc.get_file = AsyncMock(return_value=file)
+        upd.message.document = doc
+        return upd
+
+    async def test_gate_prompts_when_majority_already_imported(self):
+        from handlers.bulk_conv import bulk_receive
+        import states
+
+        upd = self._upload_update()
+        ctx = make_ctx()
+        profile = {"name": "MyBank", "fingerprint": ["Date", "Amount"]}
+        rows = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
+                 "description": "shop", "person": ""}]
+
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv._read_statement_headers_and_sniff",
+                   return_value=(["Date", "Amount"], None)), \
+             patch("handlers.bulk_conv._load_profiles", return_value={"fp": profile}), \
+             patch("handlers.bulk_conv.sp.match_profile", return_value=profile), \
+             patch("handlers.bulk_conv.sp.parse_statement", return_value=rows), \
+             patch("handlers.bulk_conv._precheck_duplicate_counts", return_value=(3, 4)):
+            result = await bulk_receive(upd, ctx)
+
+        assert result == states.BULK_RECEIVE
+        assert "_dedup_gate" in ctx.user_data
+        prompt = upd.message.reply_text.call_args_list[-1].args[0]
+        assert "3 of 4" in prompt
+        assert "Yes" in prompt and "Cancel" in prompt
+
+    async def test_gate_skipped_when_half_or_less_match(self):
+        from handlers.bulk_conv import bulk_receive
+
+        upd = self._upload_update()
+        ctx = make_ctx()
+        profile = {"name": "MyBank", "fingerprint": ["Date", "Amount"]}
+        rows = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
+                 "description": "shop", "person": ""}]
+
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv._read_statement_headers_and_sniff",
+                   return_value=(["Date", "Amount"], None)), \
+             patch("handlers.bulk_conv._load_profiles", return_value={"fp": profile}), \
+             patch("handlers.bulk_conv.sp.match_profile", return_value=profile), \
+             patch("handlers.bulk_conv.sp.parse_statement", return_value=rows), \
+             patch("handlers.bulk_conv._precheck_duplicate_counts", return_value=(2, 4)), \
+             patch("handlers.bulk_conv._finish_profile_parse",
+                   new=AsyncMock(return_value=999)) as finish:
+            result = await bulk_receive(upd, ctx)
+
+        assert result == 999
+        finish.assert_awaited_once()
+        assert "_dedup_gate" not in ctx.user_data
+
+    async def test_gate_cancel_ends_conversation(self):
+        from telegram.ext import ConversationHandler
+        from handlers.bulk_conv import bulk_receive
+
+        upd = make_update("Cancel")
+        ctx = make_ctx()
+        ctx.user_data["_dedup_gate"] = {
+            "file_bytes": b"x", "filename": "bank.csv",
+            "profile": {}, "profile_name": "MyBank",
+        }
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS):
+            result = await bulk_receive(upd, ctx)
+        assert result == ConversationHandler.END
+        assert "_dedup_gate" not in ctx.user_data
+
+    async def test_gate_yes_proceeds_to_parse(self):
+        from handlers.bulk_conv import bulk_receive
+
+        upd = make_update("Yes")
+        ctx = make_ctx()
+        ctx.user_data["_dedup_gate"] = {
+            "file_bytes": b"x", "filename": "bank.csv",
+            "profile": {"name": "MyBank"}, "profile_name": "MyBank",
+        }
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv._finish_profile_parse",
+                   new=AsyncMock(return_value=777)) as finish:
+            result = await bulk_receive(upd, ctx)
+        assert result == 777
+        finish.assert_awaited_once()
+        assert "_dedup_gate" not in ctx.user_data
+
+    async def test_gate_other_text_reprompts(self):
+        from handlers.bulk_conv import bulk_receive
+        import states
+
+        upd = make_update("what?")
+        ctx = make_ctx()
+        ctx.user_data["_dedup_gate"] = {
+            "file_bytes": b"x", "filename": "bank.csv",
+            "profile": {}, "profile_name": "MyBank",
+        }
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS):
+            result = await bulk_receive(upd, ctx)
+        assert result == states.BULK_RECEIVE
+        assert "_dedup_gate" in ctx.user_data
+
+
+class TestDedupMessageWording:
+    def test_skip_group_uses_comma_separated_rows(self):
+        from handlers.bulk_conv import _format_dedup_messages
+
+        summary = {
+            "flagged": 3,
+            "skip_groups": [{
+                "group_size": 3, "master_count": 3, "skip_n": 3,
+                "flagged_rows": [3, 7, 12], "kept_rows": [],
+                "example_date": "2024-05-01",
+            }],
+            "single_skips": [], "identical_groups": [], "loose_matches": [],
+            "total_rows": 12,
+        }
+        msgs = _format_dedup_messages(summary)
+        assert any("Rows 3, 7, 12 skipped — already imported" in m for m in msgs)
+        assert any("keep all flagged" in m for m in msgs)
+        assert not any("3-12" in m or "3–12" in m for m in msgs)
+
+    def test_identical_group_uses_comma_separated_rows(self):
+        from handlers.bulk_conv import _format_dedup_messages
+
+        summary = {
+            "flagged": 0, "skip_groups": [], "single_skips": [],
+            "identical_groups": [[4, 5, 6]], "loose_matches": [],
+            "total_rows": 6,
+        }
+        msgs = _format_dedup_messages(summary)
+        assert any("Rows 4, 5, 6 are identical" in m for m in msgs)
