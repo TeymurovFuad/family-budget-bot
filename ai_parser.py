@@ -217,32 +217,152 @@ def _try_parse_structured_text(text: str) -> list[dict] | None:
     return None
 
 
-def _build_parse_prompt(lists: dict) -> str:
-    all_cats  = ", ".join(lists.get("categories", []))
-    txn_types = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
-    return f"""You are a financial transaction parser. Extract ALL transactions from the input.
+# ── Compact positional-array output format ───────────────────────────────────
+# The bulk parse prompt asks for positional arrays instead of JSON objects —
+# roughly half the output tokens per transaction. Position → field mapping:
+_ARRAY_FIELDS = ("date", "value", "currency", "category", "description", "type",
+                 "is_recurring")
 
-Return ONLY a JSON array. Each element must have these exact keys:
-- "date": "YYYY-MM-DD" (use today's date if unknown)
-- "value": number (positive amount)
-- "currency": {" | ".join(lists.get("currencies", ["PLN"]))} (default PLN)
-- "type": {txn_types}
-- "category": one of: {all_cats}
-- "description": clean 2-4 word merchant label (max 60 chars)
+
+def _decode_positional_array(arr) -> dict | None:
+    """
+    Map one positional array [date, amount, currency, category, description,
+    type, is_recurring] to a transaction dict. Missing trailing positions are
+    simply absent (downstream validators default them); extra positions are
+    ignored. Returns None for anything that isn't a plausible row (not a
+    list/tuple, or fewer than 2 positions).
+    """
+    if not isinstance(arr, (list, tuple)) or len(arr) < 2:
+        return None
+    return {field: value for field, value in zip(_ARRAY_FIELDS, arr)}
+
+
+def _normalize_ai_rows(items) -> list[dict]:
+    """
+    Dual-format normalization (backward compat during the array-format
+    rollout): positional arrays are decoded, dicts pass through unchanged,
+    anything else is dropped.
+    """
+    rows: list[dict] = []
+    for item in items or []:
+        if isinstance(item, dict):
+            rows.append(item)
+            continue
+        decoded = _decode_positional_array(item)
+        if decoded is not None:
+            rows.append(decoded)
+    return rows
+
+
+def _salvage_json_arrays(raw: str) -> list[dict]:
+    """
+    Array-aware salvage: recover complete inner positional arrays from a
+    malformed or truncated response (outer array cut mid-element). Scans with
+    bracket-depth + string awareness and decodes each depth-1 [...] span.
+    """
+    cleaned = _strip_fences(raw or "")
+    results: list[dict] = []
+    depth = 0
+    start = None
+    in_string = False
+    escape = False
+    for i, ch in enumerate(cleaned):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = in_string
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+            if depth == 2:
+                start = i
+        elif ch == "]":
+            if depth == 2 and start is not None:
+                try:
+                    arr = json.loads(cleaned[start : i + 1])
+                    # First position must be a string date — guards against
+                    # decoding stray numeric arrays nested inside objects.
+                    if isinstance(arr, list) and arr and isinstance(arr[0], str):
+                        decoded = _decode_positional_array(arr)
+                        if decoded is not None:
+                            results.append(decoded)
+                except json.JSONDecodeError:
+                    pass
+                start = None
+            if depth > 0:
+                depth -= 1
+    return results
+
+
+def _salvage_rows(raw: str) -> list[dict]:
+    """Partial-parse recovery for both output formats: arrays first, then objects."""
+    return _salvage_json_arrays(raw) or _salvage_json_objects(raw)
+
+
+def _build_reference_block(lists: dict) -> str:
+    """
+    Dynamic reference data (currencies, types, categories) appended to the END
+    of the user message — never interpolated into the system prompt, so the
+    system prompt stays byte-identical across calls and DeepSeek's
+    prompt-prefix cache applies.
+    """
+    all_cats   = ", ".join(lists.get("categories", []))
+    txn_types  = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
+    currency_list = lists.get("currencies") or [settings.DISPLAY_CURRENCY]
+    currencies = " | ".join(currency_list)
+    # The user's configured currency (DISPLAY_CURRENCY in .env) is the default
+    # when it is an allowed currency; otherwise fall back to the first allowed.
+    default_ccy = (
+        settings.DISPLAY_CURRENCY
+        if settings.DISPLAY_CURRENCY in currency_list
+        else currency_list[0]
+    )
+    return (
+        "Reference data for this request:\n"
+        f"Allowed currencies: {currencies}\n"
+        f"Default currency: {default_ccy}\n"
+        f"Allowed transaction types: {txn_types}\n"
+        f"Allowed categories: {all_cats}"
+    )
+
+
+# byte-identical for prompt cache
+_PARSE_SYSTEM_PROMPT = """You are a financial transaction parser. Extract ALL transactions from the input.
+
+The allowed currencies, transaction types, and categories are listed at the END of the user message under "Reference data for this request".
+
+Return ONLY a JSON array of positional arrays — one inner array per transaction, with the fields in EXACTLY this order:
+[date, amount, currency, category, description, type, is_recurring]
+- date: "YYYY-MM-DD" string (use today's date if unknown)
+- amount: number (positive amount)
+- currency: one of the allowed currencies (fall back to the default currency in the reference data)
+- category: one of the allowed categories
+- description: clean 2-4 word merchant label (max 60 chars)
+- type: one of the allowed transaction types
+- is_recurring: true or false (false if unknown)
+
+Example output:
+[["2026-05-19", 23.00, "EUR", "Groceries", "Lidl", "Expense", false], ["2026-05-20", 5000, "EUR", "Salary", "salary", "Income", true]]
 
 CRITICAL field rules:
-- "description" must be a clean, human-readable merchant or purpose label
-  (e.g. "Biedronka", "Shell fuel", "Autopay S.A."). NEVER include masked card
+- description must be a clean, human-readable merchant or purpose label
+  (e.g. "Lidl", "Shell fuel", "City Utilities"). NEVER include masked card
   numbers (4111XXXXXXXX1111), terminal ids, BPID:/reference codes, /OPT/
   routing blocks, or trailing city/country codes from the raw statement line.
-- "category" MUST be copied EXACTLY, character for character, from the list above.
+- category MUST be copied EXACTLY, character for character, from the allowed list.
   Never invent, shorten, translate, or paraphrase a category name.
   If unsure, use "Other".
-- Transfer recipients, counterparties, and landlords belong in "description" —
+- Transfer recipients, counterparties, and landlords belong in description —
   there is no separate field for them.
 - "Savings" is a transaction TYPE, never a category: transfers to your own
   savings account get type "Savings" and category "Other", never Expense.
-- "type" must be coherent with "category":
+- type must be coherent with category:
   category Salary ⇒ type Income. Refunds/returns are Income with the
   category of the ORIGINAL purchase (e.g. a returned jacket is Income/Shopping).
 
@@ -251,44 +371,44 @@ Rules:
 - Parse it as a list of individual financial transactions, not as one long narrative.
 - For statement-style text, identify one transaction per block and extract the transaction date, amount, description, and direction.
 - Negative amounts = Expense; positive amounts = Income.
-- If the amount is written with a sign or appears after words like refund/zwrot/return, infer the direction from that context.
+- If the amount is written with a sign or appears after words like refund/return (in any language), infer the direction from that context.
 - Ignore balance rows, repeated headers, summary lines, account metadata, and obvious fees unless they are real transactions.
 - Do not merge multiple separate transactions into one row.
 - Do not invent dates; use the date nearest to the transaction block when present.
 - If a transaction is ambiguous, still return the best possible structured entry rather than skipping it.
 - Receipt: all items = Expense, category = Groceries unless clearly otherwise.
 - Round amounts to 2 decimal places.
-- Use the exact categories and types provided above when possible; otherwise fall back to "Other".
+- Use the exact categories and types provided in the reference data when possible; otherwise fall back to "Other".
 
 Return ONLY the JSON array, no other text."""
 
 
-def _build_quick_prompt(lists: dict) -> str:
-    all_cats  = ", ".join(lists.get("categories", []))
-    txn_types = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
-    return f"""You are a transaction parser for a Polish household finance bot.
+# byte-identical for prompt cache
+_QUICK_SYSTEM_PROMPT = """You are a transaction parser for a household finance bot.
+
+The allowed currencies, transaction types, categories, and the default currency are listed at the END of the user message under "Reference data for this request".
 
 Parse the user message as a single financial transaction.
 Return ONLY a JSON object with these keys:
 - "date": "YYYY-MM-DD" (use today's date if unknown)
 - "value": positive number
-- "currency": {" | ".join(lists.get("currencies", ["PLN"]))} (default PLN; zł/zl = PLN)
-- "type": {txn_types}
-- "category": one of: {all_cats}
+- "currency": one of the allowed currencies (fall back to the default currency; map local currency symbols and abbreviations to their ISO code)
+- "type": one of the allowed transaction types
+- "category": one of the allowed categories
 - "description": clean 2-4 word merchant label (max 40 chars) — never card numbers, BPID:/reference codes, or city/country suffixes
 
-Use only the exact categories and types provided above. Do not invent new categories or transaction types.
+Use only the exact categories and types provided in the reference data. Do not invent new categories or transaction types.
 "Savings" is a transaction TYPE, never a category: when the message says "savings", "saved", "put into savings" or similar, set type "Savings" and category "Other". Moving money to your own savings is type Savings, never Expense.
 Keep "type" coherent with "category": category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
-If you cannot map the message to an exact known category or type, return: {{"not_transaction": true}}
+If you cannot map the message to an exact known category or type, return: {"not_transaction": true}
 
-Examples:
-"groceries 89" → {{"value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
-"lunch 45 EUR" → {{"value": 45, "currency": "EUR", "type": "Expense", "category": "Dining Out", "description": "lunch"}}
-"salary 5000" → {{"value": 5000, "currency": "PLN", "type": "Income", "category": "Salary", "description": "salary"}}
-"2380 added to savings" → {{"value": 2380, "currency": "PLN", "type": "Savings", "category": "Other", "description": "savings"}}
-"hello" → {{"not_transaction": true}}
-"2026-05-24 groceries 89" → {{"date": "2026-05-24", "value": 89, "currency": "PLN", "type": "Expense", "category": "Groceries", "description": "groceries"}}
+Examples (assuming default currency EUR):
+"groceries 89" → {"value": 89, "currency": "EUR", "type": "Expense", "category": "Groceries", "description": "groceries"}
+"lunch 45 GEL" → {"value": 45, "currency": "GEL", "type": "Expense", "category": "Dining Out", "description": "lunch"}
+"salary 5000" → {"value": 5000, "currency": "EUR", "type": "Income", "category": "Salary", "description": "salary"}
+"2380 added to savings" → {"value": 2380, "currency": "EUR", "type": "Savings", "category": "Other", "description": "savings"}
+"hello" → {"not_transaction": true}
+"2026-05-24 groceries 89" → {"date": "2026-05-24", "value": 89, "currency": "EUR", "type": "Expense", "category": "Groceries", "description": "groceries"}
 """
 
 # ── Provider interface ────────────────────────────────────────────────────────
@@ -380,18 +500,20 @@ class DeepSeekProvider(AIProvider):
     def _parse_text_single(self, text: str, lists: dict) -> list[dict]:
         raw = self._chat(
             [
-                {"role": "system", "content": _build_parse_prompt(lists)},
-                {"role": "user",   "content": text},
+                # System prompt is a static constant; dynamic reference data
+                # travels at the end of the user message (prompt cache).
+                {"role": "system", "content": _PARSE_SYSTEM_PROMPT},
+                {"role": "user",   "content": f"{text}\n\n{_build_reference_block(lists)}"},
             ],
             max_tokens=self._BULK_MAX_TOKENS,
         )
         parsed = _try_parse_json(raw)
         if isinstance(parsed, list):
-            return parsed
+            return _normalize_ai_rows(parsed)
         if isinstance(parsed, dict):
             return [parsed]
 
-        salvaged = _salvage_json_objects(raw)
+        salvaged = _salvage_rows(raw)
         if salvaged:
             log.warning(
                 "AI response was malformed/truncated — salvaged %d complete transactions",
@@ -409,8 +531,10 @@ class DeepSeekProvider(AIProvider):
 
     def parse_quick(self, text: str, lists: dict) -> dict | None:
         raw = self._chat([
-            {"role": "system", "content": _build_quick_prompt(lists)},
-            {"role": "user",   "content": text},
+            # Static system prompt + dynamic reference data in the user
+            # message keeps the system prefix byte-identical (prompt cache).
+            {"role": "system", "content": _QUICK_SYSTEM_PROMPT},
+            {"role": "user",   "content": f"{text}\n\n{_build_reference_block(lists)}"},
         ])
         parsed = _try_parse_json(raw)
         if isinstance(parsed, list):
@@ -428,19 +552,22 @@ class DeepSeekProvider(AIProvider):
         b64 = base64.standard_b64encode(image_bytes).decode()
         raw = self._chat(
             [
-                {"role": "system", "content": _build_parse_prompt(lists)},
+                # Static system prompt; reference data at the end of the user
+                # message (prompt cache).
+                {"role": "system", "content": _PARSE_SYSTEM_PROMPT},
                 {"role": "user",   "content": [
                     {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
-                    {"type": "text",      "text": "Parse all transactions from this image."},
+                    {"type": "text",      "text": "Parse all transactions from this image."
+                                                  f"\n\n{_build_reference_block(lists)}"},
                 ]},
             ],
             max_tokens=self._BULK_MAX_TOKENS,
         )
         parsed = _try_parse_json(raw)
         if isinstance(parsed, list):
-            return parsed
+            return _normalize_ai_rows(parsed)
         if parsed is None:
-            salvaged = _salvage_json_objects(raw)
+            salvaged = _salvage_rows(raw)
             if salvaged:
                 log.warning(
                     "AI image response was malformed/truncated — salvaged %d transactions",
