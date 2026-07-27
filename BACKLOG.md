@@ -333,11 +333,24 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       month that has no pre-built row (bulk-imported history, or simply a new
       month starting) appears nowhere in the sheet. Confirmed live 2026-07-25:
       1400 imported rows spanning 2024 left Monthly Summary empty.
+      Re-confirmed 2026-07-27: workbook created via /setup + bulk AI import had
+      only 12 pre-built rows (Jan–Dec 2024); 2025/2026 data invisible in the sheet.
       Options: (a) bot appends a formula row for unseen Year/Month on save;
       (b) rebuild-script-style sync check like the planned Cycle Dashboard
       sync; (c) convert the sheet to dynamic formulas (SUMPRODUCT over open
       ranges) that need no per-month rows. Decide with the schema-simplification
       PR ("Derive Year/Month from Date by formula" — same territory).
+      **Priority: P2** — visible blank sheet misleads the user about their data.
+
+- [ ] **Cycle new-boundary prompt omits year — ambiguous in December** —
+      `_day_month(proposed)` in `handlers/cycle.py:56` returns `f"{d.day} {d.strftime('%b')}"`,
+      so the prompt reads "💰 Salary received. Start the new budget cycle from 20 Dec?"
+      with no year. In December this is ambiguous: the proposed date could be Dec 2025
+      or Dec 2026 (or any other year for backdated entries). Fix: include the year
+      when `proposed.year != date.today().year`, or always show the full date
+      (`f"{d.day} {d.strftime('%b %Y')}"`).
+      (`handlers/cycle.py` `_day_month`, also used in `/cycle list` output)
+      **Priority: P2** — affects correctness of boundary confirmation.
 
 ## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
 
