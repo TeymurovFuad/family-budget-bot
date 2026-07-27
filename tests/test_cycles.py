@@ -261,15 +261,15 @@ def test_detect_contains_match_on_bank_transfer_titles():
         "",
     ]
     results = cycles.detect_cycle_candidates(
-        df, existing_cycles=[], extra_keywords=["wynagrodzenie"]
+        df, existing_cycles=[], extra_keywords=["wages"]
     )
     assert [r["date"] for r in results] == [date(2024, 7, 1), date(2024, 8, 1)]
 
 
 def test_detect_extra_keywords_from_settings(monkeypatch):
-    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wynagrodzenie"])
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["wages"])
     df = _detect_df()
-    df["Description"] = ["Wynagrodzenie", "x", "y", ""]
+    df["Description"] = ["Wages", "x", "y", ""]
     results = cycles.detect_cycle_candidates(df, existing_cycles=[])
     assert [r["date"] for r in results] == [date(2024, 7, 1)]
 

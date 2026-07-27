@@ -214,7 +214,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
 | `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old, or if no cycle has been recorded yet |
 | `SALARY_CATEGORY` | — | `Salary` | Category name that marks salary income for cycle detection and the unaccounted metric |
-| `CYCLE_DETECT_KEYWORDS` | — | *(empty)* | Extra comma-separated words that mark a transaction as salary when found in its Description (e.g. `wynagrodzenie,payroll`) — see "How a salary is detected" |
+| `CYCLE_DETECT_KEYWORDS` | — | *(empty)* | Extra comma-separated words that mark a transaction as salary when found in its Description (e.g. `wages,payroll`) — see "How a salary is detected" |
 
 ### Commands
 
@@ -441,7 +441,7 @@ identical to the default calendar mode.
 /cycle started                start a new cycle from today
 /cycle started YYYY-MM-DD     start a new cycle from that date
 /cycle detect                 scan transaction history and backfill historical cycle boundaries
-/cycle detect <word> ...      same scan with extra search words (e.g. /cycle detect wynagrodzenie)
+/cycle detect <word> ...      same scan with extra search words (e.g. /cycle detect wages)
 /cycle list                   show every recorded boundary with its date range
 /cycle remove YYYY-MM-DD      delete a wrongly recorded boundary
 ```
