@@ -60,9 +60,29 @@ def test_cleanup_old_logs_removes_rotated_files():
         old_mtime = time.time() - (200 * 24 * 3600)
         os.utime(old_log, (old_mtime, old_mtime))
 
+        # Recent rotated file — 10 days ago, well within 180-day window
+        recent_log = log_dir / "budget-bot.log.2026-07-01"
+        recent_log.write_text("recent log content")
+        recent_mtime = time.time() - (10 * 24 * 3600)
+        os.utime(recent_log, (recent_mtime, recent_mtime))
+
+        # Base log file — no date suffix (live log); mtime 200 days ago.
+        # The glob pattern "budget-bot.log.*" must NOT match this file.
+        base_log = log_dir / "budget-bot.log"
+        base_log.write_text("live log content")
+        os.utime(base_log, (old_mtime, old_mtime))
+
+        # Unrelated log file in the same directory
+        other_log = log_dir / "other.log"
+        other_log.write_text("other log content")
+        os.utime(other_log, (old_mtime, old_mtime))
+
         _cleanup_old_logs(log_dir)
 
         assert not old_log.exists(), "Old rotated log file should have been deleted"
+        assert recent_log.exists(), "Recent rotated log file should NOT be deleted"
+        assert base_log.exists(), "Base log file (no date suffix) should NOT be deleted"
+        assert other_log.exists(), "Unrelated log file should NOT be deleted"
 
 
 def test_config_does_not_call_basic_config():
