@@ -30,6 +30,7 @@ from states import (
     BULK_RECEIVE, BULK_CONFIRM,
     BULK_PROFILE_CONFIRM, BULK_PROFILE_NAME,
     BULK_PROFILE_FIX_COL, BULK_PROFILE_FIX_FIELD, BULK_PROFILE_FIX_SETTING,
+    BULK_PERSON,
 )
 from validators import (
     clean_merchant_description,
@@ -395,6 +396,17 @@ def _field_pick_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def _person_pick_keyboard(persons: list[str]) -> InlineKeyboardMarkup:
+    """Inline keyboard for the 'Whose statement is this?' step."""
+    buttons = []
+    for name in persons:
+        cb = f"bperson:{name}"
+        if len(cb.encode()) <= 64:
+            buttons.append([InlineKeyboardButton(name, callback_data=cb)])
+    buttons.append([InlineKeyboardButton("Skip — household", callback_data="bperson:")])
+    return InlineKeyboardMarkup(buttons)
+
+
 async def _finish_profile_parse(
     update: Update,
     ctx: ContextTypes.DEFAULT_TYPE,
@@ -404,10 +416,55 @@ async def _finish_profile_parse(
     profile_name: str,
 ) -> int:
     """
-    After a profile is confirmed (matched or newly created): parse the file,
-    normalize rows, run merchant memory + validation, merge into the draft,
-    run dedup, and send the preview. Returns the next conversation state.
+    After a profile is confirmed (matched or newly created): ask whose statement
+    this is, then parse + preview on the callback reply. Returns BULK_PERSON.
     """
+    lists = ctx.user_data.get("lists") or load_reference_data()
+    ctx.user_data["lists"] = lists
+    ctx.user_data["_parse_file_bytes"] = file_bytes
+    ctx.user_data["_parse_filename"] = filename
+    ctx.user_data["_parse_profile"] = profile
+    ctx.user_data["_parse_profile_name"] = profile_name
+
+    persons = lists.get("persons") or []
+    await update.effective_message.reply_text(
+        "Whose statement is this?",
+        reply_markup=_person_pick_keyboard(persons),
+    )
+    return BULK_PERSON
+
+
+@auth
+async def bulk_person_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the 'Whose statement is this?' inline keyboard reply."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if not data.startswith("bperson:"):
+        return BULK_PERSON
+
+    person = data[len("bperson:"):]
+    ctx.user_data["bulk_person"] = person
+    await query.edit_message_text(
+        f"Got it — attributing to: {person}" if person else "Got it — recording as household."
+    )
+    return await _do_finish_profile_parse(update, ctx)
+
+
+async def _do_finish_profile_parse(
+    update: Update,
+    ctx: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """
+    Parse the statement stored in user_data, stamp person, build preview.
+    Called after the person-attribution step. Returns the next conversation state.
+    """
+    file_bytes = ctx.user_data.pop("_parse_file_bytes", b"")
+    filename = ctx.user_data.pop("_parse_filename", "file.csv")
+    profile = ctx.user_data.pop("_parse_profile", {})
+    profile_name = ctx.user_data.pop("_parse_profile_name", "")
+
     uid = update.effective_user.id
     lists = ctx.user_data.get("lists") or load_reference_data()
     ctx.user_data["lists"] = lists
@@ -430,6 +487,13 @@ async def _finish_profile_parse(
     )
     parsed, validator_corrections = _validate_bulk_rows(parsed, lists)
     corrections += validator_corrections
+
+    # Stamp session-level person attribution AFTER all normalization so the
+    # validator's person="" reset does not overwrite the session value.
+    bulk_person = ctx.user_data.get("bulk_person", "")
+    if bulk_person:
+        for row in parsed:
+            row["person"] = bulk_person
 
     if memory_notes:
         shown = "\n".join(f"  • {n}" for n in memory_notes[:10])
@@ -1190,8 +1254,10 @@ def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
     ok, reason, normalized, corrections = validate_parsed_row(row, lists)
     if ok:
         row.pop("invalid", None)
-        for f in ("value", "type", "category", "currency", "person"):
+        for f in ("value", "type", "category", "currency"):
             row[f] = normalized[f]
+        # person is not validated (validator always returns ""); preserve
+        # whatever was set by session attribution or a per-row edit.
         notes.extend(f"row {row_no}: {c}" for c in corrections)
     else:
         row["invalid"] = reason
@@ -1502,10 +1568,10 @@ def _apply_bulk_edit(
             f"Row {idx + 1} doesn't exist. Valid rows: 1–{len(parsed)}."
         ), []
     if field not in {"date", "value", "currency", "type", "category", "description",
-                     "is_recurring"}:
+                     "is_recurring", "person"}:
         return False, (
             f"Unknown field '{field}'. "
-            "Editable fields: date, value, currency, category, description, type, is_recurring."
+            "Editable fields: date, value, currency, category, description, type, is_recurring, person."
         ), []
 
     if field == "category" and lists:
@@ -1829,6 +1895,12 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         log.info("User %s bulk normalize: %d corrections", uid, len(corrections))
 
+    # Stamp session-level person attribution AFTER all normalization.
+    bulk_person = ctx.user_data.get("bulk_person", "")
+    if bulk_person:
+        for row in parsed:
+            row["person"] = bulk_person
+
     if _draft_limit_reached(uid):
         held = ctx.user_data.get("_pending_overflow")
         if held:
@@ -1894,6 +1966,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if reason == "cancel":
         _delete_bulk_draft(update.effective_user.id)
+        ctx.user_data.pop("bulk_person", None)
         log.info("User %s cancelled bulk import draft", update.effective_user.id)
         await update.message.reply_text(
             "Cancelled — draft discarded.", reply_markup=ReplyKeyboardRemove()
@@ -2052,6 +2125,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
     await update.message.reply_text(msg, reply_markup=ReplyKeyboardRemove())
     if not write_failed and not failed_items:
+        ctx.user_data.pop("bulk_person", None)
         next_state = await _release_pending_overflow(update, ctx)
         if next_state is not None:
             return next_state
