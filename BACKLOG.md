@@ -592,10 +592,10 @@ approach described here is exactly Cycles W1–W4.
       when `_draft_limit_reached` fires, the freshly parsed rows (already paid for with an AI call)
       are dropped without warning. Keep them in a holding buffer or warn explicitly.
 - [x] **[PR #3] Preview edits not persisted to draft file** *(fixed PR #48 — _save_bulk_draft called after each edit)*
-- [ ] **[PR #3] Recovery replay writes Date as text string** — `append_to_recovery_queue` JSON-serializes
+- [x] **[PR #3] Recovery replay writes Date as text string** *(fixed — `replay_recovery_queue` now rehydrates date/value/is_recurring before `write_transaction_row`)* — `append_to_recovery_queue` JSON-serializes
       dates with `default=str`; `replay_recovery_queue` writes the string verbatim into the Date cell.
       Rehydrate with `date.fromisoformat` (+ coerce value/is_recurring) before `write_transaction_row`.
-- [ ] **[PR #3] Cosmetic cleanup** — dead `"resolved"` status filter in `_draft_limit_reached`
+- [x] **[PR #3] Cosmetic cleanup** *(fixed — resolved filter removed, limit message corrected, unused imports dropped; e2e tests updated for two-tap /add flow)* — dead `"resolved"` status filter in `_draft_limit_reached`
       (nothing ever sets it); limit message says "50" but triggers at 51; unused `io`/`logging`
       imports in `file_storage.py`.
 
