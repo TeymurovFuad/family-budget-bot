@@ -16,6 +16,8 @@ import re
 from abc import ABC, abstractmethod
 from datetime import datetime, time
 
+from pydantic import BaseModel, ValidationError
+
 import settings
 
 log = logging.getLogger(__name__)
@@ -227,6 +229,18 @@ def _try_parse_structured_text(text: str) -> list[dict] | None:
     return None
 
 
+# ── Typed parse boundary ────────────────────────────────────────────────────────
+
+class ParsedTransaction(BaseModel):
+    date: str
+    value: float
+    currency: str
+    category: str
+    description: str
+    type: str
+    is_recurring: bool = False
+
+
 # ── Compact positional-array output format ───────────────────────────────────
 # The bulk parse prompt asks for positional arrays instead of JSON objects —
 # roughly half the output tokens per transaction. Position → field mapping:
@@ -244,6 +258,8 @@ def _decode_positional_array(arr) -> dict | None:
     """
     if not isinstance(arr, (list, tuple)) or len(arr) < 2:
         return None
+    if arr[1] is None:
+        return None
     return {field: value for field, value in zip(_ARRAY_FIELDS, arr)}
 
 
@@ -251,16 +267,23 @@ def _normalize_ai_rows(items) -> list[dict]:
     """
     Dual-format normalization (backward compat during the array-format
     rollout): positional arrays are decoded, dicts pass through unchanged,
-    anything else is dropped.
+    anything else is dropped. Each candidate row is validated against
+    ParsedTransaction; rows that fail validation are logged and excluded.
     """
     rows: list[dict] = []
     for item in items or []:
         if isinstance(item, dict):
-            rows.append(item)
+            candidate = item
+        else:
+            candidate = _decode_positional_array(item)
+            if candidate is None:
+                continue
+        try:
+            parsed = ParsedTransaction.model_validate(candidate)
+        except ValidationError as exc:
+            log.debug("Dropping invalid AI row %r: %s", candidate, exc)
             continue
-        decoded = _decode_positional_array(item)
-        if decoded is not None:
-            rows.append(decoded)
+        rows.append(parsed.model_dump())
     return rows
 
 
