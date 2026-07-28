@@ -53,12 +53,13 @@ def _current_cycle_bounds() -> tuple[date, date, str] | None:
 
 
 async def _send_cycle_summary(msg, ccy: str, df, rates,
-                              start: date, end: date, label: str) -> None:
+                              start: date, end: date, label: str,
+                              extra_keywords: list[str] | None = None) -> None:
     """msg is anything with reply_text — update.message or query.message."""
     if label == BEFORE_CYCLES_LABEL:
         # Implicit bucket for rows older than the first boundary — it has no
         # salary anchor, so salary/unaccounted math is excluded on purpose.
-        totals  = cycle_totals(df, start, end)
+        totals  = cycle_totals(df, start, end, extra_keywords)
         income  = totals["income"]
         expense = totals["expense"]
         savings = totals["savings"]
@@ -73,7 +74,7 @@ async def _send_cycle_summary(msg, ccy: str, df, rates,
             parse_mode="Markdown",
         )
         return
-    totals  = cycle_totals(df, start, end)
+    totals  = cycle_totals(df, start, end, extra_keywords)
     income  = totals["income"]
     expense = totals["expense"]
     savings = totals["savings"]
@@ -193,7 +194,8 @@ async def _maybe_prompt_backfill(msg, ctx, resolution: dict, cycles) -> bool:
     return True
 
 
-async def _send_entire_period(msg, ccy: str, df, rates, cycles, today: date) -> None:
+async def _send_entire_period(msg, ccy: str, df, rates, cycles, today: date,
+                              extra_keywords: list[str] | None = None) -> None:
     """One summary per cycle, oldest first, incl. the 'Before cycles' bucket."""
     periods = [p for p in cycle_periods(df, cycles, today) if p[0] <= today]
     if not periods:
@@ -203,10 +205,11 @@ async def _send_entire_period(msg, ccy: str, df, rates, cycles, today: date) -> 
         )
         return
     for start, end, label in periods:
-        await _send_cycle_summary(msg, ccy, df, rates, start, end, label)
+        await _send_cycle_summary(msg, ccy, df, rates, start, end, label, extra_keywords)
 
 
-async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict) -> None:
+async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict,
+                                      extra_keywords: list[str] | None = None) -> None:
     """Dispatch a parse_summary_args() result to the right report."""
     kind = resolution["kind"]
     if kind == "month":
@@ -214,11 +217,12 @@ async def _render_summary_resolution(msg, ccy: str, df, rates, resolution: dict)
                                   resolution["year"], month_name(resolution["month"]))
     elif kind == "cycle":
         await _send_cycle_summary(msg, ccy, df, rates,
-                                  resolution["start"], resolution["end"], resolution["label"])
+                                  resolution["start"], resolution["end"], resolution["label"],
+                                  extra_keywords)
     elif kind == "entire":
         today = now_utc().date()
         cycles = load_cycles() if settings.BUDGET_CYCLE else []
-        await _send_entire_period(msg, ccy, df, rates, cycles, today)
+        await _send_entire_period(msg, ccy, df, rates, cycles, today, extra_keywords)
     else:  # range
         budgets = load_budgets()
         text = _build_range_report(df, rates, budgets, ccy,
@@ -264,7 +268,8 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             resolution = {"kind": "entire", "start": earliest, "end": today}
             if await _maybe_prompt_backfill(update.message, ctx, resolution, cycles):
                 return
-            await _send_entire_period(update.message, ccy, df, rates, cycles or [], today)
+            await _send_entire_period(update.message, ccy, df, rates, cycles or [], today,
+                                      ctx.user_data.get("detect_extra_keywords"))
             return
 
         resolution = parse_summary_args(ctx.args, today, cycles)
@@ -278,7 +283,8 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         resolution = _resolve_ledger_first(resolution, cycles, today)
         if await _maybe_prompt_backfill(update.message, ctx, resolution, cycles):
             return
-        await _render_summary_resolution(update.message, ccy, df, rates, resolution)
+        await _render_summary_resolution(update.message, ccy, df, rates, resolution,
+                                         ctx.user_data.get("detect_extra_keywords"))
         return
 
     # Bare /summary → one message, three zones.
@@ -327,7 +333,8 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         if pending is None:
             await msg.reply_text("Nothing pending to render — run the report again.")
             return
-        await _render_summary_resolution(msg, ccy, df, rates, pending)
+        await _render_summary_resolution(msg, ccy, df, rates, pending,
+                                         ctx.user_data.get("detect_extra_keywords"))
         return
 
     if action in ("tm", "lm"):
@@ -346,7 +353,8 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
             return
         index = len(cycles) - need
         start, end = cycle_bounds(cycles, index, today)
-        await _send_cycle_summary(msg, ccy, df, rates, start, end, cycles[index][1])
+        await _send_cycle_summary(msg, ccy, df, rates, start, end, cycles[index][1],
+                                  ctx.user_data.get("detect_extra_keywords"))
         return
 
     if action == "cal" or action == "yrs":
@@ -420,7 +428,8 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
         for i, (c_start, label) in enumerate(cycles):
             if c_start == start:
                 s, e = cycle_bounds(cycles, i, today)
-                await _send_cycle_summary(msg, ccy, df, rates, s, e, label)
+                await _send_cycle_summary(msg, ccy, df, rates, s, e, label,
+                                          ctx.user_data.get("detect_extra_keywords"))
                 return
         await msg.reply_text("❌ That cycle is no longer in the ledger.")
         return
@@ -631,7 +640,8 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if p[2] != BEFORE_CYCLES_LABEL and p[0] <= today
         ][-6:]
         for start, end, label in periods:
-            totals = cycle_totals(df, start, end)
+            totals = cycle_totals(df, start, end,
+                                  ctx.user_data.get("detect_extra_keywords"))
             income = totals["income"]
             rate   = totals["savings"] / income * 100 if income > 0 else 0
             labels.append(label)

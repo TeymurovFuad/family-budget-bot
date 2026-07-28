@@ -157,6 +157,25 @@ def test_cycle_totals_negative_unaccounted_means_over_reported():
     assert totals["unaccounted"] < 0
 
 
+def test_cycle_totals_extra_keywords_counts_ad_hoc_salary(monkeypatch):
+    """extra_keywords=["wages"] treats a Description-matched row as salary."""
+    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: [])
+    monkeypatch.setattr("settings.CYCLE_DETECT_KEYWORDS", [])
+    df = pd.DataFrame({
+        "Date":        ["2026-06-25"],
+        "Type":        ["Income"],
+        "Category":    [""],
+        "Description": ["wages JULY 2024"],
+        "_base":        [5000.0],
+        "IsDone":      [True],
+    })
+    totals_without = cycle_totals(df, date(2026, 6, 25), date(2026, 6, 25))
+    totals_with    = cycle_totals(df, date(2026, 6, 25), date(2026, 6, 25),
+                                  extra_keywords=["wages"])
+    assert totals_without["salary"] == 0.0
+    assert totals_with["salary"] == 5000.0
+
+
 # ── /cycle list and /cycle remove ──────────────────────────────────────────────
 
 async def test_cmd_cycle_list_shows_all_boundaries(excel_path, monkeypatch):
