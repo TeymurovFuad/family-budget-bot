@@ -1326,12 +1326,17 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
     current_len = len(current[0])
     for line in row_lines:
         if current_len + len(line) + 1 > _PREVIEW_MSG_LIMIT_CHARS:
+            # Strip trailing separator so no page ends with an orphaned divider.
+            while current and current[-1] == sep:
+                current.pop()
             messages.append("\n".join(current))
             current = []
             current_len = 0
         current.append(line)
         current_len += len(line) + 1
     if current:
+        while current and current[-1] == sep:
+            current.pop()
         messages.append("\n".join(current))
 
     messages[-1] += "\n" + footer
