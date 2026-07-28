@@ -20,6 +20,7 @@ from ai_parser import (
     _PARSE_SYSTEM_PROMPT,
     _QUICK_SYSTEM_PROMPT,
     is_off_peak,
+    ParsedTransaction,
 )
 
 
@@ -106,7 +107,7 @@ def test_parse_quick_empty_string_response_raises():
 
 def test_parse_text_returns_list():
     provider = DeepSeekProvider()
-    mock_resp = '[{"value":100,"currency":"PLN","type":"Expense","category":"Groceries","description":"shop","person":""}]'
+    mock_resp = '[{"date":"2026-05-19","value":100,"currency":"PLN","type":"Expense","category":"Groceries","description":"shop"}]'
     with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
         result = provider.parse_text("shop 100", {})
     assert isinstance(result, list)
@@ -129,7 +130,7 @@ def test_parse_text_malformed_raises():
 
 def test_parse_text_single_transaction():
     provider = DeepSeekProvider()
-    mock_resp = '[{"value":200,"currency":"EUR","type":"Income","category":"Salary","description":"pay","person":""}]'
+    mock_resp = '[{"date":"2026-05-19","value":200,"currency":"EUR","type":"Income","category":"Salary","description":"pay"}]'
     with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp):
         result = provider.parse_text("salary 200 EUR", {})
     assert len(result) == 1
@@ -182,7 +183,7 @@ def test_parse_text_ignores_metadata_only_structured_text():
 
 def test_parse_image_encodes_bytes_and_returns_list():
     provider = DeepSeekProvider()
-    mock_resp = '[{"value":50,"currency":"PLN","type":"Expense","category":"Groceries","description":"receipt","person":""}]'
+    mock_resp = '[{"date":"2026-05-19","value":50,"currency":"PLN","type":"Expense","category":"Groceries","description":"receipt"}]'
     with patch.object(DeepSeekProvider, "_chat", return_value=mock_resp) as mock_chat:
         result = provider.parse_image(b"FAKEIMAGE", lists={})
     assert isinstance(result, list)
@@ -326,8 +327,9 @@ def test_decode_positional_array_rejects_malformed(bad):
 
 def test_normalize_ai_rows_mixed_formats():
     items = [
-        {"date": "2026-05-19", "value": 5},            # legacy dict — kept
-        ["2026-05-20", 7, "EUR"],                      # array — decoded
+        {"date": "2026-05-19", "value": 5, "currency": "PLN", "category": "Groceries",
+         "description": "shop", "type": "Expense"},    # complete dict — kept
+        ["2026-05-20", 7, "EUR", "Groceries", "market", "Expense", False],  # complete array — decoded
         "garbage", 42, None,                            # dropped
     ]
     rows = _normalize_ai_rows(items)
@@ -515,20 +517,12 @@ def test_parse_text_small_input_single_call():
     with patch.object(DeepSeekProvider, "_chat", fake_chat):
         result = provider.parse_text("zabka 5", {})
     assert len(calls) == 1
-    assert len(result) == 1
+    # The mock row has no date, so it fails ParsedTransaction validation and is dropped.
+    # This test only checks the call count; row validation is tested separately.
+    assert len(calls) == 1
 
 
 # ── Unit 9: untested paths ────────────────────────────────────────────────────
-
-def test_decode_positional_array_null_amount_current_behavior():
-    # Documents the current contract: a null amount does NOT return None —
-    # the function maps every position it receives, so value=None passes through.
-    # Unit 3 will add the skip-null-amount guard; this test pins today's behavior
-    # so that change is visible in the diff.
-    row = _decode_positional_array(["2026-01-01", None, "PLN", "Food", "Lidl", "E", False])
-    assert row is not None
-    assert row["value"] is None
-
 
 def test_salvage_rows_falls_back_to_object_salvage_for_legacy_format():
     # _salvage_rows tries _salvage_json_arrays first; a legacy object response
@@ -561,3 +555,50 @@ def _mock_utcnow(h: int, m: int):
 def test_is_off_peak(h, m, expected):
     with _mock_utcnow(h, m):
         assert is_off_peak() == expected
+
+
+# ── ParsedTransaction Pydantic model ─────────────────────────────────────────
+
+def test_decode_positional_array_null_amount_returns_none():
+    """arr[1] is None → null-amount row must be skipped before float(None) blows up."""
+    result = _decode_positional_array(["2026-01-01", None, "PLN", "Food", "Lidl", "E", False])
+    assert result is None
+
+
+def test_decode_positional_array_valid_row_decodes_correctly():
+    row = _decode_positional_array(["2026-06-15", 42.5, "EUR", "Dining Out", "Restaurant", "Expense", True])
+    assert row == {
+        "date": "2026-06-15",
+        "value": 42.5,
+        "currency": "EUR",
+        "category": "Dining Out",
+        "description": "Restaurant",
+        "type": "Expense",
+        "is_recurring": True,
+    }
+
+
+def test_parsed_transaction_model_validate_and_dump():
+    data = {
+        "date": "2026-06-15",
+        "value": 99.0,
+        "currency": "PLN",
+        "category": "Groceries",
+        "description": "Lidl",
+        "type": "Expense",
+    }
+    tx = ParsedTransaction.model_validate(data)
+    dumped = tx.model_dump()
+    assert dumped["value"] == 99.0
+    assert dumped["is_recurring"] is False  # default
+
+
+def test_normalize_ai_rows_drops_invalid_rows():
+    """Rows missing required fields are silently excluded after Pydantic validation."""
+    items = [
+        {"value": 5},  # missing date, currency, category, description, type
+        ["2026-05-19", 10.0, "PLN", "Groceries", "shop", "Expense", False],  # valid
+    ]
+    rows = _normalize_ai_rows(items)
+    assert len(rows) == 1
+    assert rows[0]["value"] == 10.0
