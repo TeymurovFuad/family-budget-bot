@@ -14,10 +14,20 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from datetime import datetime, time
 
 import settings
 
 log = logging.getLogger(__name__)
+
+
+def is_off_peak() -> bool:
+    """Return True if current UTC time is in the DeepSeek off-peak window (16:30–00:30 UTC)."""
+    now = datetime.utcnow().time()
+    start = time(16, 30)
+    end = time(0, 30)
+    # Window crosses midnight: 16:30–23:59 OR 00:00–00:30
+    return now >= start or now < end
 
 
 def _strip_fences(raw: str) -> str:
@@ -477,6 +487,8 @@ class DeepSeekProvider(AIProvider):
         kwargs = {"model": model, "messages": messages, "temperature": 0}
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
+        if not is_off_peak():
+            log.info("AI call outside off-peak window — cost may be higher")
         resp = self._client_().chat.completions.create(**kwargs)
         return resp.choices[0].message.content
 
