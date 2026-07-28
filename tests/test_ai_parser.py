@@ -15,6 +15,7 @@ from ai_parser import (
     _decode_positional_array,
     _normalize_ai_rows,
     _salvage_json_arrays,
+    _salvage_rows,
     _PARSE_SYSTEM_PROMPT,
     _QUICK_SYSTEM_PROMPT,
 )
@@ -513,3 +514,27 @@ def test_parse_text_small_input_single_call():
         result = provider.parse_text("zabka 5", {})
     assert len(calls) == 1
     assert len(result) == 1
+
+
+# ── Unit 9: untested paths ────────────────────────────────────────────────────
+
+def test_decode_positional_array_null_amount_current_behavior():
+    # Documents the current contract: a null amount does NOT return None —
+    # the function maps every position it receives, so value=None passes through.
+    # Unit 3 will add the skip-null-amount guard; this test pins today's behavior
+    # so that change is visible in the diff.
+    row = _decode_positional_array(["2026-01-01", None, "PLN", "Food", "Lidl", "E", False])
+    assert row is not None
+    assert row["value"] is None
+
+
+def test_salvage_rows_falls_back_to_object_salvage_for_legacy_format():
+    # _salvage_rows tries _salvage_json_arrays first; a legacy object response
+    # (no inner positional arrays) yields nothing from that path, so it must
+    # fall back to _salvage_json_objects.  Backtick fences mirror how the AI
+    # sometimes wraps its response.
+    raw = '```json\n{"date": "2026-01-01", "value": 45.0, "currency": "USD", "category": "Food", "description": "Lidl", "type": "E", "is_recurring": false}\n```'
+    result = _salvage_rows(raw)
+    assert len(result) > 0
+    assert result[0]["date"] == "2026-01-01"
+    assert result[0]["value"] == 45.0
