@@ -54,7 +54,7 @@ def _esc(text: str) -> str:
 
 
 def _day_month(d: date) -> str:
-    return f"{d.day} {d.strftime('%b')}"
+    return f"{d.day} {d.strftime('%b %Y')}"
 
 
 async def _deny_non_owner(update: Update) -> bool:
@@ -517,10 +517,10 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
     in_category = any(
-        re.search(r"\b" + re.escape(k) + r"\b", category) for k in keywords
+        re.search(r"\b" + re.escape(k) + r"\b", category, re.UNICODE) for k in keywords
     )
     in_description = not category and any(
-        re.search(r"\b" + re.escape(k) + r"\b", description) for k in keywords
+        re.search(r"\b" + re.escape(k) + r"\b", description, re.UNICODE) for k in keywords
     )
     if not in_category and not in_description:
         return
@@ -553,6 +553,12 @@ async def handle_cycle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             start = date.fromisoformat(parts[2])
         except ValueError:
             await query.message.reply_text("❌ Could not read the proposed date.")
+            return
+        if start > date.today():
+            await query.message.reply_text(
+                "❌ That date is in the future — please use /cycle to start a new cycle "
+                "from today or a past date."
+            )
             return
         label = await async_record_cycle_start(start)
         if label:
