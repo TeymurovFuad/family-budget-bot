@@ -344,10 +344,10 @@ def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd
         return pd.Series(False, index=df.index)
     pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
     category = df["Category"].fillna("").astype(str).str.strip()
-    matches = category.str.contains(pattern, case=False, regex=True)
+    matches = category.str.contains(pattern, case=False, regex=True, flags=re.UNICODE)
     if "Description" in df.columns:
         matches |= (category == "") & df["Description"].astype(str).str.contains(
-            pattern, case=False, regex=True
+            pattern, case=False, regex=True, flags=re.UNICODE
         )
     return (df["Type"] == "Income") & matches
 
