@@ -34,6 +34,10 @@ from formatters import (
 
 # Telegram hard limit is 4096 chars; leave headroom for Markdown overhead.
 _REPORT_MSG_LIMIT_CHARS = 4000
+# Telegram's absolute per-message character cap.
+_TELEGRAM_HARD_LIMIT = 4096
+# Section-break prefix used to detect safe chunk split points.
+_SECTION_BREAK_PREFIX = "━━━"
 # Timeout for the frankfurter.dev live-rates HTTP call, in seconds.
 _RATES_HTTP_TIMEOUT_S = 10.0
 
@@ -776,18 +780,34 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(report_text) <= _REPORT_MSG_LIMIT_CHARS:
         await update.message.reply_text(report_text, parse_mode="Markdown")
     else:
-        chunks = []
-        current = ""
+        # Split only at section-break lines (━━━…) to avoid breaking Markdown
+        # spans across messages (Telegram rejects unmatched bold/code markers).
+        chunks: list[str] = []
+        current_lines: list[str] = []
+        current_len = 0
         for line in report_text.split("\n"):
-            if len(current) + len(line) + 1 > _REPORT_MSG_LIMIT_CHARS:
-                chunks.append(current)
-                current = line
+            line_len = len(line) + 1  # +1 for the joining newline
+            if (line.startswith(_SECTION_BREAK_PREFIX)
+                    and current_lines
+                    and current_len + line_len > _REPORT_MSG_LIMIT_CHARS):
+                chunks.append("\n".join(current_lines))
+                current_lines = [line]
+                current_len = line_len
             else:
-                current += ("\n" if current else "") + line
-        if current:
-            chunks.append(current)
-        for chunk in chunks:
-            await update.message.reply_text(chunk, parse_mode="Markdown")
+                current_lines.append(line)
+                current_len += line_len
+        if current_lines:
+            chunks.append("\n".join(current_lines))
+        # Fallback: if no section break split the report and it's still too
+        # long, send as a single message truncated to Telegram's hard limit.
+        if len(chunks) == 1 and len(chunks[0]) > _TELEGRAM_HARD_LIMIT:
+            text = report_text[:_TELEGRAM_HARD_LIMIT - 50] + "\n⚠️ Output too long — some data was omitted."  # 50-char buffer for the truncation suffix
+            await update.message.reply_text(text, parse_mode="Markdown")
+        else:
+            for chunk in chunks:
+                if len(chunk) > _TELEGRAM_HARD_LIMIT:
+                    chunk = chunk[:_TELEGRAM_HARD_LIMIT - 50] + "\n⚠️ Output too long — some data was omitted."  # 50-char buffer for the truncation suffix
+                await update.message.reply_text(chunk, parse_mode="Markdown")
 
 
 @auth
