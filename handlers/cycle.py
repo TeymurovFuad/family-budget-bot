@@ -206,6 +206,10 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     ctx.user_data.pop("detect_recorded", None)
 
     extra_keywords = list((ctx.args or [])[1:])
+    if extra_keywords:
+        ctx.user_data["detect_extra_keywords"] = extra_keywords
+    else:
+        ctx.user_data.pop("detect_extra_keywords", None)
     keywords = cycle_detect_keywords(extra_keywords)
     await update.message.reply_text(
         f"🔍 Scanning transaction history — matching: {_esc(', '.join(keywords))}\\.\\.\\.",
