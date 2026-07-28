@@ -280,6 +280,28 @@ def test_salary_mask_empty_keyword_matches_nothing(monkeypatch):
     assert not cycles.salary_mask(_detect_df()).any()
 
 
+def test_salary_mask_empty_category_with_stored_keyword(monkeypatch):
+    """With SALARY_CATEGORY="" and one stored keyword, rows containing that
+    keyword in Description (when Category is blank) are masked; others are not.
+    No empty-alternation regex explosion occurs."""
+    monkeypatch.setattr(settings, "SALARY_CATEGORY", "")
+    monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["payroll"])
+    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: [])
+    df = pd.DataFrame({
+        "Date":        ["2026-01-10", "2026-01-15", "2026-01-20"],
+        "Type":        ["Income",     "Income",     "Income"],
+        "Category":    ["",           "",           "Freelance"],
+        "Description": ["payroll jan", "bonus",     "payroll jan"],
+        "_base":        [5000.0,        500.0,        3000.0],
+        "IsDone":      [True,          True,          True],
+    })
+    mask = cycles.salary_mask(df)
+    # row 0: category blank, description "payroll jan" -> matches
+    # row 1: category blank, description "bonus"       -> no match
+    # row 2: category "Freelance" (non-blank)          -> description ignored
+    assert list(mask) == [True, False, False]
+
+
 def test_salary_mask_description_ignored_when_category_present():
     df = _detect_df()
     df["Category"] = ["Freelance", "", "Salary Bonus", "Groceries"]
@@ -411,7 +433,7 @@ async def test_maybe_prompt_salary_income_prompts_with_wording(excel_path, monke
     upd = make_update()
     await maybe_prompt_cycle_start(upd, make_transaction(txn_date=date(2026, 7, 23)))
     text = upd.message.reply_text.call_args[0][0]
-    assert text.startswith("💰 Salary received. Start the new budget cycle from 23 Jul?")
+    assert text.startswith("💰 Salary received. Start the new budget cycle from 23 Jul 2026?")
     assert "(yes / no / different date)" in text
     markup = upd.message.reply_text.call_args.kwargs["reply_markup"]
     callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
