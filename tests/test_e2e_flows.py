@@ -170,10 +170,11 @@ class TestAddFlow:
         return state, ctx, updates
 
     async def test_add_golden_path(self):
+        # Two-tap flow: amount → category → save. Currency/type/date/recurring
+        # all default; description is empty unless edited from the confirm card.
         append_mock = AsyncMock()
         state, ctx, updates = await self._drive(
-            ["49.99", "PLN", "Expense", "Groceries", "today",
-             "weekly shop", "No — one-off", "✅ Save"],
+            ["49.99", "Groceries", "✅ Save"],
             append_mock=append_mock,
         )
         assert state == ConversationHandler.END
@@ -183,25 +184,44 @@ class TestAddFlow:
         assert txn.currency == "PLN"
         assert txn.transaction_type == "Expense"
         assert txn.category == "Groceries"
-        assert txn.description == "weekly shop"
         assert txn.is_recurring is False
         assert txn.date == LOCAL_TODAY
         assert "Saved" in all_replies(*updates)
 
     async def test_add_golden_path_foreign_currency_recurring(self):
+        # Two-tap flow to confirm card, then edit currency and recurring via
+        # the confirm-card edit flow before saving.
         append_mock = AsyncMock()
-        state, _, updates = await self._drive(
-            ["100", "EUR", "Expense", "Transport", LOCAL_TODAY.isoformat(),
-             "/skip", "Yes — recurring", "✅ Save"],
-            append_mock=append_mock,
-        )
+        with applied(add_patches(append_mock)):
+            ctx = make_ctx()
+            _, upds = await drive_add(ctx, ["100", "Transport"])
+
+            upd_e1 = make_update("✏️ Edit a field")
+            await add_conv.add_confirm(upd_e1, ctx)
+            upd_ccy_field = make_update("Currency")
+            await add_conv.add_confirm(upd_ccy_field, ctx)
+            upd_eur = make_update("EUR")
+            await add_conv.add_confirm(upd_eur, ctx)
+
+            upd_e2 = make_update("✏️ Edit a field")
+            await add_conv.add_confirm(upd_e2, ctx)
+            upd_rec_field = make_update("Recurring")
+            await add_conv.add_confirm(upd_rec_field, ctx)
+            upd_yes = make_update("Yes — recurring")
+            await add_conv.add_confirm(upd_yes, ctx)
+
+            upd_save = make_update("✅ Save")
+            state = await add_conv.add_confirm(upd_save, ctx)
+
         assert state == ConversationHandler.END
         txn = append_mock.call_args.args[0]
         assert txn.currency == "EUR"
         assert txn.is_recurring is True
         assert txn.description == ""
-        # PLN equivalent shown at 4.5 rate
-        assert "450" in all_replies(*updates)
+        # PLN equivalent shown in the confirm card after setting EUR (100 * 4.5).
+        all_text = all_replies(*upds, upd_e1, upd_ccy_field, upd_eur,
+                               upd_e2, upd_rec_field, upd_yes, upd_save)
+        assert "450" in all_text
 
     async def test_add_invalid_amount_reprompts(self):
         state, _, updates = await self._drive(["abc"])
@@ -213,9 +233,19 @@ class TestAddFlow:
         assert state == states.ADD_VALUE
 
     async def test_add_unknown_currency_reprompts(self):
-        state, _, updates = await self._drive(["50", "XXX"])
-        assert state == states.ADD_CURRENCY
-        assert "Unknown currency" in all_replies(*updates)
+        # Currency is no longer a standalone step; validation is reached via
+        # the confirm-card edit flow.
+        with applied(add_patches()):
+            ctx = make_ctx()
+            await drive_add(ctx, ["50", "Groceries"])
+            upd = make_update("✏️ Edit a field")
+            await add_conv.add_confirm(upd, ctx)
+            upd = make_update("Currency")
+            await add_conv.add_confirm(upd, ctx)
+            upd_bad = make_update("XXX")
+            state = await add_conv.add_confirm(upd_bad, ctx)
+        assert state == states.ADD_CONFIRM
+        assert "Unknown currency" in all_replies(upd_bad)
 
     async def test_add_unknown_category_reprompts(self):
         state, _, updates = await self._drive(
@@ -224,17 +254,33 @@ class TestAddFlow:
         assert "choose from the list" in all_replies(*updates)
 
     async def test_add_future_date_rejected(self):
+        # Date is no longer a standalone step; validation is reached via the
+        # confirm-card edit flow.
         tomorrow = (LOCAL_TODAY + timedelta(days=1)).isoformat()
-        state, _, updates = await self._drive(
-            ["50", "PLN", "Expense", "Groceries", tomorrow])
-        assert state == states.ADD_DATE
-        assert "Future dates" in all_replies(*updates)
+        with applied(add_patches()):
+            ctx = make_ctx()
+            await drive_add(ctx, ["50", "Groceries"])
+            upd = make_update("✏️ Edit a field")
+            await add_conv.add_confirm(upd, ctx)
+            upd = make_update("Date")
+            await add_conv.add_confirm(upd, ctx)
+            upd_bad = make_update(tomorrow)
+            state = await add_conv.add_confirm(upd_bad, ctx)
+        assert state == states.ADD_CONFIRM
+        assert "Future dates" in all_replies(upd_bad)
 
     async def test_add_malformed_date_rejected(self):
-        state, _, updates = await self._drive(
-            ["50", "PLN", "Expense", "Groceries", "31/12/2025"])
-        assert state == states.ADD_DATE
-        assert "YYYY-MM-DD" in all_replies(*updates)
+        with applied(add_patches()):
+            ctx = make_ctx()
+            await drive_add(ctx, ["50", "Groceries"])
+            upd = make_update("✏️ Edit a field")
+            await add_conv.add_confirm(upd, ctx)
+            upd = make_update("Date")
+            await add_conv.add_confirm(upd, ctx)
+            upd_bad = make_update("31/12/2025")
+            state = await add_conv.add_confirm(upd_bad, ctx)
+        assert state == states.ADD_CONFIRM
+        assert "YYYY-MM-DD" in all_replies(upd_bad)
 
     async def test_add_cancel_at_confirm_writes_nothing(self):
         append_mock = AsyncMock()
@@ -417,7 +463,7 @@ class TestBulkTextFlow:
             upd = make_update("99 category=Transport")
             state = await bulk_conv.bulk_confirm(upd, ctx)
             assert state == states.BULK_CONFIRM
-            assert "reply with edits" in all_replies(upd).lower()
+            assert "editable fields" in all_replies(upd).lower()
 
     async def test_bulk_receive_rejects_slash_command_text(self):
         with applied(bulk_patches()):
