@@ -1498,10 +1498,15 @@ def _apply_bulk_edit(
     field = match.group(2).strip().lower()
     value = match.group(3).strip()
     if not (0 <= idx < len(parsed)):
-        return False, "invalid", []
+        return False, (
+            f"Row {idx + 1} doesn't exist. Valid rows: 1–{len(parsed)}."
+        ), []
     if field not in {"date", "value", "currency", "type", "category", "description",
                      "is_recurring"}:
-        return False, "invalid", []
+        return False, (
+            f"Unknown field '{field}'. "
+            "Editable fields: date, value, currency, category, description, type, is_recurring."
+        ), []
 
     if field == "category" and lists:
         categories = lists.get("categories") or []
@@ -1922,16 +1927,12 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "(also `skip 3` / `delete 3`), `keep 4-6`.\n"
             "Send `save` to store them all, or `cancel` to stop.",
             parse_mode="Markdown",
-            reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
         )
         return BULK_CONFIRM
 
     if reason and reason not in ("edited", "cancel"):
-        # A specific validation error (e.g. unknown category) — show it verbatim.
-        await update.message.reply_text(
-            reason,
-            reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
-        )
+        # A specific validation error (e.g. unknown category, unknown field, out-of-range row) — show it verbatim.
+        await update.message.reply_text(reason)
         return BULK_CONFIRM
 
     if not action:

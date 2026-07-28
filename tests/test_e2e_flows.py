@@ -463,7 +463,18 @@ class TestBulkTextFlow:
             upd = make_update("99 category=Transport")
             state = await bulk_conv.bulk_confirm(upd, ctx)
             assert state == states.BULK_CONFIRM
-            assert "editable fields" in all_replies(upd).lower()
+            assert "doesn't exist" in all_replies(upd).lower()
+
+    async def test_bulk_unknown_field_shows_editable_fields(self):
+        with applied(bulk_patches()):
+            ctx = make_ctx()
+            await start_bulk_and_receive(ctx)
+            upd = make_update("1 foo=bar")
+            state = await bulk_conv.bulk_confirm(upd, ctx)
+            assert state == states.BULK_CONFIRM
+            reply = all_replies(upd).lower()
+            assert "unknown field" in reply
+            assert "editable fields" in reply
 
     async def test_bulk_receive_rejects_slash_command_text(self):
         with applied(bulk_patches()):
