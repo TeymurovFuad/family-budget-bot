@@ -444,10 +444,19 @@ def record_cycle_starts_batch(starts: list[date]) -> int:
         return count
 
 
-def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
+def cycle_totals(
+    df: pd.DataFrame,
+    start: date,
+    end: date,
+    extra_keywords: list[str] | None = None,
+) -> dict:
     """
     Aggregate MasterData over [start, end] (inclusive; end is today for the
     open-ended current cycle). All sums use the _base column.
+
+    extra_keywords — ad-hoc salary search words for this session (e.g. from
+    `/cycle detect <words>`); they extend the stored keyword list without being
+    persisted to the Excel workbook.
 
     unaccounted = salary received − tracked expenses − tracked savings;
     negative means over-reported.
@@ -462,7 +471,7 @@ def cycle_totals(df: pd.DataFrame, start: date, end: date) -> dict:
     income  = sub[sub["Type"] == "Income"]["_base"].sum()
     expense = sub[sub["Type"] == "Expense"]["_base"].sum()
     savings = sub[sub["Type"] == "Savings"]["_base"].sum()
-    salary = sub[salary_mask(sub)]["_base"].sum()
+    salary = sub[salary_mask(sub, extra_keywords)]["_base"].sum()
     return {
         "sub": sub,
         "income": income,
