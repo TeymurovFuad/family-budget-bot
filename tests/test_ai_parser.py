@@ -6,7 +6,8 @@ and the prompt-building helpers.
 
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+from datetime import datetime, time as dtime
 
 from ai_parser import (
     _strip_fences,
@@ -18,6 +19,7 @@ from ai_parser import (
     _salvage_rows,
     _PARSE_SYSTEM_PROMPT,
     _QUICK_SYSTEM_PROMPT,
+    is_off_peak,
 )
 
 
@@ -538,3 +540,24 @@ def test_salvage_rows_falls_back_to_object_salvage_for_legacy_format():
     assert len(result) > 0
     assert result[0]["date"] == "2026-01-01"
     assert result[0]["value"] == 45.0
+
+
+# ── is_off_peak ────────────────────────────────────────────────────────────────
+
+def _mock_utcnow(h: int, m: int):
+    """Return a context manager that patches datetime.utcnow() to a fixed time."""
+    import ai_parser
+    mock_dt = MagicMock()
+    mock_dt.utcnow.return_value = datetime(2026, 1, 1, h, m, 0)
+    return patch.object(ai_parser, "datetime", mock_dt)
+
+
+@pytest.mark.parametrize("h,m,expected", [
+    (17, 0,  True),   # 17:00 UTC — inside window
+    (0,  15, True),   # 00:15 UTC — inside window (after-midnight segment)
+    (12, 0,  False),  # 12:00 UTC — outside window
+    (0,  31, False),  # 00:31 UTC — just past the window end
+])
+def test_is_off_peak(h, m, expected):
+    with _mock_utcnow(h, m):
+        assert is_off_peak() == expected
