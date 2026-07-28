@@ -20,6 +20,31 @@ from cycles import (
     record_cycle_starts_batch, should_prompt_new_cycle,
 )
 
+_CYCLES_DISABLED_MSG = (
+    "Budget cycles are disabled\\. Set `BUDGET_CYCLE=1` in \\.env and restart\\."
+)
+
+_NOTHING_TO_BACKFILL_MSG = (
+    "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
+    "If a salary is missing, add its transfer title as a search word: "
+    "`/cycle detect wages`\\."
+)
+
+_BACKFILL_COMPLETE_REVIEWED_MSG = (
+    "✅ Backfill complete\\! All boundaries have been reviewed\\."
+)
+
+_BACKFILL_COMPLETE_RECORDED_MSG = (
+    "✅ Backfill complete\\! All boundaries have been recorded\\."
+)
+
+_DETECT_CANCELLED_MSG = "🛑 Cancelled\\."
+
+_DETECT_CUSTOM_DATE_MSG = (
+    "📅 Send `/cycle started YYYY\\-MM\\-DD` with the date the cycle "
+    "should start from\\."
+)
+
 _CYCLE_USAGE = (
     "💰 *Budget cycles* — track spending per salary period instead of "
     "calendar months. A cycle starts when your salary arrives and ends "
@@ -194,7 +219,7 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     """Handle /cycle detect — scan history and backfill cycle boundaries."""
     if not settings.BUDGET_CYCLE:
         await update.message.reply_text(
-            "Budget cycles are disabled\\. Set `BUDGET_CYCLE=1` in \\.env and restart\\.",
+            _CYCLES_DISABLED_MSG,
             parse_mode="MarkdownV2",
         )
         return
@@ -246,9 +271,7 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         )
         if not fallback:
             await update.message.reply_text(
-                "✅ Nothing to backfill — no unrecorded salary payments found\\.\n"
-                "If a salary is missing, add its transfer title as a search word: "
-                "`/cycle detect wages`\\.",
+                _NOTHING_TO_BACKFILL_MSG,
                 parse_mode="MarkdownV2",
             )
             return
@@ -389,7 +412,7 @@ async def _advance_detect_queue(message, ctx: ContextTypes.DEFAULT_TYPE) -> None
         ctx.user_data.pop("detect_total", None)
         ctx.user_data.pop("detect_recorded", None)
         await message.reply_text(
-            "✅ Backfill complete\\! All boundaries have been reviewed\\.",
+            _BACKFILL_COMPLETE_REVIEWED_MSG,
             parse_mode="MarkdownV2",
         )
 
@@ -417,7 +440,7 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
             parse_mode="MarkdownV2",
         )
         await query.message.reply_text(
-            "✅ Backfill complete\\! All boundaries have been recorded\\.",
+            _BACKFILL_COMPLETE_RECORDED_MSG,
             parse_mode="MarkdownV2",
         )
         return
@@ -434,7 +457,7 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
 
     if data == "detect:cancel":
         ctx.user_data.pop("detect_candidates", None)
-        await query.edit_message_text("🛑 Cancelled\\.", parse_mode="MarkdownV2")
+        await query.edit_message_text(_DETECT_CANCELLED_MSG, parse_mode="MarkdownV2")
         return
 
     if data.startswith("detect:pick:"):
@@ -481,8 +504,7 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
 
     if data == "detect:custom":
         await query.edit_message_text(
-            "📅 Send `/cycle started YYYY\\-MM\\-DD` with the date the cycle "
-            "should start from\\.",
+            _DETECT_CUSTOM_DATE_MSG,
             parse_mode="MarkdownV2",
         )
         await _advance_detect_queue(query.message, ctx)

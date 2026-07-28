@@ -27,6 +27,14 @@ if str(PROJECT_ROOT) not in sys.path:
 import config
 import handlers.misc
 from handlers.misc import cmd_help, cmd_start
+from handlers.cycle import (
+    _CYCLES_DISABLED_MSG,
+    _NOTHING_TO_BACKFILL_MSG,
+    _BACKFILL_COMPLETE_REVIEWED_MSG,
+    _BACKFILL_COMPLETE_RECORDED_MSG,
+    _DETECT_CANCELLED_MSG,
+    _DETECT_CUSTOM_DATE_MSG,
+)
 
 from tests.mdv2_helpers import (
     assert_valid_markdown_v2,
@@ -157,6 +165,23 @@ async def test_cmd_help_subcommand_is_valid_markdown_v2(
     await handler(update, make_ctx(args=["help"]))
 
     assert_valid_markdown_v2(_get_reply(update), f"/{handler_name} help")
+
+
+# ── additional static MarkdownV2 strings ─────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "label,text",
+    [
+        ("cycle/cycles-disabled", _CYCLES_DISABLED_MSG),
+        ("cycle/nothing-to-backfill", _NOTHING_TO_BACKFILL_MSG),
+        ("cycle/backfill-complete-reviewed", _BACKFILL_COMPLETE_REVIEWED_MSG),
+        ("cycle/backfill-complete-recorded", _BACKFILL_COMPLETE_RECORDED_MSG),
+        ("cycle/detect-cancelled", _DETECT_CANCELLED_MSG),
+        ("cycle/detect-custom-date", _DETECT_CUSTOM_DATE_MSG),
+    ],
+)
+def test_static_markdownv2_strings_are_valid(label, text):
+    assert_valid_markdown_v2(text, label)
 
 
 # ── validator self-tests ──────────────────────────────────────────────────────
