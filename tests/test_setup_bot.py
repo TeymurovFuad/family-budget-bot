@@ -128,7 +128,7 @@ class TestCollectConfig:
         assert values["TELEGRAM_BOT_TOKEN"] == "123:abc"
         assert values["ALLOWED_TELEGRAM_IDS"] == "42"
         assert values["DEEPSEEK_API_KEY"] == ""
-        assert values["TIMEZONE"] == "Europe/Warsaw"
+        assert values["TIMEZONE"] == "UTC"
         assert values["DISPLAY_CURRENCY"] == "USD"
         assert values["STORAGE_BACKEND"] == "local"
         assert values["XLSX_PATH"] == "data/Expenses_Improved.xlsx"

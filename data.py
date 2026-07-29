@@ -101,7 +101,7 @@ def load_reference_data() -> dict:
     def _load() -> dict:
         lists = load_lists(get_excel_path_for_reading())
         rates = load_rates()
-        lists["currencies"] = list(rates.keys()) if rates else ["PLN"]
+        lists["currencies"] = list(rates.keys()) if rates else [settings.DISPLAY_CURRENCY]
         return lists
 
     cached = _cached("reference_data", _load)
@@ -123,7 +123,7 @@ def load_rates() -> dict[str, float]:
     """
     Read currency rate table from the Lists sheet.
     Column positions are resolved via ListsSchema — no hardcoded positions.
-    Returns {currency_code: pln_per_unit}. Falls back to {"PLN": 1.0}.
+    Returns {currency_code: pln_per_unit}. Falls back to {settings.DISPLAY_CURRENCY: 1.0}.
     Cached — see the reference-data TTL cache above.
     """
     def _load() -> dict[str, float]:
@@ -131,7 +131,7 @@ def load_rates() -> dict[str, float]:
             return load_currency_rates_from_path(get_excel_path_for_reading())
         except Exception as e:
             log.warning("Could not load currency rates: %s", e)
-            return {"PLN": 1.0}
+            return {settings.DISPLAY_CURRENCY: 1.0}
 
     return dict(_cached("rates", _load))
 

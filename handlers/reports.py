@@ -602,9 +602,9 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     for i, (_, row) in enumerate(sub.iterrows(), 1):
         desc     = row.get("Description", "") or ""
         cat      = row.get("Category", "?")
-        orig_ccy = str(row.get("Currency", "PLN"))
+        orig_ccy = str(row.get("Currency") or settings.DISPLAY_CURRENCY)
         orig_val = row.get("Value", row["_base"])
-        extra    = f" ({orig_val:,.0f} {orig_ccy})" if orig_ccy != "PLN" and orig_ccy != ccy else ""
+        extra    = f" ({orig_val:,.0f} {orig_ccy})" if orig_ccy != settings.DISPLAY_CURRENCY and orig_ccy != ccy else ""
         lines.append(
             f"{i}. `{format_base_as_currency(row['_base'], ccy, rates)}`{extra} — "
             f"{desc or cat} _{cat}_"
@@ -853,7 +853,7 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 raw_ccy.upper(): round(1 / raw_rate, 4)
                 for raw_ccy, raw_rate in data["rates"].items() if raw_rate > 0
             }
-            live["PLN"] = 1.0
+            live[settings.DISPLAY_CURRENCY] = 1.0
 
             lines   = [f"📡 *Live rates vs Excel* (PLN per 1 unit)\n"
                        f"_Source: frankfurter.dev — {data.get('date', 'today')}_\n"]
@@ -956,7 +956,7 @@ async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     def to_display(pln_val):
         r = rates.get(ccy, 1)
-        return pln_val if ccy == "PLN" else (pln_val / r if r else pln_val)
+        return pln_val if ccy == settings.DISPLAY_CURRENCY else (pln_val / r if r else pln_val)
 
     values  = [to_display(v) for v in by_cat.values]
     labels  = list(by_cat.index)

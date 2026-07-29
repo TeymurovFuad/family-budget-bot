@@ -87,7 +87,7 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
     """
     Read {currency_code: rate_to_base} from the Lists sheet.
     Uses ListsSchema to locate columns by header name — no positional assumptions.
-    Returns {"PLN": 1.0} on any failure.
+    Returns {settings.DISPLAY_CURRENCY: 1.0} on any failure.
     """
     import re
     try:
@@ -98,7 +98,7 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
         ccy_col  = idx.get("currency")
         rate_col = idx.get("rate_to_base")
         if not ccy_col or not rate_col:
-            return {"PLN": 1.0}
+            return {settings.DISPLAY_CURRENCY: 1.0}
         rates: dict[str, float] = {}
         for row in range(2, ws.max_row + 1):
             ccy  = ws.cell(row, ccy_col).value
@@ -111,9 +111,9 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
                     rates[ccy_str] = float(rate)
                 except (TypeError, ValueError):
                     pass
-        return rates or {"PLN": 1.0}
+        return rates or {settings.DISPLAY_CURRENCY: 1.0}
     except Exception:
-        return {"PLN": 1.0}
+        return {settings.DISPLAY_CURRENCY: 1.0}
 
 
 # ── Shared MasterData row writer ──────────────────────────────────────────────
