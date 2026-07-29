@@ -357,7 +357,12 @@ async def _begin_fresh(update: Update, ctx) -> int:
 @auth_write
 @log_call()
 async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    had_stale_session = _SK in ctx.user_data
     ctx.user_data.pop(_SK, None)
+    if had_stale_session:
+        await _reply(update,
+                     "⚠️ Previous setup session was abandoned. "
+                     "Any unsaved category edits are lost. Starting fresh.")
     if not _workbook_exists():
         return await _begin_fresh(update, ctx)
 
