@@ -83,6 +83,7 @@ def _session(ctx) -> dict:
     return ctx.user_data.setdefault(_SK, {
         "categories": [], "budgets": {}, "budget_queue": [],
         "pending_rename": None, "pending_add": None, "currency": None,
+        "renames": [],  # list of (old_name, new_name) for cascade on commit
     })
 
 
@@ -161,6 +162,7 @@ def _commit_categories(session: dict) -> None:
     from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, sync_cycle_dashboard_categories
     from excel_schema import (
         ListsSchema, col_indices, header_of, sync_dashboard_categories,
+        rename_category_in_workbook,
     )
     from file_storage import ExcelFileContext, atomic_save
 
@@ -191,6 +193,11 @@ def _commit_categories(session: dict) -> None:
             ws.cell(i, typ_col, types.get(name, "Expense"))
             if bud_col and old_budgets.get(name) is not None:
                 ws.cell(i, bud_col, old_budgets[name])
+        # cascade: MasterData rows + Dashboard values + formula literals (Lists!C handled above)
+        for old_name, new_name in session.get("renames", []):
+            counts = rename_category_in_workbook(wb, old_name, new_name)
+            log.info("/setup: cascaded rename '%s' → '%s': %s", old_name, new_name, counts)
+        session["renames"] = []
         sync_dashboard_categories(wb, names)
         if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
             sync_cycle_dashboard_categories(wb)
@@ -357,7 +364,15 @@ async def _begin_fresh(update: Update, ctx) -> int:
 @auth_write
 @log_call()
 async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    ctx.user_data.pop(_SK, None)
+    stale = ctx.user_data.pop(_SK, None)
+    if stale:
+        had_renames = bool(stale.get("renames"))
+        if had_renames:
+            msg = ("⚠️ A previous setup session was still open — "
+                   "unsaved category edits have been discarded. Starting fresh.")
+        else:
+            msg = "↩️ Restarting setup."
+        await _reply(update, msg)
     if not _workbook_exists():
         return await _begin_fresh(update, ctx)
 
@@ -516,9 +531,11 @@ async def setup_rename_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> i
     session["categories"][idx] = (new, typ)
     if old in session["budgets"]:
         session["budgets"][new] = session["budgets"].pop(old)
+    session.setdefault("renames", []).append((old, new))
     session["pending_rename"] = None
     await update.message.reply_text(
-        f"✅ *{old}* → *{new}*", parse_mode="Markdown")
+        f"✅ *{old}* → *{new}* _(applies when you confirm setup)_",
+        parse_mode="Markdown")
     return await _show_review(update, ctx)
 
 
@@ -705,5 +722,8 @@ def setup_conversation_handler() -> ConversationHandler:
             ],
             SETUP_SUMMARY: [CallbackQueryHandler(setup_summary_cb, pattern="^setup:")],
         },
-        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", setup_cancel),
+            CommandHandler("setup", cmd_setup),
+        ],
     )
