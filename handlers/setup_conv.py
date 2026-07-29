@@ -83,6 +83,7 @@ def _session(ctx) -> dict:
     return ctx.user_data.setdefault(_SK, {
         "categories": [], "budgets": {}, "budget_queue": [],
         "pending_rename": None, "pending_add": None, "currency": None,
+        "renames": [],  # list of (old_name, new_name) for cascade on commit
     })
 
 
@@ -161,6 +162,7 @@ def _commit_categories(session: dict) -> None:
     from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, sync_cycle_dashboard_categories
     from excel_schema import (
         ListsSchema, col_indices, header_of, sync_dashboard_categories,
+        rename_category_in_workbook,
     )
     from file_storage import ExcelFileContext, atomic_save
 
@@ -195,6 +197,10 @@ def _commit_categories(session: dict) -> None:
         if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
             sync_cycle_dashboard_categories(wb)
         _extend_category_validation(wb, len(names))
+        for old_name, new_name in session.get("renames", []):
+            counts = rename_category_in_workbook(wb, old_name, new_name)
+            log.info("/setup: cascaded rename '%s' → '%s': %s", old_name, new_name, counts)
+        session["renames"] = []
         atomic_save(wb, excel_path)
     log.info("/setup: committed %d categories", len(names))
 
@@ -521,6 +527,7 @@ async def setup_rename_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> i
     session["categories"][idx] = (new, typ)
     if old in session["budgets"]:
         session["budgets"][new] = session["budgets"].pop(old)
+    session.setdefault("renames", []).append((old, new))
     session["pending_rename"] = None
     await update.message.reply_text(
         f"✅ *{old}* → *{new}*", parse_mode="Markdown")
