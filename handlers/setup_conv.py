@@ -363,12 +363,15 @@ async def _begin_fresh(update: Update, ctx) -> int:
 @auth_write
 @log_call()
 async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    had_stale_session = _SK in ctx.user_data
-    ctx.user_data.pop(_SK, None)
-    if had_stale_session:
-        await _reply(update,
-                     "⚠️ Previous setup session was abandoned. "
-                     "Any unsaved category edits are lost. Starting fresh.")
+    stale = ctx.user_data.pop(_SK, None)
+    if stale:
+        had_renames = bool(stale.get("renames"))
+        if had_renames:
+            msg = ("⚠️ A previous setup session was still open — "
+                   "unsaved category edits have been discarded. Starting fresh.")
+        else:
+            msg = "↩️ Restarting setup."
+        await _reply(update, msg)
     if not _workbook_exists():
         return await _begin_fresh(update, ctx)
 
@@ -530,7 +533,8 @@ async def setup_rename_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> i
     session.setdefault("renames", []).append((old, new))
     session["pending_rename"] = None
     await update.message.reply_text(
-        f"✅ *{old}* → *{new}*", parse_mode="Markdown")
+        f"✅ *{old}* → *{new}* _(applies when you confirm setup)_",
+        parse_mode="Markdown")
     return await _show_review(update, ctx)
 
 
