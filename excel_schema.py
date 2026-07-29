@@ -21,7 +21,7 @@ Usage
 
 from dataclasses import dataclass, field, fields
 from datetime import date
-from typing import Any
+from typing import Any, TypedDict
 
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
@@ -356,7 +356,14 @@ def repair_dashboard_bounds(wb) -> int:
 
 # ── Category cascade rename ───────────────────────────────────────────────────
 
-def rename_category_in_workbook(wb, old_name: str, new_name: str) -> dict[str, int]:
+
+class RenameCounts(TypedDict):
+    MasterData: int
+    Dashboard: int
+    Formulas: int
+
+
+def rename_category_in_workbook(wb, old_name: str, new_name: str) -> RenameCounts:
     """
     Rename a category everywhere inside an already-open workbook object:
       - MasterData Category column (all data rows)
@@ -364,10 +371,15 @@ def rename_category_in_workbook(wb, old_name: str, new_name: str) -> dict[str, i
       - Formula string literals in Dashboard + Monthly Summary
 
     Returns counts per area. Does NOT save — caller must atomic_save.
-    Lists!C and bulk drafts are handled by the caller (_commit_categories
-    and rename_category.py respectively).
+
+    Caller responsibilities (NOT handled here):
+      - Lists!C category name cell (caller writes the full category list)
+      - Bulk draft JSON files (rename_category.py handles these for the CLI path)
+
+    Note: formula literal replacement assumes standard ASCII double-quote characters.
+    Workbooks edited on some locales may use curly quotes — matches would silently fail.
     """
-    counts: dict[str, int] = {"MasterData": 0, "Dashboard": 0, "Formulas": 0}
+    counts: RenameCounts = {"MasterData": 0, "Dashboard": 0, "Formulas": 0}
 
     # MasterData: Category column
     if "MasterData" in wb.sheetnames:
