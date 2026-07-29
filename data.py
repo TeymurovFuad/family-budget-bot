@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+import settings
 from config import log
 from excel_schema import MasterDataSchema, header_of, load_currency_rates_from_path
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
@@ -160,8 +161,8 @@ def load_data() -> pd.DataFrame:
         df["_base"] = pd.to_numeric(df["Value"], errors="coerce")
 
     if "Currency" not in df.columns:
-        df["Currency"] = "PLN"
-    df["Currency"] = df["Currency"].fillna("PLN")
+        df["Currency"] = settings.DISPLAY_CURRENCY
+    df["Currency"] = df["Currency"].fillna(settings.DISPLAY_CURRENCY)
 
     # Recompute _base for any row where the formula cache is missing
     missing = df["_base"].isna() & df["Value"].notna()

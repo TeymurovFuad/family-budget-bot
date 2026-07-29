@@ -69,12 +69,12 @@ def load_transaction_data() -> pd.DataFrame:
     df["Value"]      = pd.to_numeric(df["Value"], errors="coerce")
     df["Year"]       = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")
     df["IsDone"]     = df["IsDone"].fillna(True).astype(bool)
-    df["Currency"]   = df["Currency"].fillna("PLN")
+    df["Currency"]   = df["Currency"].fillna(DISPLAY_CURRENCY)
     missing = df["amount_base"].isna() & df["Value"].notna()
     if missing.any():
         rates = load_currency_rates()
         df.loc[missing, "amount_base"] = df.loc[missing].apply(
-            lambda r: r["Value"] * rates.get(str(r.get("Currency", "PLN")).upper(), 1.0),
+            lambda r: r["Value"] * rates.get(str(r.get("Currency", DISPLAY_CURRENCY)).upper(), 1.0),
             axis=1,
         )
     return df.dropna(subset=["amount_base", "Type", "Year", "Month"])

@@ -35,6 +35,7 @@ RENAMES = {
     "Value (PLN)": "Value (base)",
     "Budget (PLN)": "Budget (base)",
     "Rate to PLN": "Rate to base",
+    "Goal (PLN)": "Goal",
 }
 
 

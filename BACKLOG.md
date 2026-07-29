@@ -791,8 +791,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       instead of startup-only.
 - [x] **Lost-update protection for remote backends** — `ExcelFileContext` does blind
       download→modify→upload; use GCS generation / S3 ETag preconditions and retry on conflict.
-- [ ] **_load_bulk_drafts reads every user's file** — called 3× per message just to fetch one
-      user's draft; read `_user_draft_path(uid)` directly.
+- [x] **_load_bulk_drafts reads every user's file** — called 3× per message just to fetch one
+      user's draft; read `_user_draft_path(uid)` directly. `_load_user_draft` in `bulk_conv.py:794-804` already reads single file.
 - [x] **Split file_storage god module** — backends / workbook repo / template concerns;
       backend selection should honor `STORAGE_BACKEND` strictly (a stray `GCS_BUCKET_NAME`
       env var currently overrides `STORAGE_BACKEND=local`).

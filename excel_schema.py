@@ -23,6 +23,8 @@ from dataclasses import dataclass, field, fields
 from datetime import date
 from typing import Any, TypedDict
 
+import settings
+
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
 
@@ -204,13 +206,13 @@ def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     ws.cell(r, c("is_done",      10), True if is_done is None else bool(is_done))
 
     ccy_col = c("currency", 11)
-    ws.cell(r, ccy_col, row.get("currency", "PLN"))
+    ws.cell(r, ccy_col, row.get("currency") or settings.DISPLAY_CURRENCY)
 
     vbase_col    = c("value_base", 12)
     value_letter = get_column_letter(c("value", 4))
     ccy_letter   = get_column_letter(ccy_col)
     ws.cell(r, vbase_col,
-        f'=IF(OR({ccy_letter}{r}="",{ccy_letter}{r}="PLN"),'
+        f'=IF(OR({ccy_letter}{r}="",{ccy_letter}{r}="{settings.DISPLAY_CURRENCY}"),'
         f'{value_letter}{r},'
         f'{value_letter}{r}*VLOOKUP({ccy_letter}{r},Lists!{lu_range},2,0))'
     )
@@ -619,7 +621,7 @@ class ListsSchema:
     rate_to_base: Any = col("Rate to base")
     goal_name:   Any = col("Goal Name")
     alloc_pct:   Any = col("Alloc %")
-    goal_pln:    Any = col("Goal (PLN)")
+    goal_base:   Any = col("Goal")
     salary_keyword: Any = col("Salary Keywords")
 
 
