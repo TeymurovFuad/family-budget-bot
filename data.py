@@ -221,7 +221,7 @@ def load_dedup_evidence(start=None, end=None) -> dict:
         for i in df.index[mask]:
             date_iso = dates.loc[i].date().isoformat()
             value = df.at[i, value_h]
-            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else "PLN"
+            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else settings.DISPLAY_CURRENCY
             desc = df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else ""
             strict_key = make_dedup_key(date_iso, value, ccy, desc)
             loose_key = make_loose_dedup_key(date_iso, value, ccy)

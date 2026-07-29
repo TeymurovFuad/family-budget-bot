@@ -187,3 +187,43 @@ class TestMigrateScriptIncludesGoalPln:
         renames = mod.RENAMES
         assert "Goal (PLN)" in renames
         assert renames["Goal (PLN)"] == "Goal"
+
+
+# ── test 7: load_dedup_evidence null-currency fallback uses settings ──────────
+
+class TestLoadDedupEvidenceNullCurrency:
+
+    def test_load_dedup_evidence_null_currency_uses_settings(self, excel_path, monkeypatch):
+        import settings
+        import data as data_mod
+
+        monkeypatch.setattr(settings, "DISPLAY_CURRENCY", "EUR")
+        monkeypatch.setattr(data_mod, "get_excel_path_for_reading", lambda: excel_path)
+
+        # Write a row with a null Currency value
+        _build_masterdata_excel(excel_path, [{
+            "Date":         datetime.date(2024, 6, 1),
+            "Year":         2024,
+            "Month":        "Jun",
+            "Value":        99.0,
+            "Value (base)": 99.0,
+            "Type":         "Expense",
+            "IsDone":       True,
+            # Currency intentionally absent → NaN → should fall back to settings.DISPLAY_CURRENCY
+        }])
+
+        evidence = data_mod.load_dedup_evidence()
+        from validators import make_dedup_key, make_loose_dedup_key
+        expected_strict = make_dedup_key("2024-06-01", 99.0, "EUR", "")
+        expected_loose  = make_loose_dedup_key("2024-06-01", 99.0, "EUR")
+        unexpected_strict = make_dedup_key("2024-06-01", 99.0, "PLN", "")
+        unexpected_loose  = make_loose_dedup_key("2024-06-01", 99.0, "PLN")
+
+        assert expected_strict in evidence["strict"], (
+            f"Expected strict key for EUR not found. Keys: {list(evidence['strict'].keys())}"
+        )
+        assert expected_loose in evidence["loose"], (
+            f"Expected loose key for EUR not found. Keys: {list(evidence['loose'].keys())}"
+        )
+        assert unexpected_strict not in evidence["strict"], "PLN strict key should not be present"
+        assert unexpected_loose  not in evidence["loose"],  "PLN loose key should not be present"
