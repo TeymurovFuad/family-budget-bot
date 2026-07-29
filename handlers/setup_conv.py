@@ -193,14 +193,14 @@ def _commit_categories(session: dict) -> None:
             ws.cell(i, typ_col, types.get(name, "Expense"))
             if bud_col and old_budgets.get(name) is not None:
                 ws.cell(i, bud_col, old_budgets[name])
-        sync_dashboard_categories(wb, names)
-        if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
-            sync_cycle_dashboard_categories(wb)
-        _extend_category_validation(wb, len(names))
         for old_name, new_name in session.get("renames", []):
             counts = rename_category_in_workbook(wb, old_name, new_name)
             log.info("/setup: cascaded rename '%s' → '%s': %s", old_name, new_name, counts)
         session["renames"] = []
+        sync_dashboard_categories(wb, names)
+        if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
+            sync_cycle_dashboard_categories(wb)
+        _extend_category_validation(wb, len(names))
         atomic_save(wb, excel_path)
     log.info("/setup: committed %d categories", len(names))
 
