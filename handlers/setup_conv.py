@@ -705,5 +705,8 @@ def setup_conversation_handler() -> ConversationHandler:
             ],
             SETUP_SUMMARY: [CallbackQueryHandler(setup_summary_cb, pattern="^setup:")],
         },
-        fallbacks=[CommandHandler("cancel", setup_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", setup_cancel),
+            CommandHandler("setup", cmd_setup),
+        ],
     )
