@@ -21,7 +21,7 @@ Usage
 
 from dataclasses import dataclass, field, fields
 from datetime import date
-from typing import Any
+from typing import Any, TypedDict
 
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
@@ -352,6 +352,73 @@ def repair_dashboard_bounds(wb) -> int:
                     cell.value = new_val
                     updated += 1
     return updated
+
+
+# ── Category cascade rename ───────────────────────────────────────────────────
+
+
+class RenameCounts(TypedDict):
+    MasterData: int
+    Dashboard: int
+    Formulas: int
+
+
+def rename_category_in_workbook(wb, old_name: str, new_name: str) -> RenameCounts:
+    """
+    Rename a category everywhere inside an already-open workbook object:
+      - MasterData Category column (all data rows)
+      - Dashboard plain-value cells
+      - Formula string literals in Dashboard + Monthly Summary
+
+    Returns counts per area. Does NOT save — caller must atomic_save.
+
+    Caller responsibilities (NOT handled here):
+      - Lists!C category name cell (caller writes the full category list)
+      - Bulk draft JSON files (rename_category.py handles these for the CLI path)
+
+    Note: formula literal replacement assumes standard ASCII double-quote characters.
+    Workbooks edited on some locales may use curly quotes — matches would silently fail.
+    """
+    counts: RenameCounts = {"MasterData": 0, "Dashboard": 0, "Formulas": 0}
+
+    # MasterData: Category column
+    if "MasterData" in wb.sheetnames:
+        ws = wb["MasterData"]
+        cat_col = next(
+            (c for c in range(1, ws.max_column + 1)
+             if str(ws.cell(1, c).value or "").strip() == "Category"),
+            None,
+        )
+        if cat_col:
+            for r in range(2, ws.max_row + 1):
+                if str(ws.cell(r, cat_col).value or "").strip() == old_name:
+                    ws.cell(r, cat_col, new_name)
+                    counts["MasterData"] += 1
+
+    # Dashboard: plain-value cells (budget table rows use plain strings)
+    if "Dashboard" in wb.sheetnames:
+        ws = wb["Dashboard"]
+        for r in range(1, ws.max_row + 1):
+            for c in range(1, ws.max_column + 1):
+                v = ws.cell(r, c).value
+                if isinstance(v, str) and v.strip() == old_name:
+                    ws.cell(r, c, new_name)
+                    counts["Dashboard"] += 1
+
+    # Formula literals in Dashboard + Monthly Summary
+    old_lit, new_lit = f'"{old_name}"', f'"{new_name}"'
+    for sheet_name in ("Dashboard", "Monthly Summary"):
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        for row in ws.iter_rows():
+            for cell in row:
+                v = cell.value
+                if isinstance(v, str) and v.startswith("=") and old_lit in v:
+                    cell.value = v.replace(old_lit, new_lit)
+                    counts["Formulas"] += 1
+
+    return counts
 
 
 # ── Monthly Summary auto-population ──────────────────────────────────────────

@@ -65,7 +65,7 @@ def fresh_session():
     return {
         "categories": list(DEFAULT_CATEGORIES), "budgets": {},
         "budget_queue": [], "pending_rename": None, "pending_add": None,
-        "currency": None,
+        "currency": None, "renames": [],
     }
 
 
@@ -179,6 +179,29 @@ class TestSetupEntry:
         src = inspect.getsource(mod)
         assert "@auth_write\n@log_call()\nasync def cmd_setup" in src
 
+    def test_stale_session_with_renames_warns_discarded(self, excel_path):
+        stale = fresh_session()
+        stale["renames"] = [("Groceries", "Food")]
+        upd, ctx = make_update(), make_ctx(stale)
+        run(cmd_setup(upd, ctx))
+        out = replies(upd)
+        assert "still open" in out
+
+    def test_stale_session_no_renames_shows_restart(self, excel_path):
+        stale = fresh_session()  # renames == []
+        upd, ctx = make_update(), make_ctx(stale)
+        run(cmd_setup(upd, ctx))
+        out = replies(upd)
+        assert "↩️ Restarting setup." in out
+        assert "discarded" not in out
+
+    def test_no_stale_session_no_warning(self, excel_path):
+        upd, ctx = make_update(), make_ctx()  # empty user_data
+        run(cmd_setup(upd, ctx))
+        out = replies(upd)
+        assert "still open" not in out
+        assert "Restarting" not in out
+
     def test_start_with_file_falls_through_to_menu(self, excel_path):
         upd, ctx = make_update(), make_ctx()
         with patch("handlers.menu.cmd_menu", new_callable=AsyncMock) as menu:
@@ -221,6 +244,27 @@ class TestCategorySteps:
         assert run(setup_rename_text(upd3, ctx)) == SETUP_REVIEW
         assert session["categories"][3] == ("Food", "Expense")
         assert "✅ *Groceries* → *Food*" in replies(upd3)
+        assert session["renames"] == [("Groceries", "Food")]
+
+    def test_two_sequential_renames_accumulate(self, excel_path):
+        session = fresh_session()
+        ctx = make_ctx(session)
+
+        # First rename: Groceries (index 3) → Food
+        upd1 = make_update(callback_data="setup:ren:3")
+        run(setup_rename_cb(upd1, ctx))
+        upd2 = make_update(text="Food")
+        run(setup_rename_text(upd2, ctx))
+
+        # Second rename: Transport (index 4) → Commute
+        upd3 = make_update(callback_data="setup:ren:4")
+        run(setup_rename_cb(upd3, ctx))
+        upd4 = make_update(text="Commute")
+        run(setup_rename_text(upd4, ctx))
+
+        assert ("Groceries", "Food") in session["renames"]
+        assert ("Transport", "Commute") in session["renames"]
+        assert len(session["renames"]) == 2
 
     def test_cancel_mid_rename_discards_pending(self, excel_path):
         session = fresh_session()
@@ -383,6 +427,8 @@ class TestHandlerFactory:
             SETUP_WELCOME, SETUP_REVIEW, SETUP_RENAME, SETUP_ADD,
             SETUP_BUDGET, SETUP_CURRENCY, SETUP_SUMMARY, SETUP_REMOVE,
         }
+        fallback_cmds = {cmd for h in handler.fallbacks for cmd in getattr(h, "commands", [])}
+        assert fallback_cmds == {"cancel", "setup"}
 
     def test_cancel_fallback(self, excel_path):
         upd, ctx = make_update(text="/cancel"), make_ctx(fresh_session())

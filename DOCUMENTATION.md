@@ -284,6 +284,18 @@ budgets + currency at the summary), so `/cancel` keeps everything already
 confirmed. Running `/setup` again on a configured workbook asks for
 confirmation first, then lets you edit the existing categories and budgets.
 
+Sending `/setup` while a setup session is already in progress restarts it
+immediately. The bot warns: "Previous setup session was abandoned. Any unsaved
+category edits are lost." No `/cancel` is needed first.
+
+When you rename a category during setup, the rename cascades automatically
+through all existing data — MasterData rows, Dashboard plain-value cells, and
+formula string literals are all updated in one step, equivalent to running
+`scripts/rename_category.py`. For normal use the bot handles this; run
+`scripts/rename_category.py` only when renaming categories in a workbook the
+bot cannot reach directly (offline migration, shared file on a different
+machine).
+
 ### Scheduled Reports
 
 | When | What |
