@@ -12,51 +12,51 @@ Open items after Wave 2, regrouped by theme.
 
 Statement parsing, bulk preview, dedup UX, and person attribution.
 
-- [ ] **Statement profile saved with wrong decimal separator corrupts every amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400 rows imported with 100× inflated values. Three compounding gaps: (a) profile list (`/bulk profile`) doesn't show the separator; (b) debit/credit-split proposal message omits the separator entirely; (c) "Fix a column" can only remap columns — separator, date format, and sign convention cannot be corrected in the confirm flow. Also add a sanity check: sample amount values like `79.99` (2 digits after ".") contradict comma-decimal — validate proposal against samples before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
-- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement` returns no category; `_normalize_parsed_rows` defaults empties to "Other"; merchant memory only helps for known merchants (empty on first import). The AI-categorization step for unknown merchants (BACKLOG "known format" design: "AI only for unknown merchants") was never wired into the statement path. 1400 rows imported as Other. (`handlers/bulk_conv.py` `_finish_profile_parse`)
-- [ ] **Bulk preview separator orphan at page break** — when a page boundary falls between a row and its following `──────────` rule, the rule appears as the first line of the next page. Fix: skip appending the separator if it would be the first item on a new page. (`handlers/bulk_conv.py` `_format_bulk_preview`)
-- [ ] **Report chunking can break Markdown entities** — `cmd_report` raw 4000-char split; reuse the paginated-send helper from bulk_conv.
+- [x] **Statement profile saved with wrong decimal separator corrupts every amount (79.99 → 7999)** — fixed: (a) profile list shows separator (`bulk_conv.py:75-77`); (b) debit/credit-split message includes separator (`bulk_conv.py:284-287`); (c) "Fix settings" keyboard handles decimal/date/sign (`bulk_conv.py:345-351`); (d) `validate_proposal_against_samples` sanity check (`statement_profiles.py:568-602`, called at `bulk_conv.py:1818`).
+- [x] **Statement imports categorize everything as 'Other'** — fixed: `_apply_ai_categorization` wired into `_do_finish_profile_parse` (`bulk_conv.py:485-487`).
+- [x] **Bulk preview separator orphan at page break** — fixed: `_format_bulk_preview` strips trailing separators before flushing each page (`bulk_conv.py:1395-1397`).
+- [ ] **Report chunking can break Markdown entities** — PARTIAL: `cmd_report` now splits at `━━━` section-break lines instead of raw 4000-char split (`reports.py:793-820`), preventing mid-span splits. Does not yet reuse the paginated-send helper from bulk_conv.
 - [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never improvised"). Deliberate re-alignment pass, not urgent.
-- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays. /add: move person out of the mandatory flow (default household, edit from confirm card).
+- [x] **Person attribution per import** — fixed: `_finish_profile_parse` returns `BULK_PERSON` state, `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`); also stamped in the AI text/image path (`bulk_conv.py:1898-1902`).
 - [ ] **Bulk draft archival instead of naming change** — drafts (`data/bulk_drafts/{uid}.json`) ARE deleted after successful save and on cancel (verified). Improvement: on save, move to `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` instead of deleting — cheap audit trail of what each import contained; prune archive >6 months on startup.
 
 ### Group 2 — Cycles, reports & data quality
 
 Cycle correctness, PLN neutrality, schema cleanup, and reporting gaps.
 
-- [ ] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — boundaries found with per-scan words whose keyword is not in `CYCLE_DETECT_KEYWORDS` produce cycles whose salary rows count as plain income in the unaccounted math. Docs advise the .env route; consider persisting per-scan words or warning when they find matches. (`cycles.py`) *(partially done in PR #49: the detect reply now warns that per-scan keywords apply to that scan only and points at /keywords; routing the ad-hoc keywords into `cycle_totals` remains open.)*
+- [x] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — fixed in PR #74: `extra_keywords` param added to `cycle_totals` (`cycles.py:447`) and threaded through all call sites in `handlers/reports.py:66,81,647`.
 - [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!` can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed. (`cycles.py` `salary_mask`)
-- [ ] **Duplicate boundary still re-uploads on remote backends** — `record_cycle_start` returning False inside `ExcelFileContext` triggers an unnecessary upload of an unchanged workbook.
-- [ ] **Callback "yes" date not re-validated against future dates** — currently unreachable but cheap to harden. (handlers/cycle.py)
-- [ ] **Sync workbook I/O in async handlers** — `load_cycles()` / `should_prompt_new_cycle()` block the event loop; matters mainly on remote storage backends.
-- [ ] **lists_currency_range caps at row 100** — currencies beyond Lists row 100 silently ignored in every written Value (PLN) formula → #N/A. Derive the end row from actual data or use a named range. (Overlaps with "unit-less magic numbers" sweep.)
-- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`), setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm messages. `handlers/add_conv.py`: PLN equivalent note shown during /add. `handlers/reports.py`: rates display lines (`PLN per 1 unit`, `{r:.4f} PLN`). Decide per-string: use display currency where possible; keep PLN where it is the factually correct base-currency label.
-- [ ] **Default-currency fallback hardcodes PLN** — `data.py` (`fillna("PLN")`), `models.py` / `states.py` transaction defaults, `scheduled_report.py` fallback, `excel_schema.py` writer default (`row.get("currency", "PLN")`). For a public repo the fallback must come from the `DISPLAY_CURRENCY` setting (already prompted in `setup_bot.py`), not a hardcoded currency — swapping PLN for EUR/USD would repeat the same mistake. One source of truth: `settings.DISPLAY_CURRENCY`.
-- [ ] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — `excel_schema.py:236`: `goal_pln: Any = col("Goal (PLN)")` — the Pydantic field name and the Excel column header both embed "PLN". Any non-PLN user sees a "Goal (PLN)" column header in their spreadsheet and the schema attribute name is misleading. Expected: rename column header to "Goal" (or "Goal (base)") and field to `goal_base`; migration script or `ensure_lists_sheet` rename on first open so existing workbooks are upgraded transparently.
+- [x] **Duplicate boundary still re-uploads on remote backends** — fixed: `cycles.py:121-122` returns `None` when start date already exists; `handlers/cycle.py:589-598` sends "already recorded" and skips upload.
+- [x] **Callback "yes" date not re-validated against future dates** — fixed: `handlers/cycle.py:583-587` checks `if start > date.today()` before recording.
+- [ ] **Sync workbook I/O in async handlers** — `load_cycles()` / `should_prompt_new_cycle()` block the event loop in `cmd_cycle` (lines 116, 137); only `_cmd_cycle_detect` properly wraps in `run_in_executor`. Matters mainly on remote storage backends.
+- [x] **lists_currency_range caps at row 100** — fixed: `excel_schema.py:119` defines `_EXCEL_MAX_ROW = 1048576`; `lists_currency_range` uses it as the open-ended upper bound (`excel_schema.py:128`).
+- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py:103,173` rate display notes; `handlers/misc.py:196,237-238,267` setbudget labels/prompts; `handlers/add_conv.py:174` PLN equivalent note; `handlers/reports.py:858,884,886` rates display. Decide per-string: use display currency where possible; keep PLN where it is the factually correct base-currency label.
+- [ ] **Default-currency fallback hardcodes PLN** — `data.py:164` (`fillna("PLN")`), `scheduled_report.py:72`, `excel_schema.py:207` writer default, `excel_schema.py:213` Value formula condition. None use `settings.DISPLAY_CURRENCY`.
+- [ ] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — `excel_schema.py:622`: `goal_pln: Any = col("Goal (PLN)")` — rename to `goal_base` / "Goal" with migration in `ensure_lists_sheet`.
 - [ ] **Derive Year/Month from Date by formula** — MasterData carries Date + Year + Month as three independent columns; Year/Month should be formulas (`=YEAR(A2)`, `=TEXT(A2,"mmm")`) or removed entirely with Dashboard SUMIFS rewritten against Date ranges. Touches every Dashboard formula, the writers, and the schema — do as its own PR with a migration script for existing rows.
-- [ ] **Category rename support (simplify category names)** — user decision: category + description is enough granularity; e.g. rename "Gifts & Shopping" → "Shopping" (description says what kind). Needs a rename script that updates: Lists Categories cell, all matching MasterData rows, Budget row on Dashboard, and the merchant-map once it exists — otherwise historical rows and budget VLOOKUPs silently stop matching. Also update the bulk validator's fuzzy map.
+- [ ] **Category rename support (simplify category names)** — PARTIAL: `/setup` rename flow calls `rename_category_in_workbook` covering MasterData + Dashboard; `scripts/rename_category.py` covers Lists + bulk drafts. Missing: merchant map not updated on rename; no standalone bot command (rename only via `/setup` wizard or CLI script).
 - [ ] **Enforce the 50-row limit post-merge, not pre-merge** (Copilot PR review) — `_draft_limit_reached` checks the EXISTING draft before merging, so a draft at exactly 50 can still merge a 185-row import and blow past the documented maximum. Decide the rule (cap total? reject overflow rows? paginate drafts?) and enforce it after `_merge_bulk_draft` with a clear message about what was and wasn't added.
 - [ ] **Report every silent decision to the user, briefly** — standing principle: whenever the bot skips, corrects, deduplicates, or drops anything, the user gets one short line about it. Already done for validator corrections (🛡 auto-corrected list). Still needed: dedup skips ("↺ 3 rows skipped as already imported: …"), rows dropped at save due to Transaction validation errors (currently only shown as "Saved N of M" + first 5 errors), recovery-queue replays on startup ("re-applied 2 queued transactions"), and draft archival.
-- [ ] **Cycle Dashboard sheet** — duplicate of the existing Dashboard on a new sheet; same layout, same category rows, same budget targets (shared Lists budget column — one edit updates both). Filter is a single cycle selector (dropdown fed by the ledger) instead of Year+Month; all SUMIFS filter on Date >= cycle start AND Date < next start — for the LAST ledger row (no next start) the upper bound is open-ended: TODAY()+1 in formulas, today in bot queries. Adds the salary/expenses/savings/unaccounted block and shows the cycle's day count (24-33 days — budgets are not pro-rated, matching the old manual system). The calendar Dashboard and Month/Year columns stay untouched — cycles are purely additive; disabling the flag corrupts nothing.
+- [x] **Cycle Dashboard sheet** — implemented in `cycle_dashboard.py` (`ensure_cycle_dashboard`): cycle-label dropdown in B2, full category SUMIFS block; called from `record_cycle_start` and `record_cycle_starts_batch` (`cycles.py:110-111, 415-416`).
 
 ### Group 3 — Infrastructure, schema & quality
 
 Test coverage gaps, module size, AI output contract, and tooling quality.
 
-- [ ] **DeepSeek output as typed model** — validate provider output into a Pydantic `ParsedTransaction` at the parse boundary so drafts store validated data.
-- [ ] **Off-peak batching** — DeepSeek is 50-75% cheaper 16:30-00:30 UTC; schedule any non-interactive batch work in that window.
+- [x] **DeepSeek output as typed model** — done: `ParsedTransaction` Pydantic model at `ai_parser.py:234`; `_normalize_ai_rows` validates every row via `ParsedTransaction.model_validate` (`ai_parser.py:266`).
+- [ ] **Off-peak batching** — PARTIAL: `is_off_peak()` implemented at `ai_parser.py:26-32`; currently only logs a cost warning inside `DeepSeekProvider._chat` (`ai_parser.py:513`). No actual deferral or scheduling to the off-peak window yet.
 - [ ] **Peak-time user prompt + task scheduling** *(discussion topic)* — when a user triggers a command that requires an AI call during peak hours, notify them: "It's currently peak time — AI calls cost more right now. Run now, or schedule for off-peak (after 16:30 UTC)?" If the user chooses to wait, hold the task and execute it automatically when the off-peak window opens. Needs: reliable task queue (likely the SQLite era), a scheduler (APScheduler or PTB's JobQueue), and a way to resume the original conversation context on delivery. `is_off_peak()` helper from PR #71 is the foundation. (`ai_parser.py`, `bot.py`, PTB JobQueue)
-- [ ] **Hard cap 300 lines per production module** — a file exceeding 300 lines almost always contains two concerns; split by cohesion, not by line count alone. Exempt: test files (a thorough test suite for one module legitimately runs long) and generated/schema files.
-- [ ] **/start hostile-name test doesn't run the balance checks** — `_RESERVED` excludes `*`/`_`, and the balance assertions live only in the /help test; factor into a shared helper run by both. (`tests/test_help_markdown.py`)
-- [ ] **No test for empty first_name → "there" fallback.** (`tests/test_help_markdown.py`)
-- [ ] **Escape-stripping order vs backslashes inside code spans** — the validator strips `\X` pairs before locating code spans; a legal `` \` `` inside a code span would mis-pair the remaining backticks. Not hit by current text. (`tests/test_help_markdown.py`)
-- [ ] **Extend the markdown validator to every static MarkdownV2 reply** — /help and /start are covered; `cmd_setcurrency`'s unknown-currency reply and all `<cmd> help` subcommand texts are not. Extract `_find_unescaped_reserved` into a shared test helper and parametrize. (`tests/test_help_markdown.py`, `handlers/*.py`)
-- [ ] **`test_cleanup_old_logs_removes_rotated_files` missing negative-path assertions** — the test only exercises the deletion path (a rotated file older than 180 days is removed). Add two additional assertions: (1) a recent rotated file (mtime < 180 days) matching `budget-bot.log.*` is NOT deleted; (2) the live `budget-bot.log` file (which does not match the `budget-bot.log.*` glob) is NOT deleted even if its mtime is old. Prevents a future glob regression from silently passing the test suite. (`tests/test_logger.py`, `logger.py`)
-- [ ] **`_decode_positional_array` null-amount contract undefined** — `_decode_positional_array(["2026-01-01", None])` returns `{"date": "2026-01-01", "value": None}` instead of `None`: a `None` value at the amount position passes silently to downstream validators. Add a test that either: (a) asserts the function returns `None` for a null amount, or (b) documents that validators are the correct rejection point and adds a test there. Clarify which contract is intended.
-- [ ] **`_salvage_rows` fallback path untested** — a response in legacy object format (pre-array migration) that reaches `_salvage_rows` via the `_salvage_json_objects` branch has no test. Add one to ensure the fallback path keeps working as array format rolls out.
-- [ ] **[PR #3] Preview edits not persisted to draft file** *(PR #3 bulk-import bugs)*
-- [ ] **`CATEGORY_TYPE_HINTS` dict: implement as part of this PR or as a follow-up to the data-validation PR**
-- [ ] **Monthly Summary sheet never updated by the bot** *(fixed PR #38 — but Monthly Summary priority update: verify the fix covers bulk-imported rows spanning multiple months)*
+- [ ] **Hard cap 300 lines per production module** — current offenders: `handlers/bulk_conv.py` (2132), `handlers/reports.py` (1242), `statement_profiles.py` (641), `handlers/setup_conv.py` (729), `ai_parser.py` (704), `handlers/cycle.py` (607), `cycles.py` (585), `file_storage.py` (485), `handlers/add_conv.py` (453), `storage_backends.py` (311). Split by cohesion, not line count alone. Exempt: test files and generated/schema files.
+- [x] **/start hostile-name test doesn't run the balance checks** — done: `test_start_escapes_hostile_first_name` calls `assert_valid_markdown_v2` which runs both `find_unescaped_reserved` and `assert_markup_balanced` (`tests/mdv2_helpers.py:72-76`).
+- [x] **No test for empty first_name → "there" fallback** — done: `test_start_empty_first_name_falls_back_to_there` at `tests/test_help_markdown.py:94-104`.
+- [x] **Escape-stripping order vs backslashes inside code spans** — done: `test_validator_escaped_backtick_inside_code_span` covers this regression at `tests/test_help_markdown.py:195-205`.
+- [x] **Extend the markdown validator to every static MarkdownV2 reply** — done: `cmd_setcurrency` unknown-currency reply covered by `test_setcurrency_unknown_currency_reply_is_valid_markdown_v2`; all 17 `<cmd> help` texts covered by parametrized `test_cmd_help_subcommand_is_valid_markdown_v2` (`tests/test_help_markdown.py:150-167`).
+- [x] **`test_cleanup_old_logs_removes_rotated_files` missing negative-path assertions** — done: `tests/test_logger.py:50-85` asserts all four cases: old rotated deleted, recent rotated retained, base log retained, unrelated log retained.
+- [x] **`_decode_positional_array` null-amount contract undefined** — done: `ai_parser.py:258-263` explicitly guards `if arr[1] is None: return None`; documented in function docstring.
+- [x] **`_salvage_rows` fallback path untested** — done: `test_salvage_rows_falls_back_to_object_salvage_for_legacy_format` at `tests/test_ai_parser.py:527-535`.
+- [x] **[PR #3] Preview edits not persisted to draft file** — done in PR #48: `bulk_confirm` calls `_save_bulk_draft` after each edit (`handlers/bulk_conv.py:1979-1984`).
+- [x] **`CATEGORY_TYPE_HINTS` dict** — done: defined at `handlers/setup_conv.py:56`; used in `handlers/add_conv.py:15,70` to pre-select transaction type.
+- [x] **Monthly Summary sheet never updated by the bot** — done: `file_storage.py:420` calls `ensure_monthly_summary_rows_from_masterdata(wb)` after writing all batch rows, covering multi-month imports.
 
 ### Group F — SQLite + web UI (deferred)
 
@@ -437,36 +437,20 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 
 ## Follow-up: re-review notes (PR #36/#37 second pass, 2026-07-25)
 
-- [ ] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** —
-      boundaries found with per-scan words whose keyword is not in
-      `CYCLE_DETECT_KEYWORDS` produce cycles whose salary rows count as plain
-      income in the unaccounted math. Docs advise the .env route; consider
-      persisting per-scan words or warning when they find matches. (`cycles.py`)
-      *(partially done in PR #49: the detect reply now warns that per-scan
-      keywords apply to that scan only and points at /keywords; routing the
-      ad-hoc keywords into `cycle_totals` remains open.)*
+- [x] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — done in PR #74: `extra_keywords` param added to `cycle_totals` and threaded through all call sites (`handlers/reports.py:66,81,647`).
 - [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!`
       can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed.
       (`cycles.py` `salary_mask`)
 - [ ] **Keyword set widens the Description-OR blast radius** — extends the
       existing "Description match is unconditional OR" note above: with more
       keywords, more non-salary income descriptions can trigger the prompt.
-- [ ] **/start hostile-name test doesn't run the balance checks** — `_RESERVED`
-      excludes `*`/`_`, and the balance assertions live only in the /help test;
-      factor into a shared helper run by both. (`tests/test_help_markdown.py`)
-- [ ] **No test for empty first_name → "there" fallback.** (`tests/test_help_markdown.py`)
+- [x] **/start hostile-name test doesn't run the balance checks** — done: `test_start_escapes_hostile_first_name` calls `assert_valid_markdown_v2` which runs balance checks via `mdv2_helpers.py:72-76`.
+- [x] **No test for empty first_name → "there" fallback** — done: `test_start_empty_first_name_falls_back_to_there` at `tests/test_help_markdown.py:94-104`.
 
 ## Follow-up: markdown-validator review notes (PR #37, 2026-07-25)
 
-- [ ] **Escape-stripping order vs backslashes inside code spans** — the
-      validator strips `\X` pairs before locating code spans; a legal
-      `` \` `` inside a code span would mis-pair the remaining backticks.
-      Not hit by current text. (`tests/test_help_markdown.py`)
-- [ ] **Extend the markdown validator to every static MarkdownV2 reply** —
-      /help and /start are covered; `cmd_setcurrency`'s unknown-currency
-      reply and all `<cmd> help` subcommand texts are not. Extract
-      `_find_unescaped_reserved` into a shared test helper and parametrize.
-      (`tests/test_help_markdown.py`, `handlers/*.py`)
+- [x] **Escape-stripping order vs backslashes inside code spans** — done: `test_validator_escaped_backtick_inside_code_span` covers this at `tests/test_help_markdown.py:195-205`.
+- [x] **Extend the markdown validator to every static MarkdownV2 reply** — done: `cmd_setcurrency` and all 17 `<cmd> help` texts covered by parametrized tests at `tests/test_help_markdown.py:109-167`.
 - [x] **Register a PTB error handler** *(fixed in PR #43)* — "No error handlers are registered"
       in the VM log; a global `Application.add_error_handler` that logs and
       replies with a plain-text fallback would have surfaced the /help
@@ -812,14 +796,11 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 - [x] **Split file_storage god module** — backends / workbook repo / template concerns;
       backend selection should honor `STORAGE_BACKEND` strictly (a stray `GCS_BUCKET_NAME`
       env var currently overrides `STORAGE_BACKEND=local`).
-- [ ] **DeepSeek output as typed model** — validate provider output into a Pydantic
-      `ParsedTransaction` at the parse boundary so drafts store validated data.
+- [x] **DeepSeek output as typed model** — done: `ParsedTransaction` at `ai_parser.py:234`; validated via `model_validate` in `_normalize_ai_rows`.
 
 ## Follow-up PR: UX
 
-- [ ] **Person attribution per import** — bulk stamps `person=""` on everything; ask once
-      "Whose statement is this?" and stamp all rows; per-row `4 person=X` override stays.
-      /add: move person out of the mandatory flow (default household, edit from confirm card).
+- [x] **Person attribution per import** — done: `_finish_profile_parse` prompts "Whose statement is this?", `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`). /add: move person out of the mandatory flow (default household, edit from confirm card) — still open.
 - [x] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.
@@ -835,9 +816,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       everything; on invalid edit, list the editable fields; validate category values against Lists.
 - [x] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category
       keyboard instead of ejecting to the 9-step /add.
-- [ ] **Bulk preview separator orphan at page break** — when a page boundary falls between a row and its following `──────────` rule, the rule appears as the first line of the next page. Fix: skip appending the separator if it would be the first item on a new page. (`handlers/bulk_conv.py` `_format_bulk_preview`)
-- [ ] **Report chunking can break Markdown entities** — `cmd_report` raw 4000-char split;
-      reuse the paginated-send helper from bulk_conv.
+- [x] **Bulk preview separator orphan at page break** — done: `_format_bulk_preview` strips trailing separators before page flush (`bulk_conv.py:1395-1397`).
+- [ ] **Report chunking can break Markdown entities** — PARTIAL: now splits at `━━━` section-break lines (not raw 4000-char); does not yet reuse bulk_conv paginated-send helper.
 - [ ] **edit_conv currency keyboard hardcodes 3/3 split** — breaks visually with >6 currencies.
 
 ## Follow-up PR: code clarity
