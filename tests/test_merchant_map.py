@@ -306,3 +306,55 @@ class TestBulkIntegration:
                  "description": "Uber trip", "person": ""}]
         _apply_bulk_edit("1 description=Taxi", rows, SAMPLE_LISTS)
         assert merchant_map.load_merchant_map() == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# rename_category — category renames propagate into the merchant map
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestRenameCategoryUpdatesMerchantMap:
+    @pytest.fixture
+    def map_path(self, tmp_path, monkeypatch):
+        path = tmp_path / "merchant_map.json"
+        monkeypatch.setattr(merchant_map, "MERCHANT_MAP_PATH", path)
+        return path
+
+    def _seed(self):
+        merchant_map.save_merchant_map({
+            "tesco": {"label": "Tesco", "category": "OldName",
+                      "type": "Expense", "is_recurring": False},
+            "uber": {"label": "Uber", "category": "Transport",
+                     "type": "Expense", "is_recurring": False},
+            "shell": {"label": "Shell", "category": "OldName",
+                      "type": "Expense", "is_recurring": True},
+        })
+
+    def test_matching_entries_renamed_and_persisted(self, map_path):
+        self._seed()
+        updated = merchant_map.rename_category("OldName", "NewName")
+        assert updated == 2
+        stored = merchant_map.load_merchant_map()
+        assert stored["tesco"]["category"] == "NewName"
+        assert stored["shell"]["category"] == "NewName"
+
+    def test_other_categories_unchanged(self, map_path):
+        self._seed()
+        merchant_map.rename_category("OldName", "NewName")
+        stored = merchant_map.load_merchant_map()
+        assert stored["uber"]["category"] == "Transport"
+        assert stored["shell"]["is_recurring"] is True  # other fields intact
+
+    def test_no_match_does_not_rewrite_file(self, map_path):
+        self._seed()
+        before = map_path.read_text(encoding="utf-8")
+        assert merchant_map.rename_category("Missing", "NewName") == 0
+        assert map_path.read_text(encoding="utf-8") == before
+
+    def test_non_dict_entries_tolerated(self, map_path):
+        merchant_map.save_merchant_map({
+            "junk": "not-a-dict",
+            "tesco": {"label": "Tesco", "category": "OldName",
+                      "type": "Expense", "is_recurring": False},
+        })
+        assert merchant_map.rename_category("OldName", "NewName") == 1
+        assert merchant_map.load_merchant_map()["tesco"]["category"] == "NewName"

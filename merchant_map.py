@@ -120,6 +120,26 @@ def learn_from_row(row: dict) -> str | None:
     return mapping[key]["label"]
 
 
+def rename_category(old_name: str, new_name: str) -> int:
+    """
+    Rename a category across all merchant-map entries so future bulk imports
+    stop suggesting the retired name. Returns the number of entries updated.
+    Called wherever a workbook-wide category rename happens (/setup,
+    scripts/rename_category.py).
+    """
+    mapping = load_merchant_map()
+    updated = 0
+    for entry in mapping.values():
+        if isinstance(entry, dict) and entry.get("category") == old_name:
+            entry["category"] = new_name
+            updated += 1
+    if updated:
+        save_merchant_map(mapping)
+        log.info("Renamed category in merchant map: %s → %s (%d entries)",
+                 old_name, new_name, updated)
+    return updated
+
+
 # ── Seeding from MasterData history ───────────────────────────────────────────
 
 def seed_from_master() -> dict:

@@ -52,6 +52,10 @@ def main():
         wb_counts = rename_category_in_workbook(wb, old_name, new_name)
         counts.update(wb_counts)
 
+        # Merchant map: stored category suggestions must follow the rename too.
+        import merchant_map
+        counts["Merchant map"] = merchant_map.rename_category(old_name, new_name)
+
         # Pending bulk drafts: parsed-but-unsaved rows keep category by name.
         drafts_dir = settings.BULK_DRAFTS_DIR
         if drafts_dir.is_dir():
