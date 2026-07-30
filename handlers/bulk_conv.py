@@ -17,7 +17,7 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes, ConversationHandler
 
 import ai_parser
-from ai_parser import parse_text, parse_image, _chunk_statement_text
+from ai_parser import parse_text, parse_image, _chunk_statement_text, is_off_peak
 from config import auth, auth_write, log
 from data import load_dedup_evidence, load_reference_data
 import settings
@@ -485,6 +485,10 @@ async def _do_finish_profile_parse(
             "please verify the parsed amounts."
         )
 
+    if not is_off_peak():
+        await update.effective_message.reply_text(
+            "⏰ Peak hours — AI processing costs are higher right now. Continuing..."
+        )
     parsed = await loop.run_in_executor(
         None, lambda: sp.parse_statement(file_bytes, filename, profile)
     )
@@ -829,10 +833,16 @@ def _save_bulk_draft(user_id: int, rows: list[dict]) -> None:
     path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def _delete_bulk_draft(user_id: int) -> None:
+def _archive_bulk_draft(user_id: int) -> None:
+    """Move draft to archive instead of deleting — 6-month audit trail."""
     path = _user_draft_path(user_id)
-    if path.exists():
-        path.unlink(missing_ok=True)
+    if not path.exists():
+        return
+    from datetime import datetime
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir = _bulk_draft_dir() / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    path.rename(archive_dir / f"{user_id}-{ts}.json")
 
 
 def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
@@ -1862,6 +1872,10 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 except Exception:
                     text = file_bytes.decode("latin-1", errors="replace")
                 await _announce_parse_plan(update, text)
+                if not is_off_peak():
+                    await update.message.reply_text(
+                        "⏰ Peak hours — AI processing costs are higher right now. Continuing..."
+                    )
                 parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
             else:
                 # Not a recognised statement extension — existing plain-text path.
@@ -1871,6 +1885,10 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     return BULK_RECEIVE
                 text = file_bytes.decode("utf-8", errors="replace")
                 await _announce_parse_plan(update, text)
+                if not is_off_peak():
+                    await update.message.reply_text(
+                        "⏰ Peak hours — AI processing costs are higher right now. Continuing..."
+                    )
                 parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
 
         elif update.message.text:
@@ -1880,6 +1898,10 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Send the transaction text, not a command.")
                 return BULK_RECEIVE
             await _announce_parse_plan(update, text)
+            if not is_off_peak():
+                await update.message.reply_text(
+                    "⏰ Peak hours — AI processing costs are higher right now. Continuing..."
+                )
             parsed = await loop.run_in_executor(None, lambda: parse_text(text, lists))
 
         else:
@@ -1969,7 +1991,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     action, reason, edit_notes = _apply_bulk_edit(text, parsed, lists)
 
     if reason == "cancel":
-        _delete_bulk_draft(update.effective_user.id)
+        _archive_bulk_draft(update.effective_user.id)
         ctx.user_data.pop("bulk_person", None)
         log.info("User %s cancelled bulk import draft", update.effective_user.id)
         await update.message.reply_text(
@@ -2099,7 +2121,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # instead of losing them when the whole draft is wiped.
         _save_bulk_draft(update.effective_user.id, failed_items)
     else:
-        _delete_bulk_draft(update.effective_user.id)
+        _archive_bulk_draft(update.effective_user.id)
 
     if settings.STORAGE_BACKEND == "gcs" or settings.GCS_BUCKET_NAME:
         destination = f"gs://{settings.GCS_BUCKET_NAME}/{settings.GCS_OBJECT_NAME}"

@@ -154,10 +154,27 @@ async def error_handler(update, context) -> None:
         log.exception("Failed to send error notification to chat %s", chat.id)
 
 
+def _prune_bulk_draft_archive() -> None:
+    """Delete archive files older than 6 months at startup."""
+    from datetime import datetime, timedelta
+    archive_dir = settings.BULK_DRAFTS_DIR / "archive"
+    if not archive_dir.exists():
+        return
+    cutoff = datetime.now() - timedelta(days=183)
+    removed = 0
+    for p in archive_dir.glob("*.json"):
+        if datetime.fromtimestamp(p.stat().st_mtime) < cutoff:
+            p.unlink(missing_ok=True)
+            removed += 1
+    if removed:
+        log.info("Pruned %d bulk draft archive file(s) older than 6 months", removed)
+
+
 async def register_commands(app: Application) -> None:
     """post_init hook: publish the command menu so Telegram shows it on '/'."""
     await app.bot.set_my_commands(BOT_COMMANDS)
     log.info("Registered %d bot commands with Telegram", len(BOT_COMMANDS))
+    _prune_bulk_draft_archive()
 
 
 def build_application() -> Application:
