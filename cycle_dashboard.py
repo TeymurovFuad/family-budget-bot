@@ -141,7 +141,7 @@ def ensure_cycle_dashboard(wb, salary_category=None):
     ws.cell(2, 3, "Start")
     ws.cell(2, 4, "=$N$3")
     ws.cell(2, 5, "Display")
-    ws.cell(2, 6, "PLN")
+    ws.cell(2, 6, settings.DISPLAY_CURRENCY)
     ws.cell(2, 14, _RATE_FORMULA)   # N2
     ws.cell(3, 14, _N3_FORMULA)     # N3
     ws.cell(4, 14, _N4_FORMULA)     # N4

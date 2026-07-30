@@ -412,7 +412,7 @@ class TestFlagMasterDuplicatesCountAware:
         from handlers.bulk_conv import _flag_master_duplicates
 
         rows = [{"date": "2024-05-12", "value": 45.98, "currency": "PLN",
-                 "description": "Zabka Warszawa 4211", "person": ""}]
+                 "description": "Tesco London 4211", "person": ""}]
         loose_key = make_loose_dedup_key("2024-05-12", 45.98, "PLN")
         with patch("handlers.bulk_conv.load_dedup_evidence",
                    return_value=evidence(loose={loose_key: [("2024-05-12", "Zabka")]})):
@@ -421,7 +421,7 @@ class TestFlagMasterDuplicatesCountAware:
         assert rows[0]["loose_dup"] is True
         assert rows[0]["loose_other_desc"] == "Zabka"
         assert len(summary["loose_matches"]) == 1
-        assert summary["loose_matches"][0]["description"] == "Zabka Warszawa 4211"
+        assert summary["loose_matches"][0]["description"] == "Tesco London 4211"
         assert summary["loose_matches"][0]["other_desc"] == "Zabka"
 
     def test_loose_pass_skipped_for_rows_already_strict_flagged(self):
@@ -647,7 +647,7 @@ class TestPreviewAnnotationsAndFooter:
         from handlers.bulk_conv import _format_bulk_preview
 
         rows = [{"date": "2024-05-12", "value": 45.98, "currency": "PLN",
-                 "category": "Groceries", "description": "Zabka Warszawa 4211", "person": "",
+                 "category": "Groceries", "description": "Tesco London 4211", "person": "",
                  "loose_dup": True, "loose_other_date": "2024-05-12", "loose_other_desc": "Zabka"}]
         pages = _format_bulk_preview(rows)
         assert "possible duplicate" in pages[0]
@@ -779,7 +779,7 @@ class TestBulkReceiveDedupReporting:
             draft_dir = Path(tmpdir) / "bulk_drafts"
             draft_dir.mkdir()
             parsed = [{"date": "2024-05-12", "value": 45.98, "currency": "PLN",
-                       "category": "Groceries", "description": "Zabka Warszawa 4211", "person": ""}]
+                       "category": "Groceries", "description": "Tesco London 4211", "person": ""}]
             loose_key = make_loose_dedup_key("2024-05-12", 45.98, "PLN")
 
             with patch("handlers.bulk_conv._bulk_draft_dir", return_value=draft_dir), \

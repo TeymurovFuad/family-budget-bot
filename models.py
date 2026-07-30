@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import settings
 from datetime import timezone
 from typing import Optional
 
@@ -100,7 +101,7 @@ class AddTransactionState(BaseModel):
     date:             Optional[datetime.date]  = None  # None = use today at save time
 
     # Cached during the conversation — not part of the transaction itself
-    display_currency: str   = "PLN"
+    display_currency: str   = ""
     rates:            dict  = {}
 
     def is_ready_to_confirm(self) -> bool:
@@ -118,7 +119,7 @@ class AddTransactionState(BaseModel):
         return Transaction(
             date             = self.date or datetime.datetime.now(timezone.utc).date(),
             value            = self.value,
-            currency         = self.currency or "PLN",
+            currency         = self.currency or settings.DISPLAY_CURRENCY,
             transaction_type = self.transaction_type,
             category         = self.category or "",
             person           = self.person or "",

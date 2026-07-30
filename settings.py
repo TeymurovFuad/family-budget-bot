@@ -26,7 +26,7 @@ XLSX_PATH = Path(xlsx_path).expanduser()
 if not XLSX_PATH.is_absolute():
     XLSX_PATH = PROJECT_ROOT / XLSX_PATH
 
-TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Warsaw"))
+TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "UTC"))
 DISPLAY_CURRENCY = os.getenv("DISPLAY_CURRENCY", "PLN")
 REPORT_TYPE = os.getenv("REPORT_TYPE", "weekly")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "deepseek").lower()

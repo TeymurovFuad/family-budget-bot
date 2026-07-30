@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+import settings
 from config import log
 from excel_schema import MasterDataSchema, header_of, load_currency_rates_from_path
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
@@ -100,7 +101,7 @@ def load_reference_data() -> dict:
     def _load() -> dict:
         lists = load_lists(get_excel_path_for_reading())
         rates = load_rates()
-        lists["currencies"] = list(rates.keys()) if rates else ["PLN"]
+        lists["currencies"] = list(rates.keys()) if rates else [settings.DISPLAY_CURRENCY]
         return lists
 
     cached = _cached("reference_data", _load)
@@ -122,7 +123,7 @@ def load_rates() -> dict[str, float]:
     """
     Read currency rate table from the Lists sheet.
     Column positions are resolved via ListsSchema — no hardcoded positions.
-    Returns {currency_code: pln_per_unit}. Falls back to {"PLN": 1.0}.
+    Returns {currency_code: pln_per_unit}. Falls back to {settings.DISPLAY_CURRENCY: 1.0}.
     Cached — see the reference-data TTL cache above.
     """
     def _load() -> dict[str, float]:
@@ -130,7 +131,7 @@ def load_rates() -> dict[str, float]:
             return load_currency_rates_from_path(get_excel_path_for_reading())
         except Exception as e:
             log.warning("Could not load currency rates: %s", e)
-            return {"PLN": 1.0}
+            return {settings.DISPLAY_CURRENCY: 1.0}
 
     return dict(_cached("rates", _load))
 
@@ -160,8 +161,8 @@ def load_data() -> pd.DataFrame:
         df["_base"] = pd.to_numeric(df["Value"], errors="coerce")
 
     if "Currency" not in df.columns:
-        df["Currency"] = "PLN"
-    df["Currency"] = df["Currency"].fillna("PLN")
+        df["Currency"] = settings.DISPLAY_CURRENCY
+    df["Currency"] = df["Currency"].fillna(settings.DISPLAY_CURRENCY)
 
     # Recompute _base for any row where the formula cache is missing
     missing = df["_base"].isna() & df["Value"].notna()
@@ -220,7 +221,7 @@ def load_dedup_evidence(start=None, end=None) -> dict:
         for i in df.index[mask]:
             date_iso = dates.loc[i].date().isoformat()
             value = df.at[i, value_h]
-            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else "PLN"
+            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else settings.DISPLAY_CURRENCY
             desc = df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else ""
             strict_key = make_dedup_key(date_iso, value, ccy, desc)
             loose_key = make_loose_dedup_key(date_iso, value, ccy)

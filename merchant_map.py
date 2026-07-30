@@ -252,7 +252,7 @@ def try_local_quick_parse(text: str) -> dict | None:
     return {
         "date": date_s or "",
         "value": float(amount_s.replace(",", ".")),
-        "currency": (ccy or "PLN").upper(),
+        "currency": (ccy or settings.DISPLAY_CURRENCY).upper(),
         "type": entry.get("type") or "Expense",
         "category": entry.get("category") or "Other",
         "description": entry.get("label") or clean_merchant_description(desc),

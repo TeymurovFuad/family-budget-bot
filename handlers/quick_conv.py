@@ -13,6 +13,7 @@ from data import load_rates, load_reference_data
 from excel_ops import append_transaction
 from formatters import format_base_as_currency, sanitize_description
 import merchant_map
+import settings
 from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
 from models import Transaction
@@ -48,7 +49,7 @@ def _local_fast_parse(text: str, lists: dict, rates: dict) -> tuple[dict | None,
     if _BARE_AMOUNT_RE.match(raw):
         value, _ = parse_amount(raw)
         return {
-            "date": "", "value": value, "currency": "PLN", "type": "Expense",
+            "date": "", "value": value, "currency": settings.DISPLAY_CURRENCY, "type": "Expense",
             "category": "", "description": "", "person": "", "is_recurring": False,
         }, True
     match = _QUICK_SHAPE_RE.match(raw)
@@ -68,7 +69,7 @@ def _local_fast_parse(text: str, lists: dict, rates: dict) -> tuple[dict | None,
     row = {
         "date": date_s or "",
         "value": value,
-        "currency": ccy or "PLN",
+        "currency": ccy or settings.DISPLAY_CURRENCY,
         "type": "Expense",
         "category": "",
         "description": desc,
@@ -109,7 +110,7 @@ async def _send_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
     if rates is None:
         rates = load_rates()
     val_base = normalized["value"]
-    if normalized["currency"] != "PLN" and normalized["currency"] in rates:
+    if normalized["currency"] != settings.DISPLAY_CURRENCY and normalized["currency"] in rates:
         val_base = normalized["value"] * rates[normalized["currency"]]
 
     label = format_base_as_currency(val_base, ccy, rates)
@@ -139,7 +140,7 @@ def _category_keyboard(lists: dict) -> ReplyKeyboardMarkup:
 async def _offer_category_fix(update, ctx, row: dict, lists: dict, intro: str):
     """One-tap recovery: keep what parsed, ask only for the category."""
     ctx.user_data["quick_fix"] = row
-    ccy = str(row.get("currency") or "PLN").upper()
+    ccy = str(row.get("currency") or settings.DISPLAY_CURRENCY).upper()
     await update.message.reply_text(
         f"{intro}\n"
         f"Amount: *{float(row['value']):,.2f} {ccy}*"
@@ -336,7 +337,7 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         transaction = Transaction(
             date=transaction_date,
             value=float(parsed["value"]),
-            currency=parsed.get("currency", "PLN").upper(),
+            currency=(parsed.get("currency") or settings.DISPLAY_CURRENCY).upper(),
             transaction_type=parsed.get("type", "Expense"),
             category=parsed.get("category", "Other"),
             person=parsed.get("person", ""),

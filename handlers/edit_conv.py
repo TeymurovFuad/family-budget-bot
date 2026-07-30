@@ -13,6 +13,7 @@ from file_storage import get_excel_path_for_reading, get_recent_transactions, up
 from formatters import format_base_as_currency, format_amount, sanitize_description
 from models import MONTH_NAMES
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
+import settings
 
 EDIT_FIELD_MAP = {
     "Amount":      "Value",
@@ -46,8 +47,8 @@ async def cmd_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     lines = ["Pick a transaction to edit:\n"]
     for i, txn in enumerate(txns, 1):
         raw_val  = txn.get("Value", 0)
-        raw_ccy  = txn.get("Currency", "PLN")
-        label    = format_amount(raw_val or 0, raw_ccy or "PLN")
+        raw_ccy  = txn.get("Currency") or settings.DISPLAY_CURRENCY
+        label    = format_amount(raw_val or 0, raw_ccy or settings.DISPLAY_CURRENCY)
         cat      = txn.get("Category", "")
         desc     = txn.get("Description", "") or ""
         date_str = str(txn.get("Date", ""))[:10]

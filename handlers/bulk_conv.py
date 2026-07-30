@@ -830,13 +830,13 @@ def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
 def _row_dedup_key(row: dict) -> str:
     """Strict dedup key for one draft row — same recipe as MasterData keys."""
     return make_dedup_key(
-        row.get("date"), row.get("value"), row.get("currency", "PLN"), row.get("description"),
+        row.get("date"), row.get("value"), row.get("currency") or settings.DISPLAY_CURRENCY, row.get("description"),
     )
 
 
 def _row_loose_dedup_key(row: dict) -> str:
     """Loose dedup key (date|value|currency, no description) — advisory only."""
-    return make_loose_dedup_key(row.get("date"), row.get("value"), row.get("currency", "PLN"))
+    return make_loose_dedup_key(row.get("date"), row.get("value"), row.get("currency") or settings.DISPLAY_CURRENCY)
 
 
 def _precheck_duplicate_counts(rows: list[dict]) -> tuple[int, int]:
@@ -1009,7 +1009,7 @@ def _flag_master_duplicates(rows: list[dict]) -> dict:
         row["loose_other_desc"] = other_desc
         summary["loose_matches"].append({
             "row": idx + 1,
-            "value": row.get("value"), "currency": row.get("currency", "PLN"),
+            "value": row.get("value"), "currency": row.get("currency") or settings.DISPLAY_CURRENCY,
             "description": row.get("description", ""), "date": row.get("date", ""),
             "other_date": other_date, "other_desc": other_desc,
         })
@@ -1373,7 +1373,7 @@ def _format_bulk_preview(parsed: list[dict]) -> list[str]:
             if identical else ""
         )
         row_lines.append(
-            f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency', 'PLN')} | "
+            f"{i}. {t.get('date', '')} | {t.get('value', '')} {t.get('currency') or settings.DISPLAY_CURRENCY} | "
             f"{_md_escape(t.get('category', ''))} | {_md_escape(t.get('description', ''))}"
             f"{mem_suffix}{type_suffix}{invalid_suffix}"
             f"{dup_suffix}{loose_suffix}{identical_suffix}{dropped_suffix}"
@@ -2048,7 +2048,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             transactions.append(Transaction(
                 date=txn_date,
                 value=float(item["value"]),
-                currency=item.get("currency", "PLN").upper(),
+                currency=(item.get("currency") or settings.DISPLAY_CURRENCY).upper(),
                 transaction_type=item.get("type", "Expense"),
                 category=item.get("category", "Other"),
                 person=item.get("person", ""),

@@ -11,6 +11,7 @@ TEMPLATE_PATH is read lazily through file_storage so tests that monkeypatch
 
 from pathlib import Path
 
+import settings
 from logger import get_logger
 from excel_schema import ListsSchema, MasterDataSchema, find_col, header_of
 from storage_backends import _replace_with_retry
@@ -144,7 +145,7 @@ def create_blank_excel(path: Path) -> None:
     ]
     cur_year   = datetime.now(timezone.utc).year
     years      = [cur_year - 1, cur_year, cur_year + 1, cur_year + 2]
-    currencies = [("PLN", 1.0), ("EUR", 4.28), ("USD", 3.95), ("GBP", 5.05), ("CHF", 4.45)]
+    currencies = [(settings.DISPLAY_CURRENCY, 1.0), ("EUR", 4.28), ("USD", 3.95), ("GBP", 5.05), ("CHF", 4.45)]
 
     for i, v in enumerate(months,     2): ws_li.cell(i, 1, v)
     for i, v in enumerate(txn_types,  2): ws_li.cell(i, 2, v)

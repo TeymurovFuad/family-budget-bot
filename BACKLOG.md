@@ -25,14 +25,15 @@ Statement parsing, bulk preview, dedup UX, and person attribution.
 Cycle correctness, PLN neutrality, schema cleanup, and reporting gaps.
 
 - [x] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — fixed in PR #74: `extra_keywords` param added to `cycle_totals` (`cycles.py:447`) and threaded through all call sites in `handlers/reports.py:66,81,647`.
+- [ ] **`test_detect_contains_match_on_bank_transfer_titles` fails on master** — `tests/test_cycles.py:274`: `detect_cycle_candidates` returns only one candidate when multiple description rows match salary keywords; expected two. Pre-existing failure confirmed on master before PR #81; owned by Group D (`cycles.py` `detect_cycle_candidates`).
 - [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!` can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed. (`cycles.py` `salary_mask`)
 - [x] **Duplicate boundary still re-uploads on remote backends** — fixed: `cycles.py:121-122` returns `None` when start date already exists; `handlers/cycle.py:589-598` sends "already recorded" and skips upload.
 - [x] **Callback "yes" date not re-validated against future dates** — fixed: `handlers/cycle.py:583-587` checks `if start > date.today()` before recording.
 - [ ] **Sync workbook I/O in async handlers** — `load_cycles()` / `should_prompt_new_cycle()` block the event loop in `cmd_cycle` (lines 116, 137); only `_cmd_cycle_detect` properly wraps in `run_in_executor`. Matters mainly on remote storage backends.
 - [x] **lists_currency_range caps at row 100** — fixed: `excel_schema.py:119` defines `_EXCEL_MAX_ROW = 1048576`; `lists_currency_range` uses it as the open-ended upper bound (`excel_schema.py:128`).
 - [ ] **Remaining PLN in runtime messages** — `handlers/misc.py:103,173` rate display notes; `handlers/misc.py:196,237-238,267` setbudget labels/prompts; `handlers/add_conv.py:174` PLN equivalent note; `handlers/reports.py:858,884,886` rates display. Decide per-string: use display currency where possible; keep PLN where it is the factually correct base-currency label.
-- [ ] **Default-currency fallback hardcodes PLN** — `data.py:164` (`fillna("PLN")`), `scheduled_report.py:72`, `excel_schema.py:207` writer default, `excel_schema.py:213` Value formula condition. None use `settings.DISPLAY_CURRENCY`.
-- [ ] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — `excel_schema.py:622`: `goal_pln: Any = col("Goal (PLN)")` — rename to `goal_base` / "Goal" with migration in `ensure_lists_sheet`.
+- [x] **Default-currency fallback hardcodes PLN** — fixed in PR #81: `data.py` `fillna`, `excel_schema.py` writer default and Value formula condition, `scheduled_report.py` fallback, and `load_dedup_evidence` null-currency fallback all route through `settings.DISPLAY_CURRENCY`.
+- [x] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — fixed in PR #81: `excel_schema.py` field renamed to `goal_base`, column header renamed to "Goal"; `scripts/migrate_pln_headers_to_base.py` updated with the header rename.
 - [ ] **Derive Year/Month from Date by formula** — MasterData carries Date + Year + Month as three independent columns; Year/Month should be formulas (`=YEAR(A2)`, `=TEXT(A2,"mmm")`) or removed entirely with Dashboard SUMIFS rewritten against Date ranges. Touches every Dashboard formula, the writers, and the schema — do as its own PR with a migration script for existing rows.
 - [ ] **Category rename support (simplify category names)** — PARTIAL: `/setup` rename flow calls `rename_category_in_workbook` covering MasterData + Dashboard; `scripts/rename_category.py` covers Lists + bulk drafts. Missing: merchant map not updated on rename; no standalone bot command (rename only via `/setup` wizard or CLI script).
 - [ ] **Enforce the 50-row limit post-merge, not pre-merge** (Copilot PR review) — `_draft_limit_reached` checks the EXISTING draft before merging, so a draft at exactly 50 can still merge a 185-row import and blow past the documented maximum. Decide the rule (cap total? reject overflow rows? paginate drafts?) and enforce it after `_merge_bulk_draft` with a clear message about what was and wasn't added.
@@ -791,8 +792,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       instead of startup-only.
 - [x] **Lost-update protection for remote backends** — `ExcelFileContext` does blind
       download→modify→upload; use GCS generation / S3 ETag preconditions and retry on conflict.
-- [ ] **_load_bulk_drafts reads every user's file** — called 3× per message just to fetch one
-      user's draft; read `_user_draft_path(uid)` directly.
+- [x] **_load_bulk_drafts reads every user's file** — called 3× per message just to fetch one
+      user's draft; read `_user_draft_path(uid)` directly. `_load_user_draft` in `bulk_conv.py:794-804` already reads single file.
 - [x] **Split file_storage god module** — backends / workbook repo / template concerns;
       backend selection should honor `STORAGE_BACKEND` strictly (a stray `GCS_BUCKET_NAME`
       env var currently overrides `STORAGE_BACKEND=local`).

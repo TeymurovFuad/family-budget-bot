@@ -63,14 +63,14 @@ class TestCleanMerchantDescription:
         ) == "Autopay S.A."
 
     def test_trailing_country_code_stripped(self):
-        assert clean_merchant_description("BIEDRONKA 123 WARSZAWA PL") == "BIEDRONKA 123 WARSZAWA"
+        assert clean_merchant_description("TESCO 123 LONDON GB") == "TESCO 123 LONDON"
 
     def test_already_clean_passes_through(self):
         assert clean_merchant_description("Shell fuel") == "Shell fuel"
         assert clean_merchant_description("Autopay S.A.") == "Autopay S.A."
 
     def test_star_masked_pan_stripped(self):
-        assert clean_merchant_description("Zabka 4111****1111 Krakow") == "Zabka Krakow"
+        assert clean_merchant_description("Tesco 4111****1111 Berlin") == "Tesco Berlin"
 
     def test_never_returns_empty_for_nonempty_input(self):
         # If cleaning would erase everything, the original stripped text is kept.
@@ -122,8 +122,8 @@ class TestMerchantMapStore:
     def test_lookup_uses_cleaned_case_folded_key(self):
         entry = {"label": "Biedronka", "category": "Groceries", "type": "Expense",
                  "person": "", "is_recurring": False}
-        mapping = {"biedronka 123 warszawa": entry}
-        found = merchant_map.lookup(mapping, "4111XXXXXXXX1111 BIEDRONKA 123 WARSZAWA PL")
+        mapping = {"tesco 123 london": entry}
+        found = merchant_map.lookup(mapping, "4111XXXXXXXX1111 TESCO 123 LONDON GB")
         assert found == entry
 
     def test_lookup_miss_returns_none(self):
@@ -150,7 +150,7 @@ class TestMerchantMapStore:
             _do_append_transaction(Transaction(
                 date=date(2024, 6, 10 + i), value=50.0 + i, currency="PLN",
                 transaction_type="Expense", category="Groceries", person="",
-                description="BIEDRONKA 123 WARSZAWA PL", is_recurring=False,
+                description="TESCO 123 LONDON GB", is_recurring=False,
             ))
         # A one-off merchant must NOT be seeded.
         _do_append_transaction(Transaction(
@@ -159,8 +159,8 @@ class TestMerchantMapStore:
             description="Pharmacy", is_recurring=False,
         ))
         seeded = merchant_map.seed_from_master()
-        assert "biedronka 123 warszawa" in seeded
-        assert seeded["biedronka 123 warszawa"]["category"] == "Groceries"
+        assert "tesco 123 london" in seeded
+        assert seeded["tesco 123 london"]["category"] == "Groceries"
         assert "pharmacy" not in seeded
 
     def test_load_seeds_when_file_missing(self, excel_path, tmp_path, monkeypatch):

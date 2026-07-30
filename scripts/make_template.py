@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import openpyxl
+import settings
 
 SOURCE_DEFAULT = ROOT / "data" / "Expenses_Improved.xlsx"
 DEST_DEFAULT   = ROOT / "data" / "Expenses_Template.xlsx"
@@ -92,7 +93,7 @@ def scrub_dashboard(ws) -> None:
         elif label == "Month":
             ws.cell(2, c + 1, "")
         elif label == "Display":
-            ws.cell(2, c + 1, "PLN")
+            ws.cell(2, c + 1, settings.DISPLAY_CURRENCY)
 
     # Budget column (col I) — replace =NNNN/$N$2 formulas with =0/$N$2
     budget_col = None

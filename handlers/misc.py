@@ -100,7 +100,7 @@ async def cmd_setcurrency(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ccy = ctx.args[0].upper()
         if ccy in rates:
             set_display_currency(update.effective_user.id, ccy)
-            note = "" if ccy == "PLN" else f" (1 {ccy} = {rates[ccy]} PLN)"
+            note = "" if ccy == settings.DISPLAY_CURRENCY else f" (1 {ccy} = {rates[ccy]} {settings.DISPLAY_CURRENCY})"
             await update.message.reply_text(
                 f"✅ Display currency set to *{ccy}*{note}\\.\n"
                 f"All amounts will now show in {ccy}\\.",
@@ -170,7 +170,7 @@ async def setcurrency_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     rates = load_rates()
     if ccy in rates:
         set_display_currency(update.effective_user.id, ccy)
-        note = "" if ccy == "PLN" else f"\nRate: 1 {ccy} = {rates[ccy]:.4f} PLN"
+        note = "" if ccy == settings.DISPLAY_CURRENCY else f"\nRate: 1 {ccy} = {rates[ccy]:.4f} {settings.DISPLAY_CURRENCY}"
         await update.message.reply_text(
             f"✅ Display currency set to *{ccy}*{note}",
             parse_mode="Markdown",
@@ -193,7 +193,7 @@ def _build_setbudget_keyboard() -> InlineKeyboardMarkup:
     budgets = load_budgets()
     buttons = [
         InlineKeyboardButton(
-            f"{cat} — {format_amount(budgets.get(cat, 0), 'PLN')}",
+            f"{cat} — {format_amount(budgets.get(cat, 0), settings.DISPLAY_CURRENCY)}",
             callback_data=f"setbudget:{cat}",
         )
         for cat in categories
@@ -234,8 +234,8 @@ async def setbudget_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ctx.user_data["setbudget_current"] = current
 
     await query.message.reply_text(
-        f"*{category}* — currently {format_amount(current, 'PLN')}\\.\n"
-        "Send the new monthly budget \\(PLN\\):",
+        f"*{category}* — currently {format_amount(current, settings.DISPLAY_CURRENCY)}\\.\n"
+        f"Send the new monthly budget \\({settings.DISPLAY_CURRENCY}\\):",
         parse_mode="MarkdownV2",
     )
     return SET_BUDGET_AMOUNT
@@ -264,7 +264,7 @@ async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     await update.message.reply_text(
-        f"✅ *{category}* budget: {format_amount(old_value, 'PLN')} → {format_amount(new_value, 'PLN')}",
+        f"✅ *{category}* budget: {format_amount(old_value, settings.DISPLAY_CURRENCY)} → {format_amount(new_value, settings.DISPLAY_CURRENCY)}",
         parse_mode="Markdown",
     )
     ctx.user_data.pop("setbudget_category", None)

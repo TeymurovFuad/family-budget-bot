@@ -14,6 +14,7 @@ from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
 from handlers.setup_conv import CATEGORY_TYPE_HINTS
 import merchant_map
+import settings
 from models import Transaction, AddTransactionState
 from validators import parse_amount
 from states import (
@@ -65,7 +66,7 @@ def _apply_defaults(state: AddTransactionState) -> None:
     """Fill every remaining field with a sensible default (two-tap flow)."""
     if state.currency is None:
         display = state.display_currency
-        state.currency = display if display in state.rates else "PLN"
+        state.currency = display if display in state.rates else settings.DISPLAY_CURRENCY
     if state.transaction_type is None:
         state.transaction_type = CATEGORY_TYPE_HINTS.get(state.category or "", "Expense")
     if state.date is None:
@@ -169,9 +170,9 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state.is_recurring = True  # proposal — one tap away from override
         ctx.user_data["recurring_proposed"] = True
 
-    ccy       = state.currency or "PLN"
+    ccy       = state.currency or settings.DISPLAY_CURRENCY
     pln_equiv = state.value * get_rate(ccy, state.rates)
-    pln_note  = f"\n_PLN equivalent: {pln_equiv:,.0f}_" if ccy != "PLN" else ""
+    pln_note  = f"\n_PLN equivalent: {pln_equiv:,.0f}_" if ccy != settings.DISPLAY_CURRENCY else ""
     recurring = "Yes" if state.is_recurring else "No"
     if state.is_recurring and ctx.user_data.get("recurring_proposed"):
         recurring += " 🔁 (detected from history)"
@@ -354,7 +355,7 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lval, lccy, lcat, ltime = last
             age_secs = (datetime.now(timezone.utc) - ltime).total_seconds()
             if (abs((state.value or 0) - lval) < 0.01
-                    and (state.currency or "PLN") == lccy
+                    and (state.currency or settings.DISPLAY_CURRENCY) == lccy
                     and (state.category or "") == lcat
                     and age_secs < 60):
                 ctx.user_data["dup_warned"] = True
@@ -379,7 +380,7 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         ccy      = transaction.currency
         pln      = transaction.value * get_rate(ccy, state.rates)
-        suffix   = f" ({pln:,.0f} PLN)" if ccy != "PLN" else ""
+        suffix   = f" ({pln:,.0f} {settings.DISPLAY_CURRENCY})" if ccy != settings.DISPLAY_CURRENCY else ""
         disp_ccy = get_display_currency(uid)
         await update.message.reply_text(
             f"✅ Saved: *{transaction.value:,.2f} {ccy}*{suffix} → {transaction.category}",
