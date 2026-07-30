@@ -42,6 +42,72 @@ _SECTION_BREAK_PREFIX = "━━━"
 _RATES_HTTP_TIMEOUT_S = 10.0
 
 
+def _split_message(text: str, limit: int) -> list[str]:
+    """Split *text* into chunks each at most *limit* chars.
+
+    Three-level strategy (each level applied only to chunks still over *limit*):
+    1. Split at ``━━━`` section-break lines.
+    2. Split oversized chunks at blank lines (``\\n\\n``).
+    3. Split still-oversized chunks at the last newline before *limit*.
+    """
+
+    def _split_at_blank_lines(blob: str) -> list[str]:
+        parts: list[str] = []
+        current = ""
+        for paragraph in blob.split("\n\n"):
+            candidate = (current + "\n\n" + paragraph) if current else paragraph
+            if len(candidate) <= limit:
+                current = candidate
+            else:
+                if current:
+                    parts.append(current)
+                current = paragraph
+        if current:
+            parts.append(current)
+        return parts or [blob]
+
+    # Level 1 — section breaks.
+    raw_sections = text.split("\n" + _SECTION_BREAK_PREFIX)
+    sections: list[str] = []
+    for i, s in enumerate(raw_sections):
+        sections.append(s if i == 0 else _SECTION_BREAK_PREFIX + s)
+
+    chunks: list[str] = []
+    current_chunk = ""
+    for section in sections:
+        candidate = (current_chunk + "\n" + section) if current_chunk else section
+        if len(candidate) <= limit:
+            current_chunk = candidate
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = section
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    # Level 2 — blank lines.
+    level2: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= limit:
+            level2.append(chunk)
+        else:
+            level2.extend(_split_at_blank_lines(chunk))
+
+    # Level 3 — last newline before limit.
+    final: list[str] = []
+    for chunk in level2:
+        while len(chunk) > limit:
+            split_pos = chunk.rfind("\n", 0, limit)
+            if split_pos <= 0:
+                split_pos = limit
+            final.append(chunk[:split_pos])
+            chunk = chunk[split_pos:].lstrip("\n")
+        if chunk:
+            final.append(chunk)
+
+    return final or [text]
+
+
 def _current_cycle_bounds() -> tuple[date, date, str] | None:
     """(start, today, label) for the current cycle, or None → calendar fallback."""
     if not settings.BUDGET_CYCLE:
@@ -787,37 +853,8 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {input_ccy}: {total:,.0f}")
 
     report_text = "\n".join(lines)
-    if len(report_text) <= _REPORT_MSG_LIMIT_CHARS:
-        await update.message.reply_text(report_text, parse_mode="Markdown")
-    else:
-        # Split only at section-break lines (━━━…) to avoid breaking Markdown
-        # spans across messages (Telegram rejects unmatched bold/code markers).
-        chunks: list[str] = []
-        current_lines: list[str] = []
-        current_len = 0
-        for line in report_text.split("\n"):
-            line_len = len(line) + 1  # +1 for the joining newline
-            if (line.startswith(_SECTION_BREAK_PREFIX)
-                    and current_lines
-                    and current_len + line_len > _REPORT_MSG_LIMIT_CHARS):
-                chunks.append("\n".join(current_lines))
-                current_lines = [line]
-                current_len = line_len
-            else:
-                current_lines.append(line)
-                current_len += line_len
-        if current_lines:
-            chunks.append("\n".join(current_lines))
-        # Fallback: if no section break split the report and it's still too
-        # long, send as a single message truncated to Telegram's hard limit.
-        if len(chunks) == 1 and len(chunks[0]) > _TELEGRAM_HARD_LIMIT:
-            text = report_text[:_TELEGRAM_HARD_LIMIT - 50] + "\n⚠️ Output too long — some data was omitted."  # 50-char buffer for the truncation suffix
-            await update.message.reply_text(text, parse_mode="Markdown")
-        else:
-            for chunk in chunks:
-                if len(chunk) > _TELEGRAM_HARD_LIMIT:
-                    chunk = chunk[:_TELEGRAM_HARD_LIMIT - 50] + "\n⚠️ Output too long — some data was omitted."  # 50-char buffer for the truncation suffix
-                await update.message.reply_text(chunk, parse_mode="Markdown")
+    for chunk in _split_message(report_text, _REPORT_MSG_LIMIT_CHARS):
+        await update.message.reply_text(chunk, parse_mode="Markdown")
 
 
 @auth
