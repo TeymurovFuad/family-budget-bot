@@ -497,6 +497,10 @@ async def _do_finish_profile_parse(
     memory_notes = _apply_merchant_memory(parsed)
     # AI categorization for merchants the map doesn't know — statement parsing
     # itself extracts no category, so without this first imports are all 'Other'.
+    if not (lists.get("categories") or []):
+        await update.effective_message.reply_text(
+            "⚠️ AI categorization skipped — no categories configured. Run /setup to add categories."
+        )
     ai_notes = await loop.run_in_executor(
         None, lambda: _apply_ai_categorization(parsed, lists)
     )
@@ -1220,7 +1224,7 @@ def _apply_ai_categorization(parsed: list[dict], lists: dict) -> list[str]:
     """
     categories = lists.get("categories") or []
     if not categories:
-        return ["AI categorization skipped — no categories configured. Run /setup to add categories."]
+        return []
 
     targets: dict[str, list[dict]] = {}
     for row in parsed:
