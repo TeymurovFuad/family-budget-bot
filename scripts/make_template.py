@@ -8,8 +8,8 @@ What is removed / replaced:
   - MasterData       : all data rows (header kept)
   - Monthly Summary  : all data rows (header kept)
   - Lists col D      : personal names → ["Person 1", "Person 2"]
-  - Dashboard row 2  : filter state reset (Year=current, Month="", Currency=PLN)
-  - Dashboard budgets: PLN amounts zeroed (formula structure kept: =0/$N$2)
+  - Dashboard row 2  : filter state reset (Year=current, Month="", Currency=base)
+  - Dashboard budgets: budget amounts zeroed (formula structure kept: =0/$N$2)
 
 What is preserved:
   - All sheet structure, formulas, conditional formatting, data validations
@@ -81,11 +81,11 @@ def scrub_persons(ws) -> None:
 
 
 def scrub_dashboard(ws) -> None:
-    """Reset filter state and zero out budget PLN amounts."""
+    """Reset filter state and zero out budget amounts."""
     cur_year = datetime.now(timezone.utc).year
 
     # Row 2 = filter area: Year | value | Month | value | Display | currency
-    # Reset: Year → current year, Month → "" (all months), Currency → PLN
+    # Reset: Year → current year, Month → "" (all months), Currency → base
     for c in range(1, ws.max_column + 1):
         label = str(ws.cell(2, c).value or "").strip()
         if label == "Year":
