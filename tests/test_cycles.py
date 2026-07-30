@@ -274,7 +274,7 @@ def test_detect_matches_salary_in_category_without_description_column():
 def test_detect_contains_match_on_bank_transfer_titles():
     df = _detect_df()
     df["Description"] = [
-        "WYNAGRODZENIE ZA LIPIEC ACME SP Z OO",
+        "SALARY PAYMENT JUL ACME LTD",
         "SALARY JUL 2024",
         "salary",
         "",
