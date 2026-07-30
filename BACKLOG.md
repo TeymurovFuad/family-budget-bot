@@ -95,12 +95,12 @@ Must ship before the user re-imports 1,400 historical rows.
 - [x] Formula injection via descriptions — bulk/quick/edit bypass sanitizer *(parallel-review findings)*
 
 **Still open:**
-- [ ] Salary-mask: Empty `SALARY_CATEGORY` degenerates *(salary-mask review notes PR #36)*
+- [x] Salary-mask: Empty `SALARY_CATEGORY` degenerates *(fixed: `cycles.py:325-326` strips/drops blank entries; `cycles.py:342-344` adds defense-in-depth guard in `salary_mask`)*
 - [x] Monthly Summary sheet never updated by the bot *(fixed PR #38 — bot appends SUMIFS rows on every write)*
 - [x] Recovery-queue corruption bricks startup *(fixed in prior PRs — atomic write + .corrupt quarantine in file_storage.py)*
 - [x] Partial bulk save loses failed rows *(fixed in prior PRs — failed rows kept in draft with retry message)*
-- [ ] [PR #3] Preview edits not persisted to draft file *(PR #3 bulk-import bugs)*
-- [ ] [PR #3] Recovery replay writes Date as text string *(PR #3 bulk-import bugs)*
+- [x] [PR #3] Preview edits not persisted to draft file *(fixed: `handlers/bulk_conv.py:1987` calls `_save_bulk_draft(uid, parsed)` after every edit)*
+- [x] [PR #3] Recovery replay writes Date as text string *(fixed: `excel_ops.py:114-120` rehydrates ISO date string → `datetime.date` before writing)*
 - [ ] [PR #3] Cosmetic cleanup *(PR #3 bulk-import bugs)*
 
 ### Run 2 — "Complete the cycles feature" (~35 items)
@@ -109,7 +109,7 @@ Cycles is half-done: /summary and /budget are cycle-scoped, reports aren't, pick
 **Report gaps:**
 - [x] `/report` still calendar-based *(fixed PR #47)*
 - [x] `/top` still calendar-based *(fixed PR #47)*
-- [ ] `/savings` still calendar-based *(cycle-aware report gaps)*
+- [x] `/savings` still calendar-based *(fixed: `handlers/reports.py:703-720` uses `cycle_periods` + `cycle_totals` when `settings.BUDGET_CYCLE` is set)*
 - [x] `check_budget_alert` still calendar-scoped *(fixed PR #47)*
 
 **/summary picker UX (5 items from agreed design):**
@@ -220,7 +220,7 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 
 **Open items (resolve before implementation):**
 - [ ] Confirm `data/Expenses_Template.xlsx` is committed and present at runtime (it is — verify before starting)
-- [ ] Dashboard category SUMIF rebuild function: extract shared helper from `sync_cycle_dashboard_categories` so both Dashboard and Cycle Dashboard rebuilds share one code path
+- [x] Dashboard category SUMIF rebuild function: fixed: `excel_schema.py:252-278` `write_category_sumif_block` is already shared; both Dashboard and Cycle Dashboard call it
 - [ ] `CATEGORY_TYPE_HINTS` dict: implement as part of this PR or as a follow-up to the data-validation PR
 
 - **Infra/performance (7):** .bak leak, reference-data TTL cache, JSONL recovery queue, lost-update protection, `_load_bulk_drafts` reads every user, split `file_storage`, DeepSeek output as typed model
@@ -412,15 +412,8 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       PR ("Derive Year/Month from Date by formula" — same territory).
       **Priority: P2** — visible blank sheet misleads the user about their data.
 
-- [ ] **Cycle new-boundary prompt omits year — ambiguous in December** —
-      `_day_month(proposed)` in `handlers/cycle.py:56` returns `f"{d.day} {d.strftime('%b')}"`,
-      so the prompt reads "💰 Salary received. Start the new budget cycle from 20 Dec?"
-      with no year. In December this is ambiguous: the proposed date could be Dec 2025
-      or Dec 2026 (or any other year for backdated entries). Fix: include the year
-      when `proposed.year != date.today().year`, or always show the full date
-      (`f"{d.day} {d.strftime('%b %Y')}"`).
+- [x] **Cycle new-boundary prompt omits year — ambiguous in December** — fixed: `handlers/cycle.py:82` `_day_month` now returns `f"{d.day} {d.strftime('%b %Y')}"` (year always included).
       (`handlers/cycle.py` `_day_month`, also used in `/cycle list` output)
-      **Priority: P2** — affects correctness of boundary confirmation.
 
 ## Follow-up: salary-mask review notes (PR #36, 2026-07-25)
 
@@ -429,9 +422,7 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       inflating unaccounted math. Safer: fall back to Description only when
       Category is empty/blank. Same in `maybe_prompt_cycle_start`.
       (`cycles.py` `salary_mask`)
-- [ ] **Empty `SALARY_CATEGORY` degenerates** — a blank keyword matches every
-      Income row with a blank Category or Description. Add
-      `if not keyword: return all-False`. (`cycles.py` `salary_mask`)
+- [x] **Empty `SALARY_CATEGORY` degenerates** — fixed: `cycles.py:325-326` strips/drops blank entries in `cycle_detect_keywords`; `cycles.py:342-344` adds defense-in-depth guard in `salary_mask`. (`cycles.py` `salary_mask`)
 - [x] **Exact-match on Description brittle for statement imports** *(fixed in PR #43 — word-boundary contains match)* — bank
       salary rows often read "SALARY JUL 2024" / "ACME PAYROLL"; the exact
       `== "salary"` match misses them — the same failure mode PR #36 fixed.
@@ -446,8 +437,7 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 ## Follow-up: re-review notes (PR #36/#37 second pass, 2026-07-25)
 
 - [x] **Ad-hoc `/cycle detect <words>` keywords don't reach `cycle_totals`** — done in PR #74: `extra_keywords` param added to `cycle_totals` and threaded through all call sites (`handlers/reports.py:66,81,647`).
-- [ ] **`\b` fails for keywords with non-word edge chars** — `c++` or `bonus!`
-      can never match; switch to `(?<!\w)...(?!\w)` lookarounds if ever needed.
+- [x] **`\b` fails for keywords with non-word edge chars** — fixed in PR #87: `cycles.py:345` and `handlers/cycle.py:548-551` use `(?<!\w)...(?!\w)` lookarounds.
       (`cycles.py` `salary_mask`)
 - [ ] **Keyword set widens the Description-OR blast radius** — extends the
       existing "Description match is unconditional OR" note above: with more
