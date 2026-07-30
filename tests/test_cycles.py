@@ -58,10 +58,11 @@ def make_ctx(args=None):
     return ctx
 
 
-def make_transaction(txn_type="Income", category="Salary", txn_date=None):
+def make_transaction(txn_type="Income", category="Salary", txn_date=None, description=""):
     t = MagicMock()
     t.transaction_type = txn_type
     t.category = category
+    t.description = description
     t.date = txn_date or date(2026, 7, 23)
     return t
 
@@ -475,6 +476,36 @@ async def test_maybe_prompt_young_cycle_stays_silent(excel_path, monkeypatch):
     record_cycle_start(today - timedelta(days=3))
     upd = make_update()
     await maybe_prompt_cycle_start(upd, make_transaction(txn_date=today))
+    upd.message.reply_text.assert_not_called()
+
+
+async def test_maybe_prompt_description_match_no_category(excel_path, monkeypatch):
+    """salary keyword in Description with blank Category triggers prompt."""
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    upd = make_update()
+    txn = make_transaction(category="", description="SALARY PAYMENT JUL ACME LTD")
+    await maybe_prompt_cycle_start(upd, txn)
+    upd.message.reply_text.assert_called_once()
+    assert "💰 Salary received" in upd.message.reply_text.call_args[0][0]
+
+
+async def test_maybe_prompt_nonword_edge_keyword_matches(excel_path, monkeypatch):
+    """(?<!\\w)...(?!\\w) lookaround matches keywords with non-word-char edges."""
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: ["c++bonus"])
+    upd = make_update()
+    txn = make_transaction(category="c++bonus")
+    await maybe_prompt_cycle_start(upd, txn)
+    upd.message.reply_text.assert_called_once()
+
+
+async def test_maybe_prompt_nonword_edge_no_substring_match(excel_path, monkeypatch):
+    """lookaround does not fire when keyword appears as a substring."""
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: ["salary"])
+    upd = make_update()
+    txn = make_transaction(category="salaryman")
+    await maybe_prompt_cycle_start(upd, txn)
     upd.message.reply_text.assert_not_called()
 
 

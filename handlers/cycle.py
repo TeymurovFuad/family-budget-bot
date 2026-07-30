@@ -236,13 +236,13 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         ctx.user_data["detect_extra_keywords"] = extra_keywords
     else:
         ctx.user_data.pop("detect_extra_keywords", None)
-    keywords = cycle_detect_keywords(extra_keywords)
+    loop = asyncio.get_running_loop()
+    keywords = await loop.run_in_executor(None, cycle_detect_keywords, extra_keywords)
     await update.message.reply_text(
         f"🔍 Scanning transaction history — matching: {_esc(', '.join(keywords))}\\.\\.\\.",
         parse_mode="MarkdownV2",
     )
 
-    loop = asyncio.get_running_loop()
     df, rates, cycles = await loop.run_in_executor(
         None, lambda: (load_data(), load_rates(), load_cycles())
     )
