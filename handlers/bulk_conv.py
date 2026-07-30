@@ -470,6 +470,21 @@ async def _do_finish_profile_parse(
     ctx.user_data["lists"] = lists
 
     loop = asyncio.get_running_loop()
+
+    # Re-validate decimal separator when reusing a saved profile.
+    sample_rows = await loop.run_in_executor(
+        None,
+        lambda: _get_sample_rows(
+            file_bytes, filename, delimiter=profile.get("delimiter") or ","
+        ),
+    )
+    sep_warnings = sp.validate_proposal_against_samples(profile, sample_rows)
+    if sep_warnings:
+        await update.effective_message.reply_text(
+            "⚠️ Decimal separator in saved profile may not match this file — "
+            "please verify the parsed amounts."
+        )
+
     parsed = await loop.run_in_executor(
         None, lambda: sp.parse_statement(file_bytes, filename, profile)
     )
@@ -482,6 +497,10 @@ async def _do_finish_profile_parse(
     memory_notes = _apply_merchant_memory(parsed)
     # AI categorization for merchants the map doesn't know — statement parsing
     # itself extracts no category, so without this first imports are all 'Other'.
+    if not (lists.get("categories") or []):
+        await update.effective_message.reply_text(
+            "⚠️ AI categorization skipped — no categories configured. Run /setup to add categories."
+        )
     ai_notes = await loop.run_in_executor(
         None, lambda: _apply_ai_categorization(parsed, lists)
     )

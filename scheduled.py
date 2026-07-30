@@ -22,7 +22,8 @@ async def replay_recovery_queue_job(app: Application | None = None):
     from excel_ops import replay_recovery_queue
     from file_storage import excel_write_lock, flush_recovery_queue
 
-    if not flush_recovery_queue():   # cheap peek — nothing pending
+    pending = flush_recovery_queue()   # cheap peek — nothing pending
+    if not pending:
         return
     loop = asyncio.get_running_loop()
     async with excel_write_lock:
@@ -30,6 +31,34 @@ async def replay_recovery_queue_job(app: Application | None = None):
             await loop.run_in_executor(None, replay_recovery_queue)
         except Exception:
             log.exception("Periodic recovery queue replay failed")
+            return
+
+    if app is None:
+        return
+
+    notified: set = set()
+    missing_chat_id = False
+    for row in pending:
+        chat_id = row.get("chat_id")
+        if not chat_id:
+            missing_chat_id = True
+            continue
+        if chat_id in notified:
+            continue
+        try:
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text="✅ A previously queued save was recovered and committed.",
+            )
+            notified.add(chat_id)
+        except Exception:
+            log.exception("Failed to send recovery notification to %s", chat_id)
+    if missing_chat_id and not notified:
+        log.warning(
+            "Recovery queue replay succeeded but entries carry no chat_id — "
+            "user notification skipped (%d row(s) recovered)",
+            len(pending),
+        )
 
 
 async def send_weekly_report(app: Application):
