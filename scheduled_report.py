@@ -11,7 +11,7 @@ Environment variables (set as GitHub Secrets / Variables):
   TELEGRAM_BOT_TOKEN    Required. From @BotFather.
   ALLOWED_TELEGRAM_IDS  Required. Comma-separated Telegram user IDs.
   XLSX_PATH             Path to Excel file. Default: data/Expenses_Improved.xlsx
-  DISPLAY_CURRENCY      Currency for display. Default: PLN
+  DISPLAY_CURRENCY      Currency for display. Default: set via env var
   REPORT_TYPE           weekly | monthly | yearly. Default: weekly
   TIMEZONE              Default: UTC
 """
@@ -57,7 +57,7 @@ def _month_names() -> list[str]:
 
 
 def load_budget_amounts() -> dict[str, float]:
-    """Read monthly PLN budget targets from the Dashboard sheet."""
+    """Read monthly budget targets from the Dashboard sheet."""
     return load_budgets_from_excel(get_excel_path_for_reading())
 
 

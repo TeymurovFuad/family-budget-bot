@@ -18,6 +18,11 @@ Statement parsing, bulk preview, dedup UX, and person attribution.
 - [ ] **Report chunking can break Markdown entities** — PARTIAL: `cmd_report` now splits at `━━━` section-break lines instead of raw 4000-char split (`reports.py:793-820`), preventing mid-span splits. Does not yet reuse the paginated-send helper from bulk_conv.
 - [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never improvised"). Deliberate re-alignment pass, not urgent.
 - [x] **Person attribution per import** — fixed: `_finish_profile_parse` returns `BULK_PERSON` state, `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`); also stamped in the AI text/image path (`bulk_conv.py:1898-1902`).
+- [x] **`bulk_confirm` pre-existing backtick rendering bug** — fixed: removed backtick from "send \`save\` to store them all" message (no parse_mode on that reply). (`bulk_conv.py:2012`)
+- [x] **`bulk_person_callback` empty-person path untested** — fixed: `TestBulkPersonCallback` in `test_e2e_flows.py` covers `bperson:` path and verifies confirmation text and `ctx.user_data["bulk_person"] == ""`.
+- [x] **`bulk_confirm` invalid-input branch untested** — fixed: `TestBulkConfirmInvalidBranch` in `test_e2e_flows.py` covers unrecognised message, asserts no `parse_mode`.
+- [x] **Stale PLN docstrings** — fixed: `scheduled_report.py:60`, `file_storage.py:208` updated.
+- [x] **`scripts/rebuild_excel.py` and `scripts/make_template.py` hardcode PLN** — fixed: column header, descriptions, and comments updated to use base-currency terminology.
 - [ ] **Bulk draft archival instead of naming change** — drafts (`data/bulk_drafts/{uid}.json`) ARE deleted after successful save and on cancel (verified). Improvement: on save, move to `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` instead of deleting — cheap audit trail of what each import contained; prune archive >6 months on startup.
 
 ### Group 2 — Cycles, reports & data quality
