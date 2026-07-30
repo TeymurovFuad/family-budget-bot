@@ -1528,6 +1528,9 @@ def _apply_bulk_edit(
     message: str, parsed: list[dict], lists: dict | None = None
 ) -> tuple[bool, str, list[str]]:
     """Returns (save, reason, correction_notes) — notes are 🛡-reported to the user."""
+    if lists is None:
+        from data import load_reference_data
+        lists = load_reference_data()
     text = message.strip()
     if not text:
         return False, "", []
