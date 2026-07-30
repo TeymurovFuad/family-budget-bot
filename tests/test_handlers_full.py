@@ -1839,7 +1839,7 @@ class TestBulkSaveCommandAndDestination:
         ]
         with patch("handlers.bulk_conv.async_append_batch") as mock_batch, \
 \
-             patch("handlers.bulk_conv._delete_bulk_draft"):
+             patch("handlers.bulk_conv._archive_bulk_draft"):
             result = await bulk_confirm(upd, ctx)
         assert result == ConversationHandler.END
         mock_batch.assert_called_once()
@@ -2128,3 +2128,61 @@ class TestBulkFormulaInjectionGuard:
         assert result == states.BULK_CONFIRM
         messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
         assert any("🛡" in m and "negative" in m for m in messages)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bulk draft archival + off-peak AI warning
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBulkDraftArchive:
+    def test_archive_moves_draft_to_archive_dir(self, isolated_bulk_drafts):
+        from handlers.bulk_conv import _archive_bulk_draft, _save_bulk_draft
+        uid = 4242
+        _save_bulk_draft(uid, [{"date": "2024-06-15", "value": 5}])
+        draft_path = isolated_bulk_drafts / f"{uid}.json"
+        assert draft_path.exists()
+
+        _archive_bulk_draft(uid)
+
+        assert not draft_path.exists()  # moved, not left behind
+        archived = list((isolated_bulk_drafts / "archive").glob("*.json"))
+        assert len(archived) == 1
+        # Named "<user_id>-<YYYYMMDD-HHMMSS>.json"
+        import re
+        assert re.fullmatch(rf"{uid}-\d{{8}}-\d{{6}}\.json", archived[0].name)
+        # Content preserved (audit trail, not delete)
+        import json as _json
+        assert _json.loads(archived[0].read_text(encoding="utf-8"))[0]["value"] == 5
+
+    def test_archive_noop_when_no_draft(self, isolated_bulk_drafts):
+        from handlers.bulk_conv import _archive_bulk_draft
+        _archive_bulk_draft(999999)  # must not raise
+        assert not (isolated_bulk_drafts / "archive").exists()
+
+
+class TestOffPeakWarning:
+    async def test_peak_hours_warning_sent_before_ai_parse(self):
+        upd = make_update("50 PLN groceries")
+        ctx = make_ctx()
+        parsed = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
+                   "category": "Groceries", "description": "shop"}]
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv.is_off_peak", return_value=False), \
+             patch("handlers.bulk_conv.parse_text", return_value=parsed) as mock_parse:
+            result = await bulk_receive(upd, ctx)
+        assert result == states.BULK_CONFIRM
+        messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert any("Peak hours" in m for m in messages)
+        mock_parse.assert_called_once()
+
+    async def test_no_warning_during_off_peak(self):
+        upd = make_update("50 PLN groceries")
+        ctx = make_ctx()
+        parsed = [{"date": "2024-06-15", "value": 50, "currency": "PLN",
+                   "category": "Groceries", "description": "shop"}]
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv.is_off_peak", return_value=True), \
+             patch("handlers.bulk_conv.parse_text", return_value=parsed):
+            await bulk_receive(upd, ctx)
+        messages = [c.args[0] for c in upd.message.reply_text.call_args_list]
+        assert not any("Peak hours" in m for m in messages)

@@ -510,8 +510,6 @@ class DeepSeekProvider(AIProvider):
         kwargs = {"model": model, "messages": messages, "temperature": 0}
         if max_tokens:
             kwargs["max_tokens"] = max_tokens
-        if not is_off_peak():
-            log.info("AI call outside off-peak window — cost may be higher")
         resp = self._client_().chat.completions.create(**kwargs)
         return resp.choices[0].message.content
 
