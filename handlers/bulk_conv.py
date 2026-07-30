@@ -1083,7 +1083,7 @@ def _merge_bulk_draft(user_id: int, parsed: list[dict]) -> tuple[list[dict], int
     """
     Merge new rows into the pending draft. Within-batch/within-draft repeats
     are KEPT by default (dedup v2 inverts PR #7's hard skip here — repetition
-    inside one source is almost always real, e.g. several 2 PLN car-wash
+    inside one source is almost always real, e.g. several 2.00 car-wash
     payments on the same day, or the same photo re-sent). They are annotated
     as an identical group in the preview instead (see _flag_master_duplicates),
     and MasterData-level dedup still applies once they're actually saved.

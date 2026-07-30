@@ -14,7 +14,7 @@ Two connected parts:
 | `Expenses.xlsx` | Source of truth — stores every transaction |
 | `bot.py` (Telegram) | Reads and writes the Excel file, sends summaries |
 
-All amounts are stored internally in **PLN**. You can change how they are displayed
+All amounts are stored internally in your **base currency** (set via DISPLAY_CURRENCY). You can change how they are displayed
 (EUR, AZN, etc.) without touching any data.
 
 ---
@@ -50,7 +50,7 @@ Every transaction is one row. There are 13 columns:
 | H | Description | ✅ Free text | A short note — 3 to 6 words is enough |
 | I | IsRecurring | ✅ You fill | TRUE if paid every month (rent, loan, internet) |
 | J | IsDone | ✅ You fill | TRUE = paid. FALSE = planned but not yet paid (excluded from totals) |
-| K | Currency | ✅ Dropdown | PLN by default. Change to EUR, AZN etc. for foreign transactions |
+| K | Currency | ✅ Dropdown | Your configured base currency. Change to EUR, AZN etc. for foreign transactions |
 | L | Value (base) | ❌ Formula | Auto-converts Value to the base currency using the rate from Lists sheet |
 | M | Date Modified (UTC) | ❌ Formula | Audit timestamp — when the row was entered. Set once by formula when Value is first typed in Excel; rows written by the bot get the write time directly |
 
@@ -67,7 +67,7 @@ Without this it shows 0.
 
 1. Enter the **Date** (col A). Year and Month fill automatically.
 2. Enter the **Value** — the amount in whatever currency you paid in.
-3. Set **Currency** if not PLN. The PLN equivalent calculates automatically.
+3. Set **Currency** if different from your base currency. The base-currency equivalent calculates automatically.
 4. Choose **Type** from the dropdown: Expense, Income, or Savings.
 5. Choose **Category** from the dropdown.
 6. Write a short **Description**.
@@ -105,7 +105,7 @@ Without this it shows 0.
 ### Monthly Budget Targets
 
 These are set in the Dashboard (column I, the blue input cells) and in the bot.
-All amounts in PLN:
+All amounts in base currency:
 
 | Category | Monthly budget |
 |---|---|
@@ -133,7 +133,7 @@ All amounts in PLN:
 
 **How storage works:**
 Every transaction stores the original amount in column D (Value) and the
-currency in column K. Column L (Value PLN) automatically converts to PLN using
+currency in column K. Column L (Value base) automatically converts to your base currency using
 the rate from the Lists sheet. All totals, all Dashboard figures, and all bot
 responses use column L — never column D directly.
 
@@ -141,7 +141,7 @@ responses use column L — never column D directly.
 
 | Currency | Rate to base |
 |---|---|
-| PLN | 1 (never change) |
+| `(base currency)` | 1 (never change) |
 | EUR | 4.28 — edit when the rate changes |
 | USD | 3.92 |
 | GBP | 4.98 |
@@ -152,7 +152,7 @@ The blue cells are the ones you edit. Changing EUR from 4.28 to 4.35 instantly
 recalculates every EUR transaction in the workbook.
 
 **Display currency** is set on the Dashboard in cell F2. Changing it to EUR makes
-every number on the Dashboard show in euros — it divides all PLN values by the
+every number on the Dashboard show in euros — it divides all base-currency values by the
 EUR rate. Historical data stays untouched; it just displays differently.
 
 ---
@@ -168,7 +168,7 @@ EUR rate. Historical data stays untouched; it just displays differently.
 | F2 | Display Currency — all numbers convert instantly |
 
 **The sanity check (row 15):**
-The tracker is built on: Income = Expenses + Savings. Every earned PLN must be
+The tracker is built on: Income = Expenses + Savings. Every amount in your base currency must be
 either logged as an expense or logged as savings. If the check shows anything
 other than "✓ Balanced", a transaction is missing or duplicated.
 
@@ -187,7 +187,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | D | Family members | Legacy — the Person field is retired; the bot no longer uses this list |
 | E | Years | Add the next year here before January |
 | G | Currency codes | Add a new currency here |
-| H | Rates to PLN | Edit when an exchange rate changes |
+| H | Rates (base) | Edit when an exchange rate changes |
 | Salary Keywords | Extra words that mark a transaction as salary income | Managed via `/keywords` — do not edit directly |
 
 ---
@@ -373,7 +373,7 @@ MasterData before showing the preview:
   description): the row is **saved by default** and flagged `⚠️` as an
   advisory. Reply `drop N` or `drop all flagged` if it's the same payment
   with a reformatted merchant name.
-- **Identical rows within one batch** (e.g. three 2 PLN car-wash payments
+- **Identical rows within one batch** (e.g. three 2.00 car-wash payments
   same day): all are kept by default and annotated. Reply `drop N` to remove
   one if it's a scan error.
 
@@ -607,10 +607,10 @@ Example: moving to Azerbaijan.
 2. Set `DISPLAY_CURRENCY=AZN` in `.env` and restart the bot.
 3. Set `TIMEZONE=Asia/Baku` in `.env`.
 4. Log new transactions with Currency = AZN and the native amount in Value.
-   The PLN equivalent is calculated automatically.
-5. Historical PLN data stays untouched and converts to AZN for display.
+   The base-currency equivalent is calculated automatically.
+5. Historical base-currency data stays untouched and converts to AZN for display.
 6. Update the budget amounts in the Dashboard (blue cells) to reflect
-   the new country's cost of living. The bot's `MONTHLY_BUDGETS_PLN` dict
+   the new country's cost of living. The bot's `MONTHLY_BUDGETS` dict
    in `bot.py` also needs updating to match.
 
 ---

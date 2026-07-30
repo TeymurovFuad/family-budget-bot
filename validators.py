@@ -152,7 +152,7 @@ def make_dedup_key(txn_date, value, currency, description) -> str:
 
     Used to detect re-imports of the same bank-statement rows. Uses the RAW
     Value + Currency as stored (that is what a re-import would duplicate),
-    never the PLN conversion. Description is normalized (Excel guard-quote
+    never the base-currency conversion. Description is normalized (Excel guard-quote
     stripped, merchant junk cleaned, whitespace collapsed, case-folded) so a
     raw statement description and its cleaned stored form produce the SAME key.
     """

@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import settings
 from validators import make_dedup_key, make_loose_dedup_key, parse_amount
 
 ALLOWED_UID = 123
@@ -98,7 +99,8 @@ class TestMakeDedupKey:
         k2 = make_dedup_key("2024-06-15", 50.0, "PLN", "Groceries shop")
         assert k1 == k2
 
-    def test_missing_currency_defaults_to_pln(self):
+    def test_missing_currency_defaults_to_display_currency(self, monkeypatch):
+        monkeypatch.setattr(settings, "DISPLAY_CURRENCY", "PLN")
         k1 = make_dedup_key("2024-06-15", 50.0, "", "Groceries shop")
         k2 = make_dedup_key("2024-06-15", 50.0, "PLN", "Groceries shop")
         assert k1 == k2

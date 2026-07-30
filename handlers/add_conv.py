@@ -171,8 +171,8 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ctx.user_data["recurring_proposed"] = True
 
     ccy       = state.currency or settings.DISPLAY_CURRENCY
-    pln_equiv = state.value * get_rate(ccy, state.rates)
-    base_note = f"\n_base equivalent: {pln_equiv:,.0f}_" if ccy != settings.DISPLAY_CURRENCY else ""
+    base_equiv = state.value * get_rate(ccy, state.rates)
+    base_note = f"\n_base equivalent: {base_equiv:,.0f}_" if ccy != settings.DISPLAY_CURRENCY else ""
     recurring = "Yes" if state.is_recurring else "No"
     if state.is_recurring and ctx.user_data.get("recurring_proposed"):
         recurring += " 🔁 (detected from history)"
@@ -379,8 +379,8 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             transaction.category, datetime.now(timezone.utc),
         )
         ccy      = transaction.currency
-        pln      = transaction.value * get_rate(ccy, state.rates)
-        suffix   = f" ({pln:,.0f} {settings.DISPLAY_CURRENCY})" if ccy != settings.DISPLAY_CURRENCY else ""
+        base_val = transaction.value * get_rate(ccy, state.rates)
+        suffix   = f" ({base_val:,.0f} {settings.DISPLAY_CURRENCY})" if ccy != settings.DISPLAY_CURRENCY else ""
         disp_ccy = get_display_currency(uid)
         await update.message.reply_text(
             f"✅ Saved: *{transaction.value:,.2f} {ccy}*{suffix} → {transaction.category}",

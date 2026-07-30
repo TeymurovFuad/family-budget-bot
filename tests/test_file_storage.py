@@ -109,7 +109,7 @@ class TestCreateBlankExcel:
                     assert ws.cell(row, c).value is None, f"Budget col row {row} should be blank"
                 break
 
-    def test_pln_rate_is_1(self, excel_path):
+    def test_base_currency_rate_is_1(self, excel_path):
         wb = openpyxl.load_workbook(excel_path)
         ws = wb["Lists"]
         found = False

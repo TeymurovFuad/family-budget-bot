@@ -543,13 +543,13 @@ def _run(source: Path, dest: Path):
         recur_val    = row.get("IsRecurring")
         done_val     = row.get("IsDone")
         ccy_val      = row.get("Currency") or settings.DISPLAY_CURRENCY
-        pln_val      = row.get("Value (base)")
+        base_val     = row.get("Value (base)")
         mod_val      = row.get("Date Modified (UTC)")
 
         # Recompute Value (base) if missing
-        if pln_val is None and value_val is not None:
+        if base_val is None and value_val is not None:
             rate = rates_dict.get(str(ccy_val).upper(), 1.0)
-            pln_val = round(float(value_val) * rate, 4)
+            base_val = round(float(value_val) * rate, 4)
 
         new_md.cell(r_idx,  1, date_val)
         new_md.cell(r_idx,  2, year_val)
@@ -562,7 +562,7 @@ def _run(source: Path, dest: Path):
         new_md.cell(r_idx,  9, recur_val)
         new_md.cell(r_idx, 10, done_val)
         new_md.cell(r_idx, 11, ccy_val)
-        new_md.cell(r_idx, 12, pln_val)
+        new_md.cell(r_idx, 12, base_val)
         new_md.cell(r_idx, 13, mod_val)
 
     # ── 7. Dashboard budgets ──────────────────────────────────────────────────

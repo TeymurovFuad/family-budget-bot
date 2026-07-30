@@ -12,13 +12,13 @@ def format_amount(n: float, ccy: str = "") -> str:
     return f"{n:,.0f} {ccy}"
 
 
-def convert(pln_amount: float, ccy: str, rates: dict) -> float:
+def convert(base_amount: float, ccy: str, rates: dict) -> float:
     rate = get_rate(ccy, rates)
-    return pln_amount / rate if rate else pln_amount
+    return base_amount / rate if rate else base_amount
 
 
-def format_base_as_currency(pln_amount: float, ccy: str, rates: dict) -> str:
-    return format_amount(convert(pln_amount, ccy, rates), ccy)
+def format_base_as_currency(base_amount: float, ccy: str, rates: dict) -> str:
+    return format_amount(convert(base_amount, ccy, rates), ccy)
 
 
 def budget_progress_bar(actual: float, budget: float, width: int = 10) -> str:

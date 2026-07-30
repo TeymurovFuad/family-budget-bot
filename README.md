@@ -360,7 +360,7 @@ The **Lists** sheet in the Excel file controls all reference data. The bot reads
 | F | _(unused)_ |
 | G | _(unused)_ |
 | I | Currency code (e.g. `PLN`, `EUR`, `USD`) |
-| J | Exchange rate (PLN per 1 unit of the currency) |
+| J | Exchange rate (base currency units per 1 unit of the currency) |
 
 > **All lists (categories, currencies, transaction types) are read live from Excel — add/remove values anytime without restarting the bot.**
 > Col C is the single source of truth for categories — add any category here and it appears in the bot keyboard and Excel dropdown for all transaction types (Expense, Income, Savings).

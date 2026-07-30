@@ -123,7 +123,7 @@ def load_rates() -> dict[str, float]:
     """
     Read currency rate table from the Lists sheet.
     Column positions are resolved via ListsSchema — no hardcoded positions.
-    Returns {currency_code: pln_per_unit}. Falls back to {settings.DISPLAY_CURRENCY: 1.0}.
+    Returns {currency_code: base_units_per_foreign_unit}. Falls back to {settings.DISPLAY_CURRENCY: 1.0}.
     Cached — see the reference-data TTL cache above.
     """
     def _load() -> dict[str, float]:

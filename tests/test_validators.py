@@ -58,7 +58,7 @@ class TestParseAmount:
         ("1,234,567", 1234567.0),          # repeated separator = thousands
         ("1.234.567", 1234567.0),
         ("50 PLN", 50.0),                   # currency suffix ignored
-        ("zł 89", 89.0),
+        ("£ 89", 89.0),
         (150.5, 150.5),                     # already numeric
         ("10.567", 10567.0),                # lone separator + 3 digits = thousands
         ("10.5678", 10.57),                 # rounded to 2 decimals

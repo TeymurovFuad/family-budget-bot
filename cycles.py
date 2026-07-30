@@ -333,7 +333,7 @@ def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd
     Boolean mask for salary rows: Income type AND a salary keyword in Category
     (word-boundary contains), or in Description when Category is blank.
     Description matters because bulk-imported salary rows carry the bank's
-    transfer title (e.g. 'WYNAGRODZENIE ZA LIPIEC') with an empty category;
+    transfer title (e.g. 'SALARY PAYMENT JULY') with an empty category;
     a categorised row ('Freelance' + 'Salary' description) is not a salary.
     """
     # Defense in depth: cycle_detect_keywords already drops blanks, but an

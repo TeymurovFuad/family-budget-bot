@@ -71,11 +71,11 @@ Top 3 expense categories:
 ## Formatting rules for Telegram
 
 - Use Markdown (the `parse_mode="Markdown"` version, not MarkdownV2)
-- Backticks for numbers: `11,820 PLN`
+- Backticks for numbers: `11,820 USD`
 - Bold for section labels: *Income:*
 - Emoji for status: 🚀 >20% savings, 💚 15–20%, 🟡 10–15%, 🔴 <10%, 🚨 negative
 - Max 25 lines per message — split if longer
-- Currency symbol at end: "11,820 PLN" not "PLN 11,820"
+- Currency symbol at end: "11,820 USD" not "USD 11,820"
 
 ## Formatting rules for GitHub Actions summary
 
@@ -93,7 +93,7 @@ output in this envelope and leave the token field for the caller to fill:
   "api_token": "{{BUDGET_API_TOKEN}}",
   "report_type": "weekly" | "monthly" | "yearly",
   "period": "2026-05",
-  "currency": "PLN",
+  "currency": "USD",
   "content": "[the formatted report text]"
 }
 ```

@@ -12,7 +12,7 @@ Current target schema (v2 -- unified categories):
   col F = (empty -- no longer used)
   col G = (empty -- no longer used)
   col I = Currency code
-  col J = Rate (PLN)
+  col J = Rate (base)
 
 MasterData col F dropdown points at Lists col C (plain list, no INDIRECT).
 

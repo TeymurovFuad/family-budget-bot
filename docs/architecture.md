@@ -40,7 +40,7 @@ erDiagram
         bool     IsRecurring
         bool     IsDone
         string   Currency
-        float    Value_PLN
+        float    Value_base
         datetime DateModified
     }
 
@@ -51,12 +51,12 @@ erDiagram
         string   Person_D
         int      Year_E
         string   Currency_I
-        float    Rate_PLN_J
+        float    Rate_base_J
     }
 
     DASHBOARD {
         string   Category_H
-        float    Budget_PLN_I
+        float    Budget_base_I
     }
 
     MASTERDATA }o--|| LISTS : "dropdowns validated against"
@@ -84,14 +84,14 @@ sequenceDiagram
         Bot->>AI: parse_text(text, lists)
         AI-->>Bot: Transaction fields (JSON)
         Bot->>Excel: append_transaction()
-        Bot->>TG: "✅ Saved: 250 PLN → Groceries"
+        Bot->>TG: "✅ Saved: 250 USD → Groceries"
     end
 
     alt /add step-by-step
         Bot->>TG: "Enter amount:"
         TG->>Bot: "250"
         Bot->>TG: currency keyboard
-        TG->>Bot: "PLN"
+        TG->>Bot: "USD"
         Bot->>TG: type keyboard (Expense/Income/Savings)
         TG->>Bot: "Expense"
         Bot->>Excel: load_lists() — categories
@@ -105,7 +105,7 @@ sequenceDiagram
 
     alt Report command
         Bot->>Excel: load_data()
-        Bot->>Bot: filter + aggregate _pln
+        Bot->>Bot: filter + aggregate _base
         Bot->>TG: formatted report / chart PNG
     end
 ```
@@ -194,7 +194,7 @@ flowchart LR
     BOT["bot.py\nasync_update_currency_rates()"]
     EXCEL_LI["Excel\nLists col I/J"]
     LOAD["load_rates()\nfinds cols by header name"]
-    COMPUTE["load_data()\n_pln = Value × rate"]
+    COMPUTE["load_data()\n_base = Value × rate"]
 
     CMD --> BOT
     BOT --> EXT
@@ -287,7 +287,7 @@ gantt
 |---|---|
 | **No hardcoded lists** | Categories, currencies, types all read live from Lists sheet |
 | **Single category list** | Lists col C is used for all transaction types (Expense, Income, Savings) |
-| **_pln fallback** | If `Value (PLN)` formula cache is empty, recomputed from `Value × rate` |
+| **_base fallback** | If `Value (base)` formula cache is empty, recomputed from `Value × rate` |
 | **No restart for data changes** | Any Lists sheet edit takes effect on the next bot message |
 | **Restart required** | Only `.py` file changes or `.env` changes require a restart |
 | **Storage agnostic** | Switch `STORAGE_BACKEND` in `.env` — no code change needed |

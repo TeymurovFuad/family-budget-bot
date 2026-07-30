@@ -57,7 +57,7 @@ for r in range(2, ws_md.max_row + 1):
     per  = ws_md.cell(r, hdr["Person"]).value
     ccy  = str(ws_md.cell(r, hdr["Currency"]).value or "")
     desc = str(ws_md.cell(r, hdr["Description"]).value or "")
-    vpln = ws_md.cell(r, hdr.get("Value (base)", 12)).value
+    vbase = ws_md.cell(r, hdr.get("Value (base)", 12)).value
 
     if cat and cat not in categories:
         flag("unknown_category", r, f"category={cat!r} ({typ}, {val}, {desc[:40]!r})")
@@ -75,10 +75,10 @@ for r in range(2, ws_md.max_row + 1):
         flag("date_is_text", r, f"date={dat!r}")
     if isinstance(val, str):
         flag("value_is_text", r, f"value={val!r}")
-    if isinstance(vpln, str) and vpln.startswith("=") and "$H$2:$I$" not in vpln:
-        flag("bad_vlookup_range", r, vpln[:70])
-    if vpln is None or (isinstance(vpln, str) and not vpln.startswith("=")):
-        flag("missing_vpln_formula", r, f"vpln={vpln!r}")
+    if isinstance(vbase, str) and vbase.startswith("=") and "$H$2:$I$" not in vbase:
+        flag("bad_vlookup_range", r, vbase[:70])
+    if vbase is None or (isinstance(vbase, str) and not vbase.startswith("=")):
+        flag("missing_vbase_formula", r, f"vbase={vbase!r}")
     key = (str(dat)[:10], str(val), ccy, desc.lower()[:40])
     seen_keys[key] += 1
 
