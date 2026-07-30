@@ -741,3 +741,41 @@ class TestConflictNotRequeued:
         rows = file_storage.flush_recovery_queue()
         assert len(rows) == 1
         assert rows[0]["value"] == 10.0
+
+
+# ── Monthly Summary row created on single-transaction save ────────────────────
+
+
+class TestMonthlySummaryOnSingleSave:
+    """_do_append_transaction must create a Monthly Summary row for the saved month."""
+
+    def _txn(self, year: int, month_str: str):
+        import datetime
+        from models import Transaction
+        month_to_day = {
+            "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+            "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+        }
+        day = month_to_day[month_str]
+        return Transaction(
+            date=datetime.date(year, day, 1),
+            value=50.0,
+            currency="PLN",
+            transaction_type="Expense",
+            category="Groceries",
+        )
+
+    def test_monthly_summary_row_created_for_new_month(self, excel_path):
+        import excel_ops
+        from excel_schema import ensure_monthly_summary_rows_from_masterdata
+
+        txn = self._txn(2025, "Mar")
+        excel_ops._do_append_transaction(txn)
+
+        wb = openpyxl.load_workbook(excel_path)
+        assert "Monthly Summary" in wb.sheetnames, "Monthly Summary sheet must exist"
+        ws_ms = wb["Monthly Summary"]
+        years  = [ws_ms.cell(r, 1).value for r in range(2, ws_ms.max_row + 1)]
+        months = [ws_ms.cell(r, 2).value for r in range(2, ws_ms.max_row + 1)]
+        assert 2025 in years, "Monthly Summary must have a 2025 row"
+        assert "Mar" in months, "Monthly Summary must have a Mar row"

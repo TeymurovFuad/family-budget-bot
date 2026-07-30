@@ -12,7 +12,6 @@ from excel_schema import (
     find_next_data_row,
     lists_currency_range,
     write_transaction_row,
-    ensure_monthly_summary_row,
     ensure_monthly_summary_rows_from_masterdata,
 )
 from audit import audit_span
@@ -47,8 +46,7 @@ def _do_append_transaction(transaction: Transaction) -> None:
         ws = wb["MasterData"]
         r = find_next_data_row(ws)
         write_transaction_row(ws, r, row, lists_currency_range(wb))
-        if row.get("year") and row.get("month"):
-            ensure_monthly_summary_row(wb, row["year"], row["month"])
+        ensure_monthly_summary_rows_from_masterdata(wb)
         atomic_save(wb, excel_path)
         log.info("Appended transaction row %d: %s", r, row)
 
