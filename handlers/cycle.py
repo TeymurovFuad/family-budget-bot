@@ -112,8 +112,9 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     today = now_utc().date()
     args = ctx.args or []
 
+    loop = asyncio.get_running_loop()
     if not args:
-        current = current_cycle_start(today)
+        current = await loop.run_in_executor(None, current_cycle_start, today)
         if current is None:
             await update.message.reply_text(
                 "No budget cycle recorded yet. Use `/cycle started` (or "
@@ -134,7 +135,7 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if args[0].lower() == "list":
-        cycles_ledger = load_cycles()
+        cycles_ledger = await loop.run_in_executor(None, load_cycles)
         if not cycles_ledger:
             await update.message.reply_text("No cycle boundaries recorded yet.")
             return
@@ -235,13 +236,13 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
         ctx.user_data["detect_extra_keywords"] = extra_keywords
     else:
         ctx.user_data.pop("detect_extra_keywords", None)
-    keywords = cycle_detect_keywords(extra_keywords)
+    loop = asyncio.get_running_loop()
+    keywords = await loop.run_in_executor(None, cycle_detect_keywords, extra_keywords)
     await update.message.reply_text(
         f"🔍 Scanning transaction history — matching: {_esc(', '.join(keywords))}\\.\\.\\.",
         parse_mode="MarkdownV2",
     )
 
-    loop = asyncio.get_running_loop()
     df, rates, cycles = await loop.run_in_executor(
         None, lambda: (load_data(), load_rates(), load_cycles())
     )
@@ -539,19 +540,20 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
         return
     if transaction.transaction_type != "Income":
         return
-    keywords = cycle_detect_keywords()
+    loop = asyncio.get_running_loop()
+    keywords = await loop.run_in_executor(None, cycle_detect_keywords)
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
     in_category = any(
-        re.search(r"\b" + re.escape(k) + r"\b", category, re.UNICODE) for k in keywords
+        re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", category, re.UNICODE) for k in keywords
     )
     in_description = not category and any(
-        re.search(r"\b" + re.escape(k) + r"\b", description, re.UNICODE) for k in keywords
+        re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", description, re.UNICODE) for k in keywords
     )
     if not in_category and not in_description:
         return
     today = now_utc().date()
-    if not should_prompt_new_cycle(today):
+    if not await loop.run_in_executor(None, should_prompt_new_cycle, today):
         return
     proposed = transaction.date or today
     keyboard = InlineKeyboardMarkup([[

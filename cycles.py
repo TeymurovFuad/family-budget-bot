@@ -342,7 +342,7 @@ def salary_mask(df: pd.DataFrame, extra_keywords: list[str] | None = None) -> pd
     keywords = [k for k in cycle_detect_keywords(extra_keywords) if str(k).strip()]
     if not keywords:
         return pd.Series(False, index=df.index)
-    pattern = r"\b(?:" + "|".join(re.escape(k) for k in keywords) + r")\b"
+    pattern = r"(?<!\w)(?:" + "|".join(re.escape(k) for k in keywords) + r")(?!\w)"
     category = df["Category"].fillna("").astype(str).str.strip()
     matches = category.str.contains(pattern, case=False, regex=True, flags=re.UNICODE)
     if "Description" in df.columns:
