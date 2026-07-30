@@ -10,6 +10,7 @@ reach MasterData and break the Dashboard SUMIFS.
 import hashlib
 import re
 from datetime import date, datetime, timezone
+import settings
 
 # Quick-add / /add date sanity: how far back a date may be without confirmation.
 MAX_PAST_DAYS = 90
@@ -141,7 +142,7 @@ def _normalize_dedup_value(value) -> str:
 def _dedup_key_parts(txn_date, value, currency) -> tuple[str, str, str]:
     d = str(txn_date or "").strip()[:10]
     v = _normalize_dedup_value(value)
-    ccy = _normalize_str(currency).upper() or "PLN"
+    ccy = _normalize_str(currency).upper() or settings.DISPLAY_CURRENCY
     return d, v, ccy
 
 
@@ -216,7 +217,7 @@ def validate_parsed_row(
 
     txn_type_raw = _normalize_str(row.get("type", ""))
     category_raw = _normalize_str(row.get("category", ""))
-    currency_raw = _normalize_str(row.get("currency", "PLN")).upper()
+    currency_raw = _normalize_str(row.get("currency") or settings.DISPLAY_CURRENCY).upper()
     date_raw = _normalize_str(row.get("date", ""))
 
     txn_type_map = {t.lower(): t for t in txn_types}

@@ -37,6 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import openpyxl
+import settings
 from _repair_guard import repair_guard
 from file_storage import atomic_save
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -541,7 +542,7 @@ def _run(source: Path, dest: Path):
         desc_val     = row.get("Description") or ""
         recur_val    = row.get("IsRecurring")
         done_val     = row.get("IsDone")
-        ccy_val      = row.get("Currency") or "PLN"
+        ccy_val      = row.get("Currency") or settings.DISPLAY_CURRENCY
         pln_val      = row.get("Value (base)")
         mod_val      = row.get("Date Modified (UTC)")
 

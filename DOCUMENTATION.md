@@ -51,7 +51,7 @@ Every transaction is one row. There are 13 columns:
 | I | IsRecurring | ✅ You fill | TRUE if paid every month (rent, loan, internet) |
 | J | IsDone | ✅ You fill | TRUE = paid. FALSE = planned but not yet paid (excluded from totals) |
 | K | Currency | ✅ Dropdown | PLN by default. Change to EUR, AZN etc. for foreign transactions |
-| L | Value (PLN) | ❌ Formula | Auto-converts Value to PLN using the rate from Lists sheet |
+| L | Value (base) | ❌ Formula | Auto-converts Value to the base currency using the rate from Lists sheet |
 | M | Date Modified (UTC) | ❌ Formula | Audit timestamp — when the row was entered. Set once by formula when Value is first typed in Excel; rows written by the bot get the write time directly |
 
 **The only column you must fill manually is Date (col A).** Year and Month
@@ -139,7 +139,7 @@ responses use column L — never column D directly.
 
 **The rate table** is in the Lists sheet, columns G and H:
 
-| Currency | Rate to PLN |
+| Currency | Rate to base |
 |---|---|
 | PLN | 1 (never change) |
 | EUR | 4.28 — edit when the rate changes |
@@ -210,7 +210,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `ALLOWED_TELEGRAM_IDS` | ✅ | — | Comma-separated user IDs. Get from @userinfobot |
 | `XLSX_PATH` | — | `data/Expenses.xlsx` | Path to the Excel file |
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
-| `DISPLAY_CURRENCY` | — | `PLN` | Default display currency. Change to `EUR` or `AZN` when relocating |
+| `DISPLAY_CURRENCY` | — | `PLN` | Base/display currency. Controls currency fallback in data loading, the Value (base) formula written to Excel, and dedup key generation. Baked into Excel formulas at write time — changing it after rows exist requires re-running `scripts/migrate_pln_headers_to_base.py`. |
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
 | `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old, or if no cycle has been recorded yet |
 | `SALARY_CATEGORY` | — | `Salary` | Category name that marks salary income for cycle detection and the unaccounted metric |
@@ -315,7 +315,7 @@ The bot walks you through 7 steps:
 7. Review the summary and confirm with ✅ Save or ❌ Cancel
 
 The bot writes the transaction directly to MasterData including the Currency
-column and a live Value (PLN) formula identical to manually entered rows.
+column and a live Value (base) formula identical to manually entered rows.
 It also stamps the **Date Modified (UTC)** column with the write time, so you
 can always see when a row was entered by the bot.
 

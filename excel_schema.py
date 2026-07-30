@@ -23,6 +23,8 @@ from dataclasses import dataclass, field, fields
 from datetime import date
 from typing import Any, TypedDict
 
+import settings
+
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
 
@@ -85,7 +87,7 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
     """
     Read {currency_code: rate_to_base} from the Lists sheet.
     Uses ListsSchema to locate columns by header name — no positional assumptions.
-    Returns {"PLN": 1.0} on any failure.
+    Returns {settings.DISPLAY_CURRENCY: 1.0} on any failure.
     """
     import re
     try:
@@ -96,7 +98,7 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
         ccy_col  = idx.get("currency")
         rate_col = idx.get("rate_to_base")
         if not ccy_col or not rate_col:
-            return {"PLN": 1.0}
+            return {settings.DISPLAY_CURRENCY: 1.0}
         rates: dict[str, float] = {}
         for row in range(2, ws.max_row + 1):
             ccy  = ws.cell(row, ccy_col).value
@@ -109,9 +111,9 @@ def load_currency_rates_from_path(excel_path) -> dict[str, float]:
                     rates[ccy_str] = float(rate)
                 except (TypeError, ValueError):
                     pass
-        return rates or {"PLN": 1.0}
+        return rates or {settings.DISPLAY_CURRENCY: 1.0}
     except Exception:
-        return {"PLN": 1.0}
+        return {settings.DISPLAY_CURRENCY: 1.0}
 
 
 # ── Shared MasterData row writer ──────────────────────────────────────────────
@@ -204,13 +206,13 @@ def write_transaction_row(ws, r: int, row: dict, lu_range: str) -> None:
     ws.cell(r, c("is_done",      10), True if is_done is None else bool(is_done))
 
     ccy_col = c("currency", 11)
-    ws.cell(r, ccy_col, row.get("currency", "PLN"))
+    ws.cell(r, ccy_col, row.get("currency") or settings.DISPLAY_CURRENCY)
 
     vbase_col    = c("value_base", 12)
     value_letter = get_column_letter(c("value", 4))
     ccy_letter   = get_column_letter(ccy_col)
     ws.cell(r, vbase_col,
-        f'=IF(OR({ccy_letter}{r}="",{ccy_letter}{r}="PLN"),'
+        f'=IF(OR({ccy_letter}{r}="",{ccy_letter}{r}="{settings.DISPLAY_CURRENCY}"),'
         f'{value_letter}{r},'
         f'{value_letter}{r}*VLOOKUP({ccy_letter}{r},Lists!{lu_range},2,0))'
     )
@@ -619,7 +621,7 @@ class ListsSchema:
     rate_to_base: Any = col("Rate to base")
     goal_name:   Any = col("Goal Name")
     alloc_pct:   Any = col("Alloc %")
-    goal_pln:    Any = col("Goal (PLN)")
+    goal_base:   Any = col("Goal")
     salary_keyword: Any = col("Salary Keywords")
 
 

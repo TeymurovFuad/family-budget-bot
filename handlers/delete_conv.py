@@ -8,6 +8,7 @@ from log_decorators import log_call
 from excel_ops import async_delete_transaction_row
 from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
 from states import DELETE_PICK
+import settings
 
 
 @log_call()
@@ -38,7 +39,7 @@ async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         raw_date = txn.get("Date", "?")
         date_str = raw_date.strftime("%Y-%m-%d") if hasattr(raw_date, "strftime") else str(raw_date)
         val      = txn.get("Value", "?")
-        txn_ccy  = str(txn.get("Currency", "PLN") or "PLN")
+        txn_ccy  = str(txn.get("Currency") or settings.DISPLAY_CURRENCY)
         cat      = str(txn.get("Category", "") or "—")
         label    = str(txn.get("Description", "") or cat)
         lines.append(f"{i}. `{val} {txn_ccy}` — {cat} — {label} ({date_str})")
@@ -71,7 +72,7 @@ async def delete_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         await async_delete_transaction_row(row_idx, expected)
         val   = txn.get("Value", "?")
-        d_ccy = str(txn.get("Currency", "PLN") or "PLN")
+        d_ccy = str(txn.get("Currency") or settings.DISPLAY_CURRENCY)
         label = str(txn.get("Description", "") or txn.get("Category", "") or "—")
         await update.message.reply_text(
             f"✅ Deleted: `{val} {d_ccy}` — {label}",

@@ -265,7 +265,7 @@ async def _refresh_rates_best_effort() -> dict[str, float]:
     if data is None:
         raise RuntimeError("no rate source reachable")
     live = {c.upper(): round(1 / r, 4) for c, r in data["rates"].items() if r > 0}
-    live["PLN"] = 1.0
+    live[settings.DISPLAY_CURRENCY] = 1.0
     await async_update_currency_rates(live)
     return live
 

@@ -13,7 +13,7 @@ Environment variables (set as GitHub Secrets / Variables):
   XLSX_PATH             Path to Excel file. Default: data/Expenses_Improved.xlsx
   DISPLAY_CURRENCY      Currency for display. Default: PLN
   REPORT_TYPE           weekly | monthly | yearly. Default: weekly
-  TIMEZONE              Default: Europe/Warsaw
+  TIMEZONE              Default: UTC
 """
 
 import calendar
@@ -69,12 +69,12 @@ def load_transaction_data() -> pd.DataFrame:
     df["Value"]      = pd.to_numeric(df["Value"], errors="coerce")
     df["Year"]       = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")
     df["IsDone"]     = df["IsDone"].fillna(True).astype(bool)
-    df["Currency"]   = df["Currency"].fillna("PLN")
+    df["Currency"]   = df["Currency"].fillna(DISPLAY_CURRENCY)
     missing = df["amount_base"].isna() & df["Value"].notna()
     if missing.any():
         rates = load_currency_rates()
         df.loc[missing, "amount_base"] = df.loc[missing].apply(
-            lambda r: r["Value"] * rates.get(str(r.get("Currency", "PLN")).upper(), 1.0),
+            lambda r: r["Value"] * rates.get(str(r.get("Currency", DISPLAY_CURRENCY)).upper(), 1.0),
             axis=1,
         )
     return df.dropna(subset=["amount_base", "Type", "Year", "Month"])
@@ -88,15 +88,15 @@ def load_currency_rates() -> dict[str, float]:
         rate_cols     = [c for c in rates_df.columns if "rate" in str(c).lower() and ("pln" in str(c).lower() or "base" in str(c).lower())]
         if not currency_cols or not rate_cols:
             log.warning("Currency/Rate columns not found in Lists sheet")
-            return {"PLN": 1.0}
+            return {DISPLAY_CURRENCY: 1.0}
         rates_df = rates_df[[currency_cols[0], rate_cols[0]]].copy()
         rates_df.columns = ["currency_code", "rate_to_base"]
         rates_df = rates_df.dropna(subset=["currency_code", "rate_to_base"])
         rates_df = rates_df[rates_df["currency_code"].astype(str).str.match(r"^[A-Z]{3}$")]
         return dict(zip(rates_df["currency_code"], rates_df["rate_to_base"].astype(float)))
     except Exception as error:
-        log.warning("Could not load currency rates: %s — using PLN only", error)
-        return {"PLN": 1.0}
+        log.warning("Could not load currency rates: %s — using base currency only", error)
+        return {DISPLAY_CURRENCY: 1.0}
 
 
 def convert_base_to_display_currency(pln_amount: float, currency: str, rates: dict) -> float:

@@ -36,6 +36,7 @@ import io
 import json
 import logging
 import re
+import settings
 from datetime import date, datetime
 from pathlib import Path
 
@@ -316,9 +317,9 @@ def _parse_row_dict(
 
     # Currency
     currency_col = col_map.get("currency")
-    currency = "PLN"
+    currency = settings.DISPLAY_CURRENCY
     if currency_col and currency_col in row:
-        currency = str(row[currency_col]).strip() or "PLN"
+        currency = str(row[currency_col]).strip() or settings.DISPLAY_CURRENCY
 
     # Description
     desc_col = col_map.get("description")

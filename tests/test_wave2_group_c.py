@@ -12,7 +12,7 @@ Covers:
 
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -346,7 +346,8 @@ class TestAddTwoTapDefaults:
         state = ctx.user_data["state"]
         assert state.currency == "EUR"      # display currency
         assert state.transaction_type == "Expense"
-        assert state.date == date.today()
+        import settings
+        assert state.date == datetime.now(settings.TIMEZONE).date()
         assert state.description == ""
         assert state.person == ""           # household
         assert state.is_recurring is False
