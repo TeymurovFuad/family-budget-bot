@@ -403,7 +403,7 @@ def _person_pick_keyboard(persons: list[str]) -> InlineKeyboardMarkup:
         cb = f"bperson:{name}"
         if len(cb.encode()) <= 64:
             buttons.append([InlineKeyboardButton(name, callback_data=cb)])
-    buttons.append([InlineKeyboardButton("Skip — household", callback_data="bperson:")])
+    buttons.append([InlineKeyboardButton("No specific person", callback_data="bperson:")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -447,7 +447,7 @@ async def bulk_person_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -
     person = data[len("bperson:"):]
     ctx.user_data["bulk_person"] = person
     await query.edit_message_text(
-        f"Got it — attributing to: {person}" if person else "Got it — recording as household."
+        f"Got it — attributing to: {person}" if person else "Got it — recording as a shared expense."
     )
     return await _do_finish_profile_parse(update, ctx)
 
@@ -1996,10 +1996,9 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "I didn't understand that edit.\n"
             "Editable fields: date, value, currency, type, category, description, "
             "is_recurring.\n"
-            "Examples: `2 category=Transport`, `1 value=45.50`, `drop 3` "
-            "(also `skip 3` / `delete 3`), `keep 4-6`.\n"
-            "Send `save` to store them all, or `cancel` to stop.",
-            parse_mode="Markdown",
+            "Examples: 2 category=Transport, 1 value=45.50, drop 3 "
+            "(also skip 3 / delete 3), keep 4-6.\n"
+            "Send save to store them all, or cancel to stop.",
         )
         return BULK_CONFIRM
 
