@@ -427,3 +427,34 @@ class TestParseAmountAmbiguityNote:
         value, notes = parse_amount("1,234.567")
         assert value == 1234.57
         assert notes == []
+
+
+class TestApplyBulkEditListsNone:
+    """Guard: _apply_bulk_edit must not crash or I/O when lists=None."""
+
+    def test_save_command_works_without_lists(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        rows = [_row()]
+        action, reason, notes = _apply_bulk_edit("save", rows, lists=None)
+        assert action is True
+
+    def test_category_edit_applies_when_lists_none(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        parsed = [_row()]
+        save, reason, notes = _apply_bulk_edit("1 category=Transport", parsed, lists=None)
+        assert reason == "edited"
+        assert parsed[0]["category"] == "Transport"
+
+    def test_unknown_category_accepted_when_lists_none(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        parsed = [_row()]
+        save, reason, notes = _apply_bulk_edit("1 category=Nonsense", parsed, lists=None)
+        assert reason == "edited"
+        assert parsed[0]["category"] == "Nonsense"
+
+    def test_explicit_lists_still_honours_membership(self):
+        from handlers.bulk_conv import _apply_bulk_edit
+        parsed = [_row()]
+        save, reason, notes = _apply_bulk_edit("1 category=Nonsense", parsed, lists=LISTS)
+        assert not save
+        assert "Nonsense" in reason

@@ -205,7 +205,7 @@ def save_user_prefs(prefs: dict) -> None:
 
 def load_budgets_from_excel(excel_path: Path) -> dict[str, float]:
     """
-    Read monthly budget limits (in PLN) from the Lists sheet Budget column.
+    Read monthly budget limits from the Lists sheet Budget column.
 
     Only categories that have a non-zero budget value are returned.
     Categories with no limit set are simply absent from the result dict.

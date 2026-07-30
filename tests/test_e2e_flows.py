@@ -968,3 +968,81 @@ class TestHelpFlow:
         assert_valid_markdown_v2(call.args[0], source=handler_name + " help")
         # Conversation entry points must end, not enter the flow.
         assert result in (ConversationHandler.END, None)
+
+
+# ── Bulk person callback + bulk_confirm guard tests ───────────────────────────
+
+class TestBulkPersonCallback:
+    """Tests for bulk_person_callback — especially the empty-person (shared expense) path."""
+
+    def _make_callback_update(self, callback_data: str, user_id=UID):
+        upd = MagicMock()
+        upd.callback_query = MagicMock()
+        upd.callback_query.data = callback_data
+        upd.callback_query.answer = AsyncMock()
+        upd.callback_query.edit_message_text = AsyncMock()
+        upd.effective_user.id = user_id
+        upd.message = None
+        return upd
+
+    async def test_empty_person_sets_shared_expense_confirmation(self):
+        upd = self._make_callback_update("bperson:")
+        ctx = make_ctx()
+        ctx.user_data["_parse_file_bytes"] = b""
+        ctx.user_data["_parse_filename"] = "file.csv"
+        ctx.user_data["_parse_profile"] = {}
+        ctx.user_data["_parse_profile_name"] = ""
+        ctx.user_data["lists"] = SAMPLE_LISTS
+
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv._do_finish_profile_parse", new_callable=AsyncMock) as mock_finish:
+            mock_finish.return_value = bulk_conv.BULK_PERSON
+            await bulk_conv.bulk_person_callback(upd, ctx)
+
+        upd.callback_query.edit_message_text.assert_awaited_once()
+        assert ctx.user_data["bulk_person"] == ""
+        edit_call_text = upd.callback_query.edit_message_text.call_args[0][0]
+        assert "shared expense" in edit_call_text
+
+    async def test_named_person_sets_person_in_context(self):
+        upd = self._make_callback_update("bperson:Alice")
+        ctx = make_ctx()
+        ctx.user_data["_parse_file_bytes"] = b""
+        ctx.user_data["_parse_filename"] = "file.csv"
+        ctx.user_data["_parse_profile"] = {}
+        ctx.user_data["_parse_profile_name"] = ""
+        ctx.user_data["lists"] = SAMPLE_LISTS
+
+        with patch("handlers.bulk_conv.load_reference_data", return_value=SAMPLE_LISTS), \
+             patch("handlers.bulk_conv._do_finish_profile_parse", new_callable=AsyncMock) as mock_finish:
+            mock_finish.return_value = bulk_conv.BULK_PERSON
+            await bulk_conv.bulk_person_callback(upd, ctx)
+
+        assert ctx.user_data["bulk_person"] == "Alice"
+        edit_call_text = upd.callback_query.edit_message_text.call_args[0][0]
+        assert "Alice" in edit_call_text
+
+
+class TestBulkConfirmInvalidBranch:
+    """Covers the reason == 'invalid' path in bulk_confirm."""
+
+    async def test_unrecognised_text_returns_plain_text_reply(self):
+        upd = make_update("⚙️ More")
+        ctx = make_ctx()
+        ctx.user_data["bulk_parsed"] = [
+            {"date": TODAY, "value": 10.0, "type": "Expense",
+             "category": "Groceries", "person": "", "description": "test",
+             "is_recurring": False, "currency": "USD", "dropped": False}
+        ]
+        ctx.user_data["lists"] = SAMPLE_LISTS
+
+        state = await bulk_conv.bulk_confirm(upd, ctx)
+
+        assert state == bulk_conv.BULK_CONFIRM
+        upd.message.reply_text.assert_awaited()
+        reply_text, reply_kwargs = (
+            upd.message.reply_text.call_args[0][0],
+            upd.message.reply_text.call_args[1],
+        )
+        assert reply_kwargs.get("parse_mode") is None
+        assert "save" in reply_text.lower() or "edit" in reply_text.lower()

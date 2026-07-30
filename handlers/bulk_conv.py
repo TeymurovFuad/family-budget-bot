@@ -2010,7 +2010,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not action:
         log.info("User %s sent non-action bulk message: %s", update.effective_user.id, text)
         await update.message.reply_text(
-            "Please reply with edits, or send `save` to store them all.",
+            "Please reply with edits, or press Save to store them all.",
             reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
         )
         return BULK_CONFIRM

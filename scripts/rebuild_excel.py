@@ -126,7 +126,7 @@ def rebuild_guide(ws):
         ('E', 'Year',       'Years shown in dropdowns. Add future years here.'),
         ('F–H', '(empty)', 'Reserved — do not use'),
         ('I', 'Currency',   '3-letter ISO code e.g. EUR, USD, GBP'),
-        ('J', 'Rate (PLN)', 'How many PLN = 1 unit of that currency'),
+        ('J', 'Rate (base)', 'How many base currency units = 1 unit of that currency'),
     ]:
         body_row(r, f'{col_ltr}  {header}', desc, green_left=True); r += 1
     blank(r); r += 1
@@ -135,7 +135,7 @@ def rebuild_guide(ws):
     for left, right in [
         ('New category', 'Add a row in column C of the Lists sheet. Bot picks it up immediately — no restart.'),
         ('New person',   'Add a row in column D. No restart needed.'),
-        ('New currency', 'Add code in col I and PLN rate in col J. Use /rates to refresh from internet.'),
+        ('New currency', 'Add code in col I and exchange rate in col J. Use /rates to refresh from internet.'),
         ('New year',     'Add the year number in column E. No restart needed.'),
     ]:
         body_row(r, left, right); r += 1
@@ -528,7 +528,7 @@ def _run(source: Path, dest: Path):
         "Currency", "Value (base)", "Date Modified (UTC)",
     ]
 
-    # Rates dict for recomputing Value(PLN) where missing
+    # Rates dict for recomputing Value (base) where missing
     rates_dict = {code: rate for code, rate in currencies}
 
     for r_idx, row in enumerate(rows, 2):
@@ -546,7 +546,7 @@ def _run(source: Path, dest: Path):
         pln_val      = row.get("Value (base)")
         mod_val      = row.get("Date Modified (UTC)")
 
-        # Recompute Value(PLN) if missing
+        # Recompute Value (base) if missing
         if pln_val is None and value_val is not None:
             rate = rates_dict.get(str(ccy_val).upper(), 1.0)
             pln_val = round(float(value_val) * rate, 4)
