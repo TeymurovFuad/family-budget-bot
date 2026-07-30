@@ -1246,6 +1246,8 @@ class TestBulkConvReceive:
             assert ctx.user_data["bulk_parsed"], "draft must be loaded for save/cancel"
 
     async def test_second_upload_does_not_clobber_held_overflow(self):
+        # Post-merge cap: draft has 51 rows; new upload merges to 52, cap trims to 50.
+        # The pre-existing _pending_overflow entry is left untouched in user_data.
         upd = make_update("50 PLN groceries", user_id=99998)
         ctx = make_ctx()
         held = [{"date": "2024-05-01", "value": 7, "currency": "PLN",
@@ -1262,9 +1264,12 @@ class TestBulkConvReceive:
                  patch("handlers.bulk_conv.parse_text", return_value=[{"date": "2024-06-01", "value": 15, "currency": "PLN", "category": "Groceries", "description": "milk", "person": ""}]):
                 result = await bulk_receive(upd, ctx)
             assert result == states.BULK_CONFIRM
+            # held overflow must remain intact — post-merge cap does not touch it
             assert ctx.user_data["_pending_overflow"] == held
-            sent = upd.message.reply_text.call_args.args[0]
-            assert "held" in sent and "NOT kept" in sent
+            # cap message must reference the row limit
+            sent = upd.message.reply_text.call_args_list
+            cap_msgs = [c.args[0] for c in sent if "capped" in c.args[0] or "Draft capped" in c.args[0]]
+            assert cap_msgs, f"expected a cap message, got: {[c.args[0] for c in sent]}"
 
     async def test_bulk_receive_allows_exactly_50_pending_entries(self):
         upd = make_update("50 PLN groceries", user_id=77777)
