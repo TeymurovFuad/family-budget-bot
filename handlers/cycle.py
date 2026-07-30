@@ -540,7 +540,8 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
         return
     if transaction.transaction_type != "Income":
         return
-    keywords = cycle_detect_keywords()
+    loop = asyncio.get_running_loop()
+    keywords = await loop.run_in_executor(None, cycle_detect_keywords)
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
     in_category = any(
@@ -552,7 +553,6 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
     if not in_category and not in_description:
         return
     today = now_utc().date()
-    loop = asyncio.get_running_loop()
     if not await loop.run_in_executor(None, should_prompt_new_cycle, today):
         return
     proposed = transaction.date or today
