@@ -59,3 +59,8 @@ Correction: Each session must create a task-named worktree (`git worktree add ..
 Action:     After code review, reported findings in conversation only — did not add them to BACKLOG.md. User had to ask explicitly.
 Correction: After every review, non-blocking findings must be written to BACKLOG.md immediately in the same worktree, then committed, without waiting for the user to ask.
 ---
+
+<!-- 2026-07-30 ORCHESTRATOR [USER] -->
+Action:     Opened PR #82 without running the fan-out review first — skipped the mandatory delivery chain step.
+Correction: Fan-out review (reviewer, architect, tester, devops, TW, EM) must be spawned immediately after PR open, every time, with no exceptions. Re-read orchestrator.md before every PR open step.
+---
