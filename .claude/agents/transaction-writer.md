@@ -22,7 +22,7 @@ If Input Sanitizer returned "rejected", stop and report errors to the user inste
 2. Detects column positions from the header row by name — never hardcodes positions
 3. Finds the next empty row
 4. Writes all fields
-5. Writes `Value (PLN)` formula
+5. Writes `Value (base)` formula
 6. Writes `Date Modified` formula
 7. Saves inside the `with` block so the context manager uploads back to GCS/S3
 
@@ -53,7 +53,7 @@ subsequent columns and breaks hardcoded positions silently.
 | IsRecurring | transaction.is_recurring | bool |
 | IsDone | True | bool — always True for bot-written rows |
 | Currency | transaction.currency | str |
-| Value (PLN) | formula | `=IF(OR(K{r}="",K{r}="PLN"),D{r},D{r}*VLOOKUP(K{r},Lists!$G$2:$H$20,2,0))` |
+| Value (base) | formula | `=IF(OR(K{r}="",K{r}=<base_ccy>),D{r},D{r}*VLOOKUP(K{r},Lists!$G$2:$H$20,2,0))` |
 | Date Modified (UTC) | formula | `=IF(D{r}<>"",IF(M{r}="",NOW(),M{r}),"")` |
 
 Note: `Year` and `Month` are always derived fields on the `Transaction` model —

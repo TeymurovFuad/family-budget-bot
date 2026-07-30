@@ -165,7 +165,7 @@ class TestValueBaseFormulaUsesDisplayCurrency:
 
 class TestListsSchemaGoalField:
 
-    def test_goal_base_field_exists_goal_pln_does_not(self):
+    def test_goal_base_field_exists_goal_pln_removed(self):
         from excel_schema import ListsSchema
         assert hasattr(ListsSchema, "goal_base")
         assert not hasattr(ListsSchema, "goal_pln")
@@ -173,9 +173,9 @@ class TestListsSchemaGoalField:
 
 # ── test 6: migrate script includes goal_pln rename ──────────────────────────
 
-class TestMigrateScriptIncludesGoalPln:
+class TestMigrateScriptGoalRename:
 
-    def test_migrate_script_includes_goal_pln(self):
+    def test_migrate_script_includes_goal_rename(self):
         import importlib.util
         scripts_dir = str(PROJECT_ROOT / "scripts")
         if scripts_dir not in sys.path:

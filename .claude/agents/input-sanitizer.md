@@ -42,12 +42,12 @@ Also return a sanitization report alongside the model:
 - Positive number only — the model enforces this; `ValueError` on construction if ≤ 0
 - Strip: currency symbols, spaces, commas → `"1 234,56 zł"` → `1234.56`
 - Accept both `.` and `,` as decimal separator
-- Flag (ask to confirm, not auto-reject) if > 50,000 PLN — likely a mistake
+- Flag (ask to confirm, not auto-reject) if > 50,000 in base currency — likely a mistake
 
 ### Currency
 - Must match a code in Lists sheet col G — read from Excel, do not hardcode
 - Normalise to uppercase: `"eur"` → `"EUR"`
-- Default to `"PLN"` if missing — flag in changes
+- Default to `settings.DISPLAY_CURRENCY` if missing — flag in changes
 - Reject unknown codes — do not guess
 
 ### Type (transaction_type)

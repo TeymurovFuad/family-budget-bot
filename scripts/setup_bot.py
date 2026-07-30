@@ -183,7 +183,7 @@ REQUIRED_PROMPTS = [
 # (key, prompt, help text, default) — Enter accepts the default.
 OPTIONAL_PROMPTS = [
     ("TIMEZONE", "Timezone", "IANA name, e.g. America/New_York, Europe/London.", "UTC"),
-    ("DISPLAY_CURRENCY", "Display currency", "Currency code used in reports.", "PLN"),
+    ("DISPLAY_CURRENCY", "Display currency", "Currency code used in reports.", ""),
     ("STORAGE_BACKEND", "Storage backend", "local | gcs | s3. 'local' keeps the Excel file on disk.", "local"),
     ("XLSX_PATH", "Excel file path", "Where the workbook lives (relative to the repo).", "data/Expenses_Improved.xlsx"),
 ]
@@ -342,7 +342,7 @@ def print_summary(values: dict[str, str], start_cmd: str) -> None:
     say(f"  Storage:        {values.get('STORAGE_BACKEND', 'local')}")
     say(f"  Workbook:       {values.get('XLSX_PATH', 'data/Expenses_Improved.xlsx')}")
     say(f"  Timezone:       {values.get('TIMEZONE', 'UTC')}")
-    say(f"  Currency:       {values.get('DISPLAY_CURRENCY', 'PLN')}")
+    say(f"  Currency:       {values.get('DISPLAY_CURRENCY', '')}")
     say()
     say(f"Start the bot:    {start_cmd}")
     say("Stop it:          Ctrl+C (or systemctl stop budget-bot if installed as a service)")

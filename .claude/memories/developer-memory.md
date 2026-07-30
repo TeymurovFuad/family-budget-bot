@@ -33,7 +33,7 @@ Read at session start. Apply silently.
 
 ## Budget-bot project
 <!-- 2026-06-16 -->
-- All PLN aggregations use `_pln` column — never sum raw `Value` (mixed currencies).
+- All base-currency aggregations use `_base` column — never sum raw `Value` (mixed currencies).
 - Column positions detected from headers dynamically — never hardcode column indices.
 - Storage abstraction in file_storage.py: always use ExcelFileContext for writes, get_excel_path_for_reading for reads.
 - Upload retry (3 attempts, exponential backoff) built into _upload_from_local_file.
@@ -66,7 +66,7 @@ Read at session start. Apply silently.
 | F | Empty -- not used |
 | G | Empty -- not used |
 | I | Currency code (e.g. PLN, EUR, USD) |
-| J | Exchange rate to PLN |
+| J | Exchange rate to base currency |
 
 ## No hardcoded data rule
 <!-- 2026-06-29 -->

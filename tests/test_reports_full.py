@@ -196,7 +196,7 @@ class TestConvertFull:
         assert convert(999.0, "BAD", {}) == pytest.approx(999.0)
 
 
-class TestFormatPlnAsCurrencyFull:
+class TestFormatBaseAsCurrencyFull:
 
     def test_base_passthrough(self, monkeypatch):
         monkeypatch.setattr(formatters, "get_rate", lambda ccy, rates: 1.0)
@@ -280,8 +280,8 @@ class TestBuildSavingsChartFull:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=False)
-def pln_rates(monkeypatch):
-    """Make get_rate always return 1.0 so PLN amounts pass through unchanged."""
+def base_rates(monkeypatch):
+    """Make get_rate always return 1.0 so base-currency amounts pass through unchanged."""
     monkeypatch.setattr(_data_stub, "get_rate", lambda ccy, rates: 1.0)
 
 

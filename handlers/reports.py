@@ -954,9 +954,9 @@ async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     by_cat = sub.groupby("Category")["_base"].sum().sort_values(ascending=False)
 
-    def to_display(pln_val):
+    def to_display(base_val):
         r = rates.get(ccy, 1)
-        return pln_val if ccy == settings.DISPLAY_CURRENCY else (pln_val / r if r else pln_val)
+        return base_val if ccy == settings.DISPLAY_CURRENCY else (base_val / r if r else base_val)
 
     values  = [to_display(v) for v in by_cat.values]
     labels  = list(by_cat.index)

@@ -275,7 +275,7 @@ class TestDetectRecurring:
         # terminate with an empty months set and return False.
         df = _master_df([
             ["2026-05-10", "Spotify", 45.0],
-            ["2026-06-10", "Biedronka", 45.0],
+            ["2026-06-10", "Tesco", 45.0],
         ])
         assert self._detect(df, description="Netflix", value=45.0) is False
 

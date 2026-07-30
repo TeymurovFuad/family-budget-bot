@@ -5,7 +5,7 @@ recommendations. Use this agent for any analytical question about the data.
 
 ## What this agent does
 
-Reads MasterData from Expenses_Improved.xlsx (column L = Value PLN for all
+Reads MasterData from Expenses_Improved.xlsx (column L = Value (base) for all
 aggregations) and answers questions about spending patterns, budget performance,
 savings trends, and financial health.
 
@@ -17,15 +17,15 @@ For any given year + month:
 - Savings rate (savings ÷ income)
 - Flag if savings rate < 10% (low) or > 20% (strong)
 - Net balance check: should be near zero (income = expenses + savings)
-- If |net| > 500 PLN, flag it as a possible missing transaction
+- If |net| > 500 base-currency units, flag it as a possible missing transaction
 
 ### Budget vs actual
 For any period, compare actual spending per category against monthly targets:
 
-Budgets are read from the Lists sheet (Budget (PLN) column next to Categories) —
+Budgets are read from the Lists sheet (Budget (base) column next to Categories) —
 never hardcoded. Example shape:
 
-| Category | Budget (PLN/month) |
+| Category | Budget (base/month) |
 |---|---|
 | Groceries | 2,000 |
 | Housing | 3,000 |
@@ -78,9 +78,9 @@ Return a list of plain English observations the user can act on:
 
 ## Rules for the analyst
 
-- Always use column L (Value PLN) for all sums — never column D
+- Always use column L (Value base) for all sums — never column D
 - Only include rows where IsDone = TRUE
 - Be direct about overspending — do not soften it
 - Give specific numbers, not vague observations
-- When comparing periods, state both values: "7,817 PLN vs 6,450 PLN last month (+21%)"
+- When comparing periods, state both values: "7,817 vs 6,450 last month (+21%)"
 - Savings rate context: <5% = critical, 5–10% = low, 10–15% = ok, 15–20% = good, >20% = strong

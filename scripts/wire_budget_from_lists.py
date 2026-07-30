@@ -12,7 +12,7 @@ with repair_guard():
 
     # Rows with hardcoded budget amounts in col I (Budget column of Expenses by Category)
     # H col = category name, I col = budget amount
-    # Replace =<hardcoded>/$N$2 with VLOOKUP into Lists!$C:$D (Categories / Budget PLN)
+    # Replace =<hardcoded>/$N$2 with VLOOKUP into Lists!$C:$D (Categories / Budget (base))
     fixed = 0
     for r in range(11, 28):  # rows 11-27 are the category rows; 28 is TOTAL (SUM)
         cell_h = ws_db.cell(r, 8)   # col H = category name

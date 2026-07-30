@@ -210,7 +210,7 @@ def load_budgets_from_excel(excel_path: Path) -> dict[str, float]:
     Only categories that have a non-zero budget value are returned.
     Categories with no limit set are simply absent from the result dict.
 
-    Returns {category_name: pln_amount}.
+    Returns {category_name: base_amount}.
     Falls back to an empty dict if the sheet cannot be read.
     """
     try:

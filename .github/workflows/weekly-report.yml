@@ -40,7 +40,7 @@ jobs:
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_TELEGRAM_IDS: ${{ secrets.ALLOWED_TELEGRAM_IDS }}
           DISPLAY_CURRENCY:     ${{ vars.DISPLAY_CURRENCY || 'PLN' }}
-          TIMEZONE:             Europe/Warsaw
+          TIMEZONE:             UTC
 
           # Storage backend — set whichever you use, leave the others blank
           STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}

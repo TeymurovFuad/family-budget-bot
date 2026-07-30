@@ -98,7 +98,7 @@ class TestMakeDedupKey:
         k2 = make_dedup_key("2024-06-15", 50.0, "PLN", "Groceries shop")
         assert k1 == k2
 
-    def test_missing_currency_defaults_to_pln(self):
+    def test_missing_currency_defaults_to_display_currency(self):
         k1 = make_dedup_key("2024-06-15", 50.0, "", "Groceries shop")
         k2 = make_dedup_key("2024-06-15", 50.0, "PLN", "Groceries shop")
         assert k1 == k2

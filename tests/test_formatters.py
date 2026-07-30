@@ -74,7 +74,7 @@ class TestConvert:
 # ── format_base_as_currency ────────────────────────────────────────────────────
 
 
-class TestFormatPlnAsCurrency:
+class TestFormatBaseAsCurrency:
 
     def test_base_to_base_formats_unchanged(self, monkeypatch):
         monkeypatch.setattr(data_module, "get_rate", lambda ccy, rates: 1.0)

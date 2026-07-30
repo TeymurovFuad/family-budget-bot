@@ -114,13 +114,13 @@ class TestDedupKeyCleaningConsistency:
 
 class TestMerchantMapStore:
     def test_save_load_round_trip(self):
-        entry = {"label": "Biedronka", "category": "Groceries", "type": "Expense",
+        entry = {"label": "Tesco", "category": "Groceries", "type": "Expense",
                  "person": "", "is_recurring": False}
-        merchant_map.save_merchant_map({"biedronka": entry})
-        assert merchant_map.load_merchant_map() == {"biedronka": entry}
+        merchant_map.save_merchant_map({"tesco": entry})
+        assert merchant_map.load_merchant_map() == {"tesco": entry}
 
     def test_lookup_uses_cleaned_case_folded_key(self):
-        entry = {"label": "Biedronka", "category": "Groceries", "type": "Expense",
+        entry = {"label": "Tesco", "category": "Groceries", "type": "Expense",
                  "person": "", "is_recurring": False}
         mapping = {"tesco 123 london": entry}
         found = merchant_map.lookup(mapping, "4111XXXXXXXX1111 TESCO 123 LONDON GB")
@@ -175,23 +175,23 @@ class TestMerchantMapStore:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestLocalQuickParse:
-    def _remember_biedronka(self):
-        merchant_map.save_merchant_map({"biedronka": {
-            "label": "Biedronka", "category": "Groceries", "type": "Expense",
+    def _remember_tesco(self):
+        merchant_map.save_merchant_map({"tesco": {
+            "label": "Tesco", "category": "Groceries", "type": "Expense",
             "person": "", "is_recurring": False,
         }})
 
     def test_known_merchant_parses_without_ai(self):
-        self._remember_biedronka()
-        parsed = merchant_map.try_local_quick_parse("biedronka 45,50")
+        self._remember_tesco()
+        parsed = merchant_map.try_local_quick_parse("tesco 45,50")
         assert parsed["value"] == 45.50
         assert parsed["category"] == "Groceries"
-        assert parsed["description"] == "Biedronka"
+        assert parsed["description"] == "Tesco"
         assert parsed["currency"] == "PLN"
 
     def test_date_and_currency_tokens(self):
-        self._remember_biedronka()
-        parsed = merchant_map.try_local_quick_parse("2024-05-24 Biedronka 45 eur")
+        self._remember_tesco()
+        parsed = merchant_map.try_local_quick_parse("2024-05-24 Tesco 45 eur")
         assert parsed["date"] == "2024-05-24"
         assert parsed["currency"] == "EUR"
 
@@ -204,8 +204,8 @@ class TestLocalQuickParse:
     async def test_handle_quick_add_skips_ai_for_known_merchant(self):
         from handlers.quick_conv import handle_quick_add
         import states
-        self._remember_biedronka()
-        upd = make_update("biedronka 45")
+        self._remember_tesco()
+        upd = make_update("tesco 45")
         ctx = make_ctx()
         ai = MagicMock(side_effect=AssertionError("AI must not be called"))
         with patch("handlers.quick_conv.load_reference_data", return_value=SAMPLE_LISTS), \
@@ -222,14 +222,14 @@ class TestLocalQuickParse:
     async def test_stale_memory_falls_back_to_ai(self):
         from handlers.quick_conv import handle_quick_add
         import states
-        merchant_map.save_merchant_map({"biedronka": {
-            "label": "Biedronka", "category": "RenamedAway", "type": "Expense",
+        merchant_map.save_merchant_map({"tesco": {
+            "label": "Tesco", "category": "RenamedAway", "type": "Expense",
             "person": "", "is_recurring": False,
         }})
-        upd = make_update("biedronka 45")
+        upd = make_update("tesco 45")
         ctx = make_ctx()
         ai_parsed = {"value": 45, "currency": "PLN", "category": "Groceries",
-                     "description": "Biedronka", "type": "Expense", "person": ""}
+                     "description": "Tesco", "type": "Expense", "person": ""}
         with patch("handlers.quick_conv.load_reference_data", return_value=SAMPLE_LISTS), \
              patch("handlers.quick_conv.parse_quick", return_value=ai_parsed), \
              patch("handlers.quick_conv.load_rates", return_value={"PLN": 1.0}), \

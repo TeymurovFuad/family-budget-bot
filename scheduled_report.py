@@ -99,13 +99,13 @@ def load_currency_rates() -> dict[str, float]:
         return {DISPLAY_CURRENCY: 1.0}
 
 
-def convert_base_to_display_currency(pln_amount: float, currency: str, rates: dict) -> float:
+def convert_base_to_display_currency(base_amount: float, currency: str, rates: dict) -> float:
     rate = rates.get(currency.upper(), 1.0)
-    return pln_amount / rate if rate else pln_amount
+    return base_amount / rate if rate else base_amount
 
 
-def format_with_currency(pln_amount: float, currency: str, rates: dict) -> str:
-    converted = convert_base_to_display_currency(pln_amount, currency, rates)
+def format_with_currency(base_amount: float, currency: str, rates: dict) -> str:
+    converted = convert_base_to_display_currency(base_amount, currency, rates)
     return f"{converted:,.0f} {currency}"
 
 

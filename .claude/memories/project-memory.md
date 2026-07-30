@@ -14,14 +14,14 @@ Read at session start. Apply silently.
 <!-- 2026-07-21 (supersedes 2026-06-16 layout) -->
 - Column positions are NEVER hardcoded — excel_schema.py (MasterDataSchema/ListsSchema DTOs,
   header-name lookup) is the single source of truth; write_transaction_row is the one row writer.
-- Lists sheet: A Months, B TxnTypes, C Categories, D Budget (PLN), E Persons, F Years,
-  H Currency, I Rate to PLN, M/N/O Goal Name/Alloc %/Goal (PLN).
+- Lists sheet: A Months, B TxnTypes, C Categories, D Budget (base), E Persons, F Years,
+  H Currency, I Rate to base, M/N/O Goal Name/Alloc %/Goal (base).
 - MasterData: A Date, B Year, C Month, D Value, E Type, F Category, G Person, H Description,
-  I IsRecurring, J IsDone, K Currency, L Value (PLN) formula, M Date Modified (UTC).
+  I IsRecurring, J IsDone, K Currency, L Value (base) formula, M Date Modified (UTC).
 - Category "Gifts & Shopping" was renamed to "Shopping" (2026-07-21, scripts/rename_category.py).
 - Dropdown validations are static ranges — the writer extends them on every append
   (extend_validation_ranges); delete_rows shrinks them, creation path re-extends.
-- All PLN aggregations use _pln column — never sum raw Value (mixed currencies).
+- All base-currency aggregations use _base column — never sum raw Value (mixed currencies).
 
 ## Runtime environment
 <!-- 2026-07-21 -->
