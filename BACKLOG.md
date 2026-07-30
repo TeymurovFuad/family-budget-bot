@@ -808,7 +808,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: UX
 
-- [x] **Person attribution per import** — done: `_finish_profile_parse` prompts "Whose statement is this?", `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`). /add: move person out of the mandatory flow (default household, edit from confirm card) — still open.
+- [x] **Person attribution per import** — done: `_finish_profile_parse` prompts "Whose statement is this?", `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`). /add: `ADD_PERSON` state retired 2026-07-25 (`states.py:7`); person defaults to "" (household), editable from confirm card.
 - [x] **Recurring detection from history** — same cleaned merchant + similar amount (±10%)
       in ≥2 prior months ⇒ propose `is_recurring=True` (🔁 in preview, pre-selected in /add).
       Stop asking on every /add; bulk stops hardcoding False.
@@ -826,7 +826,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
       keyboard instead of ejecting to the 9-step /add.
 - [x] **Bulk preview separator orphan at page break** — done: `_format_bulk_preview` strips trailing separators before page flush (`bulk_conv.py:1395-1397`).
 - [ ] **Report chunking can break Markdown entities** — PARTIAL: now splits at `━━━` section-break lines (not raw 4000-char); does not yet reuse bulk_conv paginated-send helper.
-- [ ] **edit_conv currency keyboard hardcodes 3/3 split** — breaks visually with >6 currencies.
+- [x] **edit_conv currency keyboard hardcodes 3/3 split** — fixed: `edit_conv.py:105` now uses 2-per-row dynamic split (`ccy_list[i:i+2]`), not hardcoded 3-column rows.
 
 ## Follow-up PR: code clarity
 
