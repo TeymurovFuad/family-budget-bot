@@ -1261,6 +1261,7 @@ def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
         notes.extend(f"row {row_no}: {c}" for c in corrections)
     else:
         row["invalid"] = reason
+        notes.append(f"row {row_no}: validation failed — {reason}")
     return notes
 
 
@@ -1574,17 +1575,18 @@ def _apply_bulk_edit(
             "Editable fields: date, value, currency, category, description, type, is_recurring, person."
         ), []
 
+    notes: list[str] = []
     if field == "category" and lists:
         categories = lists.get("categories") or []
-        if categories and value.lower() not in {c.lower() for c in categories}:
+        if lists and not categories:
+            notes.append("categories list is empty — category not validated")
+        elif categories and value.lower() not in {c.lower() for c in categories}:
             return False, (
                 f"Unknown category '{value}'. Valid categories: {', '.join(categories)}."
             ), []
         elif categories:
             canonical = next(c for c in categories if c.lower() == value.lower())
             value = canonical
-
-    notes: list[str] = []
     if field == "value":
         try:
             value, amount_notes = parse_amount(value)
@@ -1901,34 +1903,17 @@ async def bulk_receive(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for row in parsed:
             row["person"] = bulk_person
 
-    if _draft_limit_reached(uid):
-        held = ctx.user_data.get("_pending_overflow")
-        if held:
-            # Never overwrite (or silently append to) rows already held —
-            # that would lose the earlier paid-for parse.
-            await update.message.reply_text(
-                f"⚠️ You already have {len(held)} row(s) held from a previous upload. "
-                f"Save or cancel your current draft first to release them — "
-                f"this upload was NOT kept.",
-                reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
-            )
-            ctx.user_data["bulk_parsed"] = _load_user_draft(uid)
-            return BULK_CONFIRM
-        # Do NOT merge the new rows — hold them so the paid-for parse survives.
-        ctx.user_data["_pending_overflow"] = _sort_bulk_rows(parsed)
-        await update.message.reply_text(
-            f"⚠️ Your draft is full ({_DRAFT_LIMIT_ENTRIES}+ entries), so the {len(parsed)} "
-            f"row(s) I just parsed were NOT added — they are held aside. Send `save` to "
-            f"store the existing draft or `cancel` to discard it, and I'll load the held "
-            f"rows as a fresh draft.",
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardMarkup([["Save", "Cancel"]], one_time_keyboard=True, resize_keyboard=True),
-        )
-        ctx.user_data["bulk_parsed"] = _load_user_draft(uid)
-        return BULK_CONFIRM
-
     parsed = _sort_bulk_rows(parsed)
     draft_rows, merged_in = _merge_bulk_draft(uid, parsed)
+    if len(draft_rows) > _DRAFT_LIMIT_ENTRIES:
+        overflow = len(draft_rows) - _DRAFT_LIMIT_ENTRIES
+        draft_rows = draft_rows[:_DRAFT_LIMIT_ENTRIES]
+        _save_bulk_draft(uid, draft_rows)
+        await update.message.reply_text(
+            f"⚠️ Draft capped at {_DRAFT_LIMIT_ENTRIES} rows — {overflow} row(s) were not added. "
+            f"Send `save` to store what's here, then import the rest.",
+            parse_mode=None,
+        )
     ctx.user_data["bulk_parsed"] = draft_rows
     log.info("User %s bulk parse completed: %d items (src=%s)", update.effective_user.id, len(parsed), src)
     if merged_in > 0:
