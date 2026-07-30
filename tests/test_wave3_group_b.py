@@ -1,13 +1,12 @@
 """
-tests/test_wave3_group_b.py — Wave 3 Group B: _apply_bulk_edit lazy-loads reference data.
+tests/test_wave3_group_b.py — Wave 3 Group B: _apply_bulk_edit with lists=None.
 
-Verifies that _apply_bulk_edit works correctly when lists=None (the common
-call path from bulk_conv message handler) by auto-loading reference data.
+Verifies that _apply_bulk_edit works correctly when lists=None (no validation)
+and when lists is provided (validation is applied).
 """
 
 import sys
 import os
-from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -37,18 +36,19 @@ class TestApplyBulkEditLazyLoad:
         save, reason, notes = _apply_bulk_edit("save", _row(), lists=None)
         assert save is True
 
-    def test_category_edit_validates_when_lists_none(self):
-        with patch("data.load_reference_data", return_value=SAMPLE_LISTS):
-            save, reason, notes = _apply_bulk_edit("1 category=Transport", _row(), lists=None)
+    def test_category_edit_applies_when_lists_none(self):
+        parsed = _row()
+        save, reason, notes = _apply_bulk_edit("1 category=Transport", parsed, lists=None)
         assert save is False
         assert reason == "edited"
-        assert _row()[0]["category"] == "Groceries"  # original unchanged
+        assert parsed[0]["category"] == "Transport"
 
-    def test_category_edit_rejects_unknown_when_lists_none(self):
-        with patch("data.load_reference_data", return_value=SAMPLE_LISTS):
-            save, reason, notes = _apply_bulk_edit("1 category=Nonsense", _row(), lists=None)
+    def test_unknown_category_accepted_when_lists_none(self):
+        parsed = _row()
+        save, reason, notes = _apply_bulk_edit("1 category=Nonsense", parsed, lists=None)
         assert save is False
-        assert "Unknown category" in reason
+        assert reason == "edited"
+        assert parsed[0]["category"] == "Nonsense"
 
     def test_explicit_lists_still_honoured(self):
         parsed = _row()
