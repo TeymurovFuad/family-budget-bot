@@ -30,7 +30,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ALLOWED_TELEGRAM_IDS: ${{ secrets.ALLOWED_TELEGRAM_IDS }}
-          DISPLAY_CURRENCY:     ${{ vars.DISPLAY_CURRENCY || 'PLN' }}
+          DISPLAY_CURRENCY:     ${{ vars.DISPLAY_CURRENCY }}
           TIMEZONE:             UTC
 
           # Storage backend — set whichever you use, leave the others blank

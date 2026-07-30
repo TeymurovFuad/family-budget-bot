@@ -141,7 +141,7 @@ responses use column L — never column D directly.
 
 | Currency | Rate to base |
 |---|---|
-| <base currency> | 1 (never change) |
+| `(base currency)` | 1 (never change) |
 | EUR | 4.28 — edit when the rate changes |
 | USD | 3.92 |
 | GBP | 4.98 |

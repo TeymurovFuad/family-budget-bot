@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 import merchant_map
+import settings
 from formatters import sanitize_description
 from models import Transaction
 from validators import clean_merchant_description, make_dedup_key
@@ -181,13 +182,14 @@ class TestLocalQuickParse:
             "person": "", "is_recurring": False,
         }})
 
-    def test_known_merchant_parses_without_ai(self):
+    def test_known_merchant_parses_without_ai(self, monkeypatch):
+        monkeypatch.setattr(settings, "DISPLAY_CURRENCY", "PLN")
         self._remember_tesco()
         parsed = merchant_map.try_local_quick_parse("tesco 45,50")
         assert parsed["value"] == 45.50
         assert parsed["category"] == "Groceries"
         assert parsed["description"] == "Tesco"
-        assert parsed["currency"] == "PLN"
+        assert parsed["currency"] == settings.DISPLAY_CURRENCY
 
     def test_date_and_currency_tokens(self):
         self._remember_tesco()
