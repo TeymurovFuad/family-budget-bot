@@ -180,8 +180,8 @@ class TestMigrateScriptIncludesGoalPln:
         scripts_dir = str(PROJECT_ROOT / "scripts")
         if scripts_dir not in sys.path:
             sys.path.insert(0, scripts_dir)
-        script_path = PROJECT_ROOT / "scripts" / "migrate_pln_headers_to_base.py"
-        spec = importlib.util.spec_from_file_location("migrate_pln_headers_to_base", script_path)
+        script_path = PROJECT_ROOT / "scripts" / "migrate_base_currency_headers.py"
+        spec = importlib.util.spec_from_file_location("migrate_base_currency_headers", script_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         renames = mod.RENAMES

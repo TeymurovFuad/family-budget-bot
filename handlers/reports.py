@@ -838,8 +838,8 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Fetching live rates from frankfurter.dev…")
         try:
             import httpx
-            primary_url  = "https://api.frankfurter.dev/v1/latest?from=PLN"
-            fallback_url = "https://api.frankfurter.app/latest?from=PLN"
+            primary_url  = f"https://api.frankfurter.dev/v1/latest?from={settings.DISPLAY_CURRENCY}"
+            fallback_url = f"https://api.frankfurter.app/latest?from={settings.DISPLAY_CURRENCY}"
             async with httpx.AsyncClient(follow_redirects=True, timeout=_RATES_HTTP_TIMEOUT_S) as client:
                 try:
                     resp = await client.get(primary_url)
@@ -855,7 +855,7 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             }
             live[settings.DISPLAY_CURRENCY] = 1.0
 
-            lines   = [f"📡 *Live rates vs Excel* (PLN per 1 unit)\n"
+            lines   = [f"📡 *Live rates vs Excel* ({settings.DISPLAY_CURRENCY} per 1 unit)\n"
                        f"_Source: frankfurter.dev — {data.get('date', 'today')}_\n"]
             updated: dict[str, float] = {}
             for cur_ccy, old_rate in sorted(rates.items()):
@@ -881,9 +881,9 @@ async def cmd_rates(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Failed to fetch live rates: {e}")
 
     else:
-        lines = ["💱 *Current exchange rates* (PLN per 1 unit)\n"]
+        lines = [f"💱 *Current exchange rates* ({settings.DISPLAY_CURRENCY} per 1 unit)\n"]
         for cur_ccy, r in sorted(rates.items()):
-            lines.append(f"`{cur_ccy}`: {r:.4f} PLN")
+            lines.append(f"`{cur_ccy}`: {r:.4f} {settings.DISPLAY_CURRENCY}")
         lines.append("\n_Tip: `/rates refresh` fetches live rates from frankfurter.dev and updates Excel._")
         await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 

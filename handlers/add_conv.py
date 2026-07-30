@@ -172,13 +172,13 @@ async def _show_confirm_card(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     ccy       = state.currency or settings.DISPLAY_CURRENCY
     pln_equiv = state.value * get_rate(ccy, state.rates)
-    pln_note  = f"\n_PLN equivalent: {pln_equiv:,.0f}_" if ccy != settings.DISPLAY_CURRENCY else ""
+    base_note = f"\n_base equivalent: {pln_equiv:,.0f}_" if ccy != settings.DISPLAY_CURRENCY else ""
     recurring = "Yes" if state.is_recurring else "No"
     if state.is_recurring and ctx.user_data.get("recurring_proposed"):
         recurring += " 🔁 (detected from history)"
     summary = (
         f"📝 *Confirm transaction*\n\n"
-        f"Amount:      `{state.value:,.2f} {ccy}`{pln_note}\n"
+        f"Amount:      `{state.value:,.2f} {ccy}`{base_note}\n"
         f"Type:        `{state.transaction_type}`\n"
         f"Category:    `{state.category or '—'}`\n"
         f"Date:        `{state.date.strftime('%Y-%m-%d')}`\n"

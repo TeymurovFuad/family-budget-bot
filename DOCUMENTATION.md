@@ -210,7 +210,7 @@ other than "✓ Balanced", a transaction is missing or duplicated.
 | `ALLOWED_TELEGRAM_IDS` | ✅ | — | Comma-separated user IDs. Get from @userinfobot |
 | `XLSX_PATH` | — | `data/Expenses.xlsx` | Path to the Excel file |
 | `TIMEZONE` | — | `Europe/Warsaw` | For timestamps and scheduled reports |
-| `DISPLAY_CURRENCY` | — | `PLN` | Base/display currency. Controls currency fallback in data loading, the Value (base) formula written to Excel, and dedup key generation. Baked into Excel formulas at write time — changing it after rows exist requires re-running `scripts/migrate_pln_headers_to_base.py`. |
+| `DISPLAY_CURRENCY` | — | `PLN` | Base/display currency. Controls currency fallback in data loading, the Value (base) formula written to Excel, and dedup key generation. Baked into Excel formulas at write time — changing it after rows exist requires re-running `scripts/migrate_base_currency_headers.py`. |
 | `BUDGET_CYCLE` | — | `0` | Set to `1` to enable salary-to-salary budget cycles (see "Budget Cycles" below) |
 | `CYCLE_REPROMPT_MIN_AGE_DAYS` | — | `20` | A saved Salary income only proposes a new cycle if the current one is at least this old, or if no cycle has been recorded yet |
 | `SALARY_CATEGORY` | — | `Salary` | Category name that marks salary income for cycle detection and the unaccounted metric |

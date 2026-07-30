@@ -1,5 +1,5 @@
 """
-migrate_pln_headers_to_base.py — one-time migration for pre-existing workbooks
+migrate_base_currency_headers.py — one-time migration for pre-existing workbooks
 created before the PLN -> base currency rename.
 
 Older workbooks have header cells literally named "Value (PLN)",
@@ -14,7 +14,7 @@ Run this ONCE, after upgrading to a version of the bot that expects the
 Freshly generated workbooks (from the current Expenses_Template.xlsx) are
 unaffected and do not need this script.
 
-Usage:  python scripts/migrate_pln_headers_to_base.py [path-to-xlsx]
+Usage:  python scripts/migrate_base_currency_headers.py [path-to-xlsx]
         (defaults to settings.XLSX_PATH if no path is given)
 """
 import os
