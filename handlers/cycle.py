@@ -112,8 +112,9 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     today = now_utc().date()
     args = ctx.args or []
 
+    loop = asyncio.get_running_loop()
     if not args:
-        current = current_cycle_start(today)
+        current = await loop.run_in_executor(None, current_cycle_start, today)
         if current is None:
             await update.message.reply_text(
                 "No budget cycle recorded yet. Use `/cycle started` (or "
@@ -134,7 +135,7 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if args[0].lower() == "list":
-        cycles_ledger = load_cycles()
+        cycles_ledger = await loop.run_in_executor(None, load_cycles)
         if not cycles_ledger:
             await update.message.reply_text("No cycle boundaries recorded yet.")
             return
@@ -543,15 +544,16 @@ async def maybe_prompt_cycle_start(update: Update, transaction) -> None:
     category = str(transaction.category or "").strip().lower()
     description = str(getattr(transaction, "description", "") or "").lower()
     in_category = any(
-        re.search(r"\b" + re.escape(k) + r"\b", category, re.UNICODE) for k in keywords
+        re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", category, re.UNICODE) for k in keywords
     )
     in_description = not category and any(
-        re.search(r"\b" + re.escape(k) + r"\b", description, re.UNICODE) for k in keywords
+        re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", description, re.UNICODE) for k in keywords
     )
     if not in_category and not in_description:
         return
     today = now_utc().date()
-    if not should_prompt_new_cycle(today):
+    loop = asyncio.get_running_loop()
+    if not await loop.run_in_executor(None, should_prompt_new_cycle, today):
         return
     proposed = transaction.date or today
     keyboard = InlineKeyboardMarkup([[
