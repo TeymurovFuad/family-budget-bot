@@ -137,7 +137,7 @@ def load_rates() -> dict[str, float]:
 
 
 def get_rate(ccy: str, rates: dict[str, float]) -> float:
-    """1 unit of ccy in PLN. Returns 1.0 if unknown."""
+    """1 unit of ccy in base currency. Returns 1.0 if unknown."""
     return rates.get(ccy.upper(), 1.0)
 
 

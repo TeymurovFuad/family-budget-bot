@@ -60,7 +60,7 @@ async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👋 Hi *{name}*! I'm your *Budget Bot*.\n\n"
         "Three ways to log spending:\n"
-        "• Just type it — e.g. \"groceries 89 PLN\"\n"
+        "• Just type it — e.g. \"groceries 89\"\n"
         "• /add — guided, one transaction step by step\n"
         "• /bulk — import many at once from a photo, file or text\n\n"
         f"Currently showing amounts in *{ccy}*. "
