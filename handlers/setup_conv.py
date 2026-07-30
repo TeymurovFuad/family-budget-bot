@@ -160,6 +160,8 @@ def _extend_category_validation(wb, n_categories: int) -> None:
 def _commit_categories(session: dict) -> None:
     """Checkpoint A: Lists!C + both dashboards + validation, one atomic save."""
     from openpyxl import load_workbook
+
+    import merchant_map
     from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, sync_cycle_dashboard_categories
     from excel_schema import (
         ListsSchema, col_indices, header_of, sync_dashboard_categories,
@@ -198,6 +200,7 @@ def _commit_categories(session: dict) -> None:
         for old_name, new_name in session.get("renames", []):
             counts = rename_category_in_workbook(wb, old_name, new_name)
             log.info("/setup: cascaded rename '%s' → '%s': %s", old_name, new_name, counts)
+            merchant_map.rename_category(old_name, new_name)
         session["renames"] = []
         sync_dashboard_categories(wb, names)
         if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
