@@ -20,6 +20,7 @@ Cancelling mid-flow keeps whatever checkpoints already committed.
 
 import re
 
+import settings
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler, CommandHandler, ContextTypes, ConversationHandler,
@@ -250,8 +251,8 @@ async def _refresh_rates_best_effort() -> dict[str, float]:
     """Fetch live rates from frankfurter and update Excel. Raises on failure."""
     import httpx
     from excel_ops import async_update_currency_rates
-    urls = ["https://api.frankfurter.dev/v1/latest?from=PLN",
-            "https://api.frankfurter.app/latest?from=PLN"]
+    urls = [f"https://api.frankfurter.dev/v1/latest?from={settings.DISPLAY_CURRENCY}",
+            f"https://api.frankfurter.app/latest?from={settings.DISPLAY_CURRENCY}"]
     data = None
     async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
         for url in urls:

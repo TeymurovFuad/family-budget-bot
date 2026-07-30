@@ -2,11 +2,13 @@
 formatters.py — display formatting helpers. No I/O, no side effects.
 """
 
+import settings
 from data import get_rate
 from validators import clean_merchant_description
 
 
-def format_amount(n: float, ccy: str = "PLN") -> str:
+def format_amount(n: float, ccy: str = "") -> str:
+    ccy = ccy or settings.DISPLAY_CURRENCY
     return f"{n:,.0f} {ccy}"
 
 
