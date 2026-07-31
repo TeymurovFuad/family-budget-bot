@@ -10,6 +10,9 @@ today's Excel-backed call sites so the Phase 2 swap is mechanical:
   update_transaction_field(...)    ↔ file_storage.update_transaction_field
   load_transactions()              ↔ data.load_data() (same DataFrame columns)
   load_reference_data()            ↔ data.load_reference_data() (same keys)
+
+This module structurally satisfies storage_protocol.StorageBackend — any
+future backend must expose the same five callables.
 """
 
 import pandas as pd
@@ -17,6 +20,7 @@ import pandas as pd
 import settings
 import sqlite_ops
 from models import MONTH_NAMES
+from sqlite_types import TransactionRow, TransactionSource, TransactionType
 
 
 def _conn():
@@ -41,22 +45,22 @@ def append_transaction(transaction) -> None:
         value_base, rate_used = sqlite_ops.compute_value_base(
             row["value"], row.get("currency"), rates, settings.DISPLAY_CURRENCY)
         date = row.get("date")
-        sqlite_ops.insert_transaction(conn, {
-            "date":              date.isoformat() if hasattr(date, "isoformat") else date,
-            "year":              row.get("year"),
-            "month":             row.get("month"),
-            "value":             row.get("value"),
-            "currency":          row.get("currency") or settings.DISPLAY_CURRENCY,
-            "value_base":        value_base,
-            "rate_used":         rate_used,
-            "type":              row.get("type"),
-            "category":          row.get("category"),
-            "person":            row.get("person"),
-            "description":       row.get("description"),
-            "is_recurring":      row.get("is_recurring"),
-            "is_done":           True if row.get("is_done") is None else row.get("is_done"),
-            "source":            row.get("source", "bot"),
-        })
+        sqlite_ops.insert_transaction(conn, TransactionRow(
+            date=date.isoformat() if hasattr(date, "isoformat") else date,
+            year=row.get("year"),
+            month=row.get("month"),
+            value=row.get("value"),
+            currency=row.get("currency") or settings.DISPLAY_CURRENCY,
+            value_base=value_base,
+            rate_used=rate_used,
+            type=row.get("type"),
+            category=row.get("category"),
+            person=row.get("person"),
+            description=row.get("description"),
+            is_recurring=row.get("is_recurring"),
+            is_done=True if row.get("is_done") is None else row.get("is_done"),
+            source=row.get("source", TransactionSource.BOT),
+        ))
     finally:
         conn.close()
 
@@ -65,7 +69,8 @@ def _check_expected(conn, id: int, expected: dict | None) -> None:
     """Mirror file_storage._row_matches_snapshot: verify Date/Value/Description."""
     if expected is None:
         return
-    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (id,)).fetchone()
+    row = conn.execute(
+        f"SELECT * FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?", (id,)).fetchone()
     if row is None:
         raise RowMismatchError(f"Transaction {id} no longer exists.")
     mapping = {"Date": "date", "Value": "value", "Description": "description"}
@@ -123,7 +128,8 @@ def update_transaction_field(id: int, field, value=None, expected: dict | None =
         _check_expected(conn, id, expected)
         if "value" in updates or "currency" in updates:
             row = conn.execute(
-                "SELECT value, currency FROM transactions WHERE id = ?", (id,)).fetchone()
+                f"SELECT value, currency FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?",
+                (id,)).fetchone()
             if row is None:
                 raise RowMismatchError(f"Transaction {id} no longer exists.")
             new_value = updates.get("value", row["value"])
@@ -195,18 +201,20 @@ def load_reference_data() -> dict:
     conn = _conn()
     try:
         cats = conn.execute(
-            "SELECT name, budget_base FROM categories WHERE active = 1 ORDER BY rowid"
+            f"SELECT name, budget_base FROM {sqlite_ops.TABLE_CATEGORIES} "
+            f"WHERE active = 1 ORDER BY rowid"
         ).fetchall()
         persons = [r["name"] for r in conn.execute(
-            "SELECT name FROM persons WHERE active = 1 ORDER BY rowid")]
+            f"SELECT name FROM {sqlite_ops.TABLE_PERSONS} WHERE active = 1 ORDER BY rowid")]
         rates = sqlite_ops.load_rates_dict(conn)
         years = [r["year"] for r in conn.execute(
-            "SELECT DISTINCT year FROM transactions WHERE year IS NOT NULL ORDER BY year")]
+            f"SELECT DISTINCT year FROM {sqlite_ops.TABLE_TRANSACTIONS} "
+            f"WHERE year IS NOT NULL ORDER BY year")]
     finally:
         conn.close()
     return {
         "months":     list(MONTH_NAMES),
-        "txn_types":  ["Expense", "Income", "Savings"],
+        "txn_types":  [t.value for t in TransactionType],
         "categories": [r["name"] for r in cats],
         "persons":    persons,
         "years":      years,

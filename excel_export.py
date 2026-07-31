@@ -12,6 +12,7 @@ Standalone callable — not wired into APScheduler yet (Phase 2).
 from logger import get_logger
 
 import sqlite_ops
+from sqlite_types import SyncDirection, SyncStatus
 from excel_schema import (
     MasterDataSchema,
     col_indices,
@@ -70,12 +71,12 @@ def generate_excel_from_sqlite(db_path, template_path, output_path) -> None:
 
         ensure_monthly_summary_rows_from_masterdata(wb)
         atomic_save(wb, output_path)
-        sqlite_ops.log_sync(conn, "export", "ok",
+        sqlite_ops.log_sync(conn, SyncDirection.EXPORT, SyncStatus.OK,
                             f"{len(rows)} rows -> {output_path}")
         log.info("Exported %d SQLite transactions to %s", len(rows), output_path)
     except Exception as e:
         try:
-            sqlite_ops.log_sync(conn, "export", "error", str(e))
+            sqlite_ops.log_sync(conn, SyncDirection.EXPORT, SyncStatus.ERROR, str(e))
         except Exception:
             pass
         raise

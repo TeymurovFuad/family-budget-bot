@@ -22,6 +22,7 @@ import pandas as pd
 import settings
 import sqlite_ops
 from excel_schema import load_currency_rates_from_path
+from sqlite_types import SyncDirection, SyncStatus, TransactionRow, TransactionSource
 
 
 def _clean(v):
@@ -36,8 +37,8 @@ def _clean(v):
     return v
 
 
-def df_row_to_txn(row, rates: dict[str, float]) -> dict:
-    """Map one data.load_data() DataFrame row to a transactions-table dict."""
+def df_row_to_txn(row, rates: dict[str, float]) -> TransactionRow:
+    """Map one data.load_data() DataFrame row to a TransactionRow."""
     value = float(row["Value"])
     currency = str(_clean(row.get("Currency")) or settings.DISPLAY_CURRENCY).strip().upper()
     value_base, rate_used = sqlite_ops.compute_value_base(
@@ -48,23 +49,23 @@ def df_row_to_txn(row, rates: dict[str, float]) -> dict:
         date = date.date()
     date_modified = _clean(row.get("Date Modified (UTC)"))
 
-    return {
-        "date":              date.isoformat() if date is not None else None,
-        "year":              int(row["Year"]),
-        "month":             _clean(row.get("Month")),
-        "value":             value,
-        "currency":          currency,
-        "value_base":        value_base,
-        "rate_used":         rate_used,
-        "type":              _clean(row.get("Type")),
-        "category":          _clean(row.get("Category")),
-        "person":            _clean(row.get("Person")),
-        "description":       _clean(row.get("Description")),
-        "is_recurring":      bool(_clean(row.get("IsRecurring")) or False),
-        "is_done":           bool(row.get("IsDone", True)),
-        "date_modified_utc": str(date_modified) if date_modified is not None else None,
-        "source":            "excel_import",
-    }
+    return TransactionRow(
+        date=date.isoformat() if date is not None else None,
+        year=int(row["Year"]),
+        month=_clean(row.get("Month")),
+        value=value,
+        currency=currency,
+        value_base=value_base,
+        rate_used=rate_used,
+        type=_clean(row.get("Type")),
+        category=_clean(row.get("Category")),
+        person=_clean(row.get("Person")),
+        description=_clean(row.get("Description")),
+        is_recurring=bool(_clean(row.get("IsRecurring")) or False),
+        is_done=bool(row.get("IsDone", True)),
+        date_modified_utc=str(date_modified) if date_modified is not None else None,
+        source=TransactionSource.EXCEL_IMPORT,
+    )
 
 
 def run_import(db_path=None, dry_run: bool = False) -> dict:
@@ -84,25 +85,26 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
         # Report against the current DB state without writing.
         conn = sqlite_ops.init_db(db_path)
         try:
-            existing = {r["content_hash"] for r in
-                        conn.execute("SELECT content_hash FROM transactions")}
+            existing = {r["content_hash"] for r in conn.execute(
+                f"SELECT content_hash FROM {sqlite_ops.TABLE_TRANSACTIONS}")}
         finally:
             conn.close()
         for _, row in df.iterrows():
             txn = df_row_to_txn(row, rates)
             h = sqlite_ops.content_hash_for_row(
-                txn["date"], txn["value"], txn["currency"], txn["type"],
-                txn["category"], txn["person"], txn["description"],
-                txn["date_modified_utc"])
+                txn.date, txn.value, txn.currency, txn.type,
+                txn.category, txn.person, txn.description,
+                txn.date_modified_utc)
             stats["skipped" if h in existing else "inserted"] += 1
         return stats
 
     conn = sqlite_ops.init_db(db_path)
     try:
-        before = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        count_sql = f"SELECT COUNT(*) FROM {sqlite_ops.TABLE_TRANSACTIONS}"
+        before = conn.execute(count_sql).fetchone()[0]
         for _, row in df.iterrows():
             sqlite_ops.insert_transaction(conn, df_row_to_txn(row, rates))
-        after = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        after = conn.execute(count_sql).fetchone()[0]
         stats["inserted"] = after - before
         stats["skipped"] = stats["total"] - stats["inserted"]
 
@@ -114,7 +116,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
         for person in lists.get("persons", []):
             sqlite_ops.upsert_person(conn, str(person))
 
-        sqlite_ops.log_sync(conn, "import", "ok",
+        sqlite_ops.log_sync(conn, SyncDirection.IMPORT, SyncStatus.OK,
                             f"inserted={stats['inserted']} skipped={stats['skipped']}")
     finally:
         conn.close()

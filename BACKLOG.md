@@ -142,7 +142,7 @@ Six groups by file domain — agents A–E chain sequentially (each PR targets t
 | **C — Conversation handlers** | `handlers/add_conv.py`, `handlers/quick_conv.py`, `handlers/edit_conv.py`, `handlers/delete_conv.py` | /add default-and-confirm, quick-add one-tap recovery, recurring detection, person attribution, local fast-path quick-add, empty SALARY_CATEGORY fix |
 | **D — Reports + cycles** | `handlers/reports.py`, `handlers/cycle.py`, `cycles.py`, `scheduled_report.py` | /savings cycle-aware, lazy backfill, none-this-month, candidate window, past/entire-period walk, before-first-boundary, multi-salary picker, timezone fix, report chunking |
 | **E — Infra + scripts** | `scripts/`, `logger.py`, `bot.py` (wiring only) | Log retention, draft archival, magic numbers sweep, 300-line cap, recovery replay Date fix, off-peak batching |
-| **F — Web UI** | `web/` (new), `sqlite_ops.py` (new) | SQLite shadow store → read API + UI → web write path → flip SQLite primary (Cycles W1–W4) |
+| **F — Web UI** | `web/` (new), `sqlite_ops.py` (shipped in PR #96, with `sqlite_types.py`, `storage_protocol.py`, `storage_facade.py`) | SQLite shadow store → read API + UI → web write path → flip SQLite primary (Cycles W1–W4) |
 
 **Collision rules:**
 - `bot.py` — Group E only, wiring/constants changes only
@@ -473,11 +473,19 @@ Excel stays the source of truth until Cycle 4 explicitly flips it.
 Each cycle is a self-contained deliverable that ships value on its own.
 Cycles must be done in order — each depends on the previous.
 
+> **Progress (PR #96, Cycle S1 Phase 1):** the storage foundation shipped ahead of W1 —
+> `sqlite_ops.py` (WAL schema: transactions/categories/persons/rates/goals/sync_log, table-name
+> constants, `sqlite_types.py` StrEnums + `TransactionRow` dataclass), `storage_facade.py`
+> (satisfies `storage_protocol.StorageBackend`, mirrors `data.load_data()` shape),
+> `scripts/import_excel_to_sqlite.py` (idempotent backfill via content_hash),
+> `excel_export.py` + `scripts/reconcile_sqlite_export.py`. Nothing is wired into the
+> running bot yet; W1's dual-write (or a direct flip per W4) is the next step.
+
 ### Cycle W1 — SQLite as a shadow/parallel store
-- [ ] Design schema: `transactions` (mirrors MasterData), `cycles`, `lists` (categories, currencies, budgets), `merchant_map`.
-- [ ] Add a `sqlite_ops.py` layer: `init_db`, `upsert_transaction`, `delete_transaction`, `upsert_cycle`, `load_transactions(filters)`.
+- [x] Design schema: `transactions` (mirrors MasterData), reference tables (categories, persons, rates, goals) — done in `sqlite_ops.py` (PR #96); `cycles` and `merchant_map` tables still pending.
+- [x] Add a `sqlite_ops.py` layer — done (PR #96): `init_db`, `insert_transaction`, `update_transaction`, `delete_transaction`, `list_transactions(filters)`, reference upserts, `log_sync`.
 - [ ] Wire dual-write: every `write_transaction_row` / `delete_transaction` / edit also writes to SQLite. Reads still come from Excel. Bot behaviour unchanged.
-- [ ] Backfill script: `scripts/backfill_sqlite.py` — import all existing MasterData rows into SQLite on first run.
+- [x] Backfill script — done (PR #96) as `scripts/import_excel_to_sqlite.py`: re-runnable, `--dry-run`, content_hash skips duplicates.
 - [ ] CI: SQLite write failures are logged and non-fatal (Excel is still authoritative — a SQLite bug must never block a save).
 - Done when: SQLite stays in sync with Excel through normal bot usage for one week without divergence.
 
@@ -508,7 +516,7 @@ Cycles must be done in order — each depends on the previous.
 - [x] **UI framework**: HTMX + Jinja2 templates served by FastAPI. Server-side rendering, no JS framework — closest Python equivalent to Blazor/Razor Pages.
 - [x] **Hosting**: systemd service + Nginx reverse proxy on the same Oracle Cloud VM. No Docker — same pattern as the existing bot service.
 - [x] **Access**: WireGuard VPN. No public web surface. Phone and laptop connect via WireGuard app (QR code setup). Web UI only reachable inside the VPN tunnel.
-- [ ] **SQLite concurrency**: enable WAL mode on the SQLite DB; verify bot + web server don't deadlock under concurrent writes. Resolve at W1.
+- [ ] **SQLite concurrency**: WAL mode enabled (`sqlite_ops.init_db`, PR #96); still to verify bot + web server don't deadlock under concurrent writes.
 
 ---
 

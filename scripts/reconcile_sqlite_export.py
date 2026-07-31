@@ -31,8 +31,8 @@ def sqlite_totals(db_path) -> dict[tuple, float]:
         return {
             (r["year"], r["month"]): r["total"]
             for r in conn.execute(
-                "SELECT year, month, SUM(value_base) AS total FROM transactions "
-                "GROUP BY year, month")
+                f"SELECT year, month, SUM(value_base) AS total "
+                f"FROM {sqlite_ops.TABLE_TRANSACTIONS} GROUP BY year, month")
         }
     finally:
         conn.close()

@@ -16,11 +16,21 @@ import sqlite3
 from datetime import datetime, timezone
 
 import settings
+from sqlite_types import SyncDirection, SyncStatus, TransactionRow
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS transactions (
+TABLE_TRANSACTIONS = "transactions"
+TABLE_CATEGORIES = "categories"
+TABLE_PERSONS = "persons"
+TABLE_RATES = "rates"
+TABLE_GOALS = "goals"
+TABLE_SYNC_LOG = "sync_log"
+
+PRAGMA_WAL = "PRAGMA journal_mode=WAL"
+
+_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {TABLE_TRANSACTIONS} (
     id                INTEGER PRIMARY KEY,
     date              TEXT,
     year              INTEGER,
@@ -39,25 +49,25 @@ CREATE TABLE IF NOT EXISTS transactions (
     source            TEXT,
     content_hash      TEXT UNIQUE
 );
-CREATE TABLE IF NOT EXISTS categories (
+CREATE TABLE IF NOT EXISTS {TABLE_CATEGORIES} (
     name        TEXT PRIMARY KEY,
     budget_base REAL,
     active      INTEGER
 );
-CREATE TABLE IF NOT EXISTS persons (
+CREATE TABLE IF NOT EXISTS {TABLE_PERSONS} (
     name   TEXT PRIMARY KEY,
     active INTEGER
 );
-CREATE TABLE IF NOT EXISTS rates (
+CREATE TABLE IF NOT EXISTS {TABLE_RATES} (
     currency     TEXT PRIMARY KEY,
     rate_to_base REAL
 );
-CREATE TABLE IF NOT EXISTS goals (
+CREATE TABLE IF NOT EXISTS {TABLE_GOALS} (
     name      TEXT PRIMARY KEY,
     alloc_pct REAL,
     goal_base REAL
 );
-CREATE TABLE IF NOT EXISTS sync_log (
+CREATE TABLE IF NOT EXISTS {TABLE_SYNC_LOG} (
     id        INTEGER PRIMARY KEY,
     ts        TEXT,
     direction TEXT,
@@ -82,7 +92,7 @@ def init_db(db_path) -> sqlite3.Connection:
     from pathlib import Path
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(PRAGMA_WAL)
     conn.executescript(_SCHEMA)
     conn.commit()
     return conn
@@ -150,14 +160,14 @@ _TXN_COLUMNS = (
 )
 
 
-def insert_transaction(conn: sqlite3.Connection, row_dict: dict) -> int:
+def insert_transaction(conn: sqlite3.Connection, row_dict: "TransactionRow | dict") -> int:
     """
-    Insert one transaction. On content_hash conflict the insert is ignored
-    (idempotent re-import) and the existing row's id is returned.
-    Missing content_hash is computed from the row fields.
-    Returns the row id.
+    Insert one transaction (a TransactionRow or a column-keyed dict).
+    On content_hash conflict the insert is ignored (idempotent re-import)
+    and the existing row's id is returned. Missing content_hash is computed
+    from the row fields. Returns the row id.
     """
-    row = dict(row_dict)
+    row = row_dict.to_db_dict() if isinstance(row_dict, TransactionRow) else dict(row_dict)
     if not row.get("content_hash"):
         row["content_hash"] = content_hash_for_row(
             row.get("date"), row.get("value"), row.get("currency"),
@@ -170,7 +180,7 @@ def insert_transaction(conn: sqlite3.Connection, row_dict: dict) -> int:
         if row.get(flag) is not None:
             row[flag] = int(bool(row[flag]))
     cols = [c for c in _TXN_COLUMNS if c in row]
-    sql = (f"INSERT INTO transactions ({', '.join(cols)}) "
+    sql = (f"INSERT INTO {TABLE_TRANSACTIONS} ({', '.join(cols)}) "
            f"VALUES ({', '.join('?' for _ in cols)}) "
            f"ON CONFLICT(content_hash) DO NOTHING")
     cur = conn.execute(sql, [row[c] for c in cols])
@@ -178,7 +188,7 @@ def insert_transaction(conn: sqlite3.Connection, row_dict: dict) -> int:
     if cur.rowcount == 1:
         return cur.lastrowid
     existing = conn.execute(
-        "SELECT id FROM transactions WHERE content_hash = ?",
+        f"SELECT id FROM {TABLE_TRANSACTIONS} WHERE content_hash = ?",
         (row["content_hash"],),
     ).fetchone()
     return existing["id"]
@@ -192,13 +202,13 @@ def update_transaction(conn: sqlite3.Connection, id: int, fields: dict) -> None:
     if bad:
         raise ValueError(f"Unknown transaction column(s): {bad}")
     assignments = ", ".join(f"{k} = ?" for k in fields)
-    conn.execute(f"UPDATE transactions SET {assignments} WHERE id = ?",
+    conn.execute(f"UPDATE {TABLE_TRANSACTIONS} SET {assignments} WHERE id = ?",
                  [*fields.values(), id])
     conn.commit()
 
 
 def delete_transaction(conn: sqlite3.Connection, id: int) -> None:
-    conn.execute("DELETE FROM transactions WHERE id = ?", (id,))
+    conn.execute(f"DELETE FROM {TABLE_TRANSACTIONS} WHERE id = ?", (id,))
     conn.commit()
 
 
@@ -216,7 +226,7 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None) -> 
             raise ValueError(f"Unsupported filter: {key}")
         where.append(f"{key} = ?")
         params.append(val)
-    sql = "SELECT * FROM transactions"
+    sql = f"SELECT * FROM {TABLE_TRANSACTIONS}"
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY date, id"
@@ -228,7 +238,7 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None) -> 
 def upsert_category(conn: sqlite3.Connection, name: str,
                     budget_base: float | None = None, active: bool = True) -> None:
     conn.execute(
-        "INSERT INTO categories (name, budget_base, active) VALUES (?, ?, ?) "
+        f"INSERT INTO {TABLE_CATEGORIES} (name, budget_base, active) VALUES (?, ?, ?) "
         "ON CONFLICT(name) DO UPDATE SET budget_base = excluded.budget_base, "
         "active = excluded.active",
         (name, budget_base, int(active)),
@@ -238,7 +248,7 @@ def upsert_category(conn: sqlite3.Connection, name: str,
 
 def upsert_person(conn: sqlite3.Connection, name: str, active: bool = True) -> None:
     conn.execute(
-        "INSERT INTO persons (name, active) VALUES (?, ?) "
+        f"INSERT INTO {TABLE_PERSONS} (name, active) VALUES (?, ?) "
         "ON CONFLICT(name) DO UPDATE SET active = excluded.active",
         (name, int(active)),
     )
@@ -247,7 +257,7 @@ def upsert_person(conn: sqlite3.Connection, name: str, active: bool = True) -> N
 
 def upsert_rate(conn: sqlite3.Connection, currency: str, rate_to_base: float) -> None:
     conn.execute(
-        "INSERT INTO rates (currency, rate_to_base) VALUES (?, ?) "
+        f"INSERT INTO {TABLE_RATES} (currency, rate_to_base) VALUES (?, ?) "
         "ON CONFLICT(currency) DO UPDATE SET rate_to_base = excluded.rate_to_base",
         (str(currency).strip().upper(), float(rate_to_base)),
     )
@@ -257,7 +267,7 @@ def upsert_rate(conn: sqlite3.Connection, currency: str, rate_to_base: float) ->
 def upsert_goal(conn: sqlite3.Connection, name: str,
                 alloc_pct: float | None = None, goal_base: float | None = None) -> None:
     conn.execute(
-        "INSERT INTO goals (name, alloc_pct, goal_base) VALUES (?, ?, ?) "
+        f"INSERT INTO {TABLE_GOALS} (name, alloc_pct, goal_base) VALUES (?, ?, ?) "
         "ON CONFLICT(name) DO UPDATE SET alloc_pct = excluded.alloc_pct, "
         "goal_base = excluded.goal_base",
         (name, alloc_pct, goal_base),
@@ -265,16 +275,18 @@ def upsert_goal(conn: sqlite3.Connection, name: str,
     conn.commit()
 
 
-def log_sync(conn: sqlite3.Connection, direction: str, status: str, detail: str = "") -> None:
+def log_sync(conn: sqlite3.Connection, direction: SyncDirection,
+             status: SyncStatus, detail: str = "") -> None:
     """Record one import/export event in sync_log."""
     conn.execute(
-        "INSERT INTO sync_log (ts, direction, status, detail) VALUES (?, ?, ?, ?)",
-        (datetime.now(timezone.utc).isoformat(), direction, status, detail),
+        f"INSERT INTO {TABLE_SYNC_LOG} (ts, direction, status, detail) VALUES (?, ?, ?, ?)",
+        (datetime.now(timezone.utc).isoformat(), str(direction), str(status), detail),
     )
     conn.commit()
 
 
 def load_rates_dict(conn: sqlite3.Connection) -> dict[str, float]:
     """{currency: rate_to_base} from the rates table; DISPLAY_CURRENCY fallback."""
-    rates = {r["currency"]: r["rate_to_base"] for r in conn.execute("SELECT * FROM rates")}
+    rates = {r["currency"]: r["rate_to_base"]
+             for r in conn.execute(f"SELECT * FROM {TABLE_RATES}")}
     return rates or {settings.DISPLAY_CURRENCY: 1.0}
