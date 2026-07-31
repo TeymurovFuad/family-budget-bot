@@ -28,6 +28,9 @@ TABLE_GOALS = "goals"
 TABLE_SYNC_LOG = "sync_log"
 
 PRAGMA_WAL = "PRAGMA journal_mode=WAL"
+# Wait up to 5s for a competing writer's lock instead of failing immediately
+# with "database is locked" (bot + future web server share this DB).
+PRAGMA_BUSY_TIMEOUT = "PRAGMA busy_timeout=5000"
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_TRANSACTIONS} (
@@ -93,6 +96,7 @@ def init_db(db_path) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = connect(db_path)
     conn.execute(PRAGMA_WAL)
+    conn.execute(PRAGMA_BUSY_TIMEOUT)
     conn.executescript(_SCHEMA)
     conn.commit()
     return conn

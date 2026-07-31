@@ -16,14 +16,20 @@ This module structurally satisfies storage_protocol.StorageBackend — any
 future backend must expose the same five callables.
 """
 
+import logging
+from datetime import date as _date
+
 import pandas as pd
 
 import settings
 import sqlite_ops
 from models import MONTH_NAMES
+from validators import make_dedup_key, make_loose_dedup_key
 from sqlite_types import (
     SyncDirection, SyncStatus, TransactionRow, TransactionSource, TransactionType,
 )
+
+log = logging.getLogger(__name__)
 
 
 def _conn():
@@ -241,6 +247,65 @@ def load_transactions(filters: dict | None = None) -> pd.DataFrame:
     df = df.dropna(subset=["_base", "Type", "Year", "Month"])
     df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
     return df
+
+
+def load_dedup_evidence(start=None, end=None) -> dict:
+    """
+    SQLite twin of data.load_dedup_evidence(): multiset evidence of stored
+    transactions for dedup-v2's count-aware, two-pass scan. Returns:
+
+        {
+          "strict": {strict_key: [(date_iso, description), ...]},
+          "loose":  {loose_key:  [(date_iso, description), ...]},
+        }
+
+    strict_key = date|value|currency|cleaned-description (validators.make_dedup_key)
+    loose_key  = date|value|currency, no description (validators.make_loose_dedup_key)
+
+    len(evidence["strict"][key]) / len(evidence["loose"][key]) is that key's
+    multiset count in the transactions table. Only rows whose date falls in
+    [start, end] (date objects, both optional/inclusive) are counted; dates
+    are compared on their first 10 chars so a stray time component never
+    excludes a boundary day. Returns empty dicts on any read failure —
+    dedup never blocks an import, it just stops flagging anything.
+    """
+    empty = {"strict": {}, "loose": {}}
+    try:
+        conn = _conn()
+        try:
+            where = ["date IS NOT NULL", "value IS NOT NULL"]
+            params: list = []
+            if start is not None:
+                where.append("substr(date, 1, 10) >= ?")
+                params.append(start.isoformat() if hasattr(start, "isoformat") else str(start)[:10])
+            if end is not None:
+                where.append("substr(date, 1, 10) <= ?")
+                params.append(end.isoformat() if hasattr(end, "isoformat") else str(end)[:10])
+            rows = conn.execute(
+                f"SELECT date, value, currency, description "
+                f"FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE {' AND '.join(where)}",
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        strict: dict[str, list[tuple[str, str]]] = {}
+        loose: dict[str, list[tuple[str, str]]] = {}
+        for r in rows:
+            try:
+                date_iso = _date.fromisoformat(str(r["date"])[:10]).isoformat()
+            except ValueError:
+                continue  # unparseable date — mirror the Excel reader's coerce+drop
+            value = r["value"]
+            ccy = r["currency"] or settings.DISPLAY_CURRENCY
+            desc = r["description"] if r["description"] is not None else ""
+            strict_key = make_dedup_key(date_iso, value, ccy, desc)
+            loose_key = make_loose_dedup_key(date_iso, value, ccy)
+            strict.setdefault(strict_key, []).append((date_iso, str(desc)))
+            loose.setdefault(loose_key, []).append((date_iso, str(desc)))
+        return {"strict": strict, "loose": loose}
+    except Exception as e:
+        log.warning("Could not load dedup evidence from SQLite: %s", e)
+        return empty
 
 
 def load_reference_data() -> dict:

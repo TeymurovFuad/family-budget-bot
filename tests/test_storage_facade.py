@@ -189,3 +189,86 @@ def test_bulk_conv_reference_reads_use_facade(sqlite_db):
     ref = bulk_conv.load_reference_data()
     assert ref["categories"] == ["Groceries"]
     assert ref["persons"] == ["Alice"]
+
+
+# ── load_dedup_evidence (SQLite twin of data.load_dedup_evidence) ─────────────
+
+def test_bulk_conv_dedup_evidence_uses_facade(sqlite_db):
+    """bulk_conv must read dedup evidence from the facade (SQLite), not data.py
+    (Excel) — otherwise its own SQLite saves never feed its own dedup scan."""
+    import handlers.bulk_conv as bulk_conv
+    assert bulk_conv.load_dedup_evidence is storage_facade.load_dedup_evidence
+
+
+def test_load_dedup_evidence_shape_and_multiset_counts(sqlite_db):
+    from validators import make_dedup_key, make_loose_dedup_key
+    # Two rows with the same date|value|ccy|description (different person, so
+    # distinct content_hash) + one row differing only in description.
+    storage_facade.append_transactions_batch([
+        _txn(), _txn(person="Bob"), _txn(description="other shop"),
+    ])
+    ev = storage_facade.load_dedup_evidence(
+        datetime.date(2024, 6, 1), datetime.date(2024, 6, 30))
+    strict_key = make_dedup_key(
+        "2024-06-15", 150.50, settings.DISPLAY_CURRENCY, "weekly shop")
+    loose_key = make_loose_dedup_key("2024-06-15", 150.50, settings.DISPLAY_CURRENCY)
+    assert len(ev["strict"][strict_key]) == 2          # multiset, count-aware
+    assert len(ev["loose"][loose_key]) == 3            # description ignored
+    assert ev["strict"][strict_key][0] == ("2024-06-15", "weekly shop")
+
+
+def test_load_dedup_evidence_sees_own_batch_writes(sqlite_db):
+    """The re-upload scenario: rows saved via append_transactions_batch must
+    appear in the very next dedup evidence read."""
+    from validators import make_dedup_key
+    assert storage_facade.load_dedup_evidence() == {"strict": {}, "loose": {}}
+    storage_facade.append_transactions_batch([_txn()])
+    ev = storage_facade.load_dedup_evidence()
+    key = make_dedup_key("2024-06-15", 150.50, settings.DISPLAY_CURRENCY, "weekly shop")
+    assert len(ev["strict"][key]) == 1
+
+
+def test_load_dedup_evidence_date_range_filter(sqlite_db):
+    storage_facade.append_transactions_batch([
+        _txn(),
+        _txn(date=datetime.date(2024, 7, 1), month="Jul", description="july row"),
+    ])
+    ev = storage_facade.load_dedup_evidence(
+        datetime.date(2024, 6, 1), datetime.date(2024, 6, 30))
+    all_descs = [d for entries in ev["strict"].values() for _, d in entries]
+    assert all_descs == ["weekly shop"]                # July row filtered out
+    # Boundary day is inclusive.
+    ev2 = storage_facade.load_dedup_evidence(
+        datetime.date(2024, 7, 1), datetime.date(2024, 7, 1))
+    assert [d for e in ev2["strict"].values() for _, d in e] == ["july row"]
+
+
+def test_load_dedup_evidence_read_failure_returns_empty(sqlite_db, monkeypatch):
+    """Dedup never blocks an import — any read failure yields empty evidence."""
+    monkeypatch.setattr(storage_facade, "_conn",
+                        lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert storage_facade.load_dedup_evidence() == {"strict": {}, "loose": {}}
+
+
+# ── within-batch duplicate content_hash: silent skip, never data loss ─────────
+
+def test_duplicate_content_hash_within_batch_skips_only_exact_dup(sqlite_db):
+    conn = sqlite_ops.init_db(sqlite_db)
+    row = dict(
+        date="2024-06-15", year=2024, month="Jun", value=10.0,
+        currency=settings.DISPLAY_CURRENCY, value_base=10.0, rate_used=1.0,
+        type="Expense", category="Groceries", person="Alice",
+        description="coffee", is_recurring=0, is_done=1,
+        date_modified_utc="2024-06-15T00:00:00+00:00", content_hash="same-hash",
+    )
+    id1 = sqlite_ops.insert_transaction(conn, dict(row), commit=False)
+    id2 = sqlite_ops.insert_transaction(conn, dict(row), commit=False)  # exact dup
+    id3 = sqlite_ops.insert_transaction(
+        conn, dict(row, description="tea", content_hash="other-hash"), commit=False)
+    conn.commit()
+    rows = sqlite_ops.list_transactions(conn)
+    conn.close()
+    assert id2 == id1                       # dup resolved to the existing row id
+    assert id3 != id1
+    assert len(rows) == 2                   # only the exact duplicate was skipped
+    assert sorted(r["description"] for r in rows) == ["coffee", "tea"]

@@ -19,10 +19,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 import ai_parser
 from ai_parser import parse_text, parse_image, _chunk_statement_text, is_off_peak
 from config import auth, auth_write, log
-from data import load_dedup_evidence
 import settings
 import storage_facade
-from storage_facade import load_reference_data
+from storage_facade import load_dedup_evidence, load_reference_data
 import merchant_map
 from handlers.cycle import maybe_prompt_cycle_start
 from models import Transaction
@@ -2137,16 +2136,7 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         _archive_bulk_draft(update.effective_user.id)
 
-    if settings.STORAGE_BACKEND == "gcs" or settings.GCS_BUCKET_NAME:
-        destination = f"gs://{settings.GCS_BUCKET_NAME}/{settings.GCS_OBJECT_NAME}"
-    elif settings.STORAGE_BACKEND == "s3" or settings.S3_BUCKET_NAME:
-        destination = f"s3://{settings.S3_BUCKET_NAME}/{settings.S3_OBJECT_NAME}"
-    else:
-        destination = str(settings.XLSX_PATH)
-    msg = (
-        f"✅ Saved {saved} of {len(parsed)} transaction(s) "
-        f"to the MasterData sheet of:\n{destination}"
-    )
+    msg = f"✅ Saved {saved} of {len(parsed)} transaction(s) to your budget store."
     if skipped_dups and not write_failed:
         nums = ", ".join(f"#{n}" for n in skipped_dups[:10])
         more = f", … and {len(skipped_dups) - 10} more" if len(skipped_dups) > 10 else ""
