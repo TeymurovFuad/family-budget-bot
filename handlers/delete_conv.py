@@ -7,8 +7,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, log
 from log_decorators import log_call
-from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
-from storage_facade import RowMismatchError, delete_transaction_row
+from file_storage import RowMovedError
+from storage_facade import RowMismatchError, delete_transaction_row, get_recent_transactions
 from states import DELETE_PICK
 import settings
 
@@ -25,8 +25,10 @@ async def cmd_delete(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     try:
-        recent = get_recent_transactions(get_excel_path_for_reading(), n=5)
-    except FileNotFoundError as e:
+        # SQLite-sourced: each row's _row_idx is the real SQLite id, the same
+        # keyspace delete_transaction_row expects at pick time.
+        recent = get_recent_transactions(n=5)
+    except Exception as e:
         await update.message.reply_text(f"❌ {e}"); return
 
     if not recent:

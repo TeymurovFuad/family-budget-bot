@@ -230,10 +230,15 @@ def delete_transaction(conn: sqlite3.Connection, id: int) -> None:
 _FILTER_COLUMNS = ("year", "month", "category", "person", "type")
 
 
-def list_transactions(conn: sqlite3.Connection, filters: dict | None = None) -> list[dict]:
+def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
+                      *, newest_first: bool = False,
+                      limit: int | None = None) -> list[dict]:
     """
     Return transactions as dicts, optionally filtered by year, month,
-    category, person, and/or type. Ordered by date then id.
+    category, person, and/or type. Ordered by date then id (ascending by
+    default; both descending with newest_first=True). Pass limit to cap the
+    result — combined with newest_first=True this yields the N most recent
+    rows.
     """
     where, params = [], []
     for key, val in (filters or {}).items():
@@ -244,7 +249,10 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None) -> 
     sql = f"SELECT * FROM {TABLE_TRANSACTIONS}"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY date, id"
+    sql += " ORDER BY date DESC, id DESC" if newest_first else " ORDER BY date, id"
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(int(limit))
     return [dict(r) for r in conn.execute(sql, params)]
 
 

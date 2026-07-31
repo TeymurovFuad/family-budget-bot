@@ -248,3 +248,85 @@ async def test_delete_pick_row_gone_surfaces_moved_message(sqlite_db):
     assert result == ConversationHandler.END
     sent = upd.message.reply_text.call_args.args[0]
     assert "moved" in sent.lower()
+
+
+# ── Flow-level: the REAL list→pick path uses the SQLite id keyspace ───────────
+#
+# The tests above inject a known SQLite id straight into user_data, bypassing
+# the listing step — which is how an Excel-row-index/SQLite-id keyspace
+# mismatch once went unnoticed. These drive the actual /edit and /delete
+# conversations end to end: list from storage, pick a number, confirm, and
+# verify the write landed on the exact row the user picked.
+
+def _seed_three():
+    """Three rows on distinct dates; returns their SQLite ids oldest-first."""
+    ids = [
+        _seed_row(date="2026-07-01", value=10.0, description="bread"),
+        _seed_row(date="2026-07-02", value=20.0, description="taxi"),
+        _seed_row(date="2026-07-03", value=30.0, description="cinema"),
+    ]
+    return ids
+
+
+async def test_edit_full_flow_targets_picked_row_by_sqlite_id(sqlite_db):
+    ids = _seed_three()
+    ctx = make_ctx()
+
+    result = await edit_conv.cmd_edit(make_update("/edit"), ctx)
+    assert result == edit_conv.EDIT_PICK
+    # Listing came from SQLite and _row_idx IS the SQLite primary key.
+    listed = ctx.user_data["edit_txns"]
+    assert [t["_row_idx"] for t in listed] == ids  # oldest-first, like Excel
+    assert [t["Description"] for t in listed] == ["bread", "taxi", "cinema"]
+
+    # Pick row 2 ("taxi"), change Amount to 55, confirm.
+    assert await edit_conv.edit_pick(make_update("2"), ctx) == edit_conv.EDIT_FIELD
+    assert await edit_conv.edit_field(make_update("Amount"), ctx) == edit_conv.EDIT_VALUE
+    assert await edit_conv.edit_value(make_update("55"), ctx) == edit_conv.EDIT_CONFIRM
+    upd = make_update("Yes")
+    assert await edit_conv.edit_confirm(upd, ctx) == ConversationHandler.END
+    assert "Updated" in upd.message.reply_text.call_args.args[0]
+
+    rows = {r["id"]: r for r in _list_rows()}
+    assert rows[ids[1]]["value"] == 55.0          # the picked row changed
+    assert rows[ids[0]]["value"] == 10.0          # neighbours untouched
+    assert rows[ids[2]]["value"] == 30.0
+
+
+async def test_delete_full_flow_targets_picked_row_by_sqlite_id(sqlite_db):
+    ids = _seed_three()
+    ctx = make_ctx()
+
+    result = await delete_conv.cmd_delete(make_update("/delete"), ctx)
+    assert result == delete_conv.DELETE_PICK
+    # Delete lists newest-first; every candidate's _row_idx is a SQLite id.
+    candidates = ctx.user_data["delete_candidates"]
+    assert [t["_row_idx"] for t in candidates] == list(reversed(ids))
+
+    # Pick 1 = newest ("cinema").
+    upd = make_update("1")
+    assert await delete_conv.delete_pick(upd, ctx) == ConversationHandler.END
+    assert "Deleted" in upd.message.reply_text.call_args.args[0]
+    assert sorted(r["id"] for r in _list_rows()) == sorted(ids[:2])
+
+
+async def test_edit_full_flow_row_deleted_between_list_and_confirm(sqlite_db):
+    """The optimistic-lock guard still fires within the SQLite keyspace."""
+    ids = _seed_three()
+    ctx = make_ctx()
+    await edit_conv.cmd_edit(make_update("/edit"), ctx)
+    await edit_conv.edit_pick(make_update("2"), ctx)
+    await edit_conv.edit_field(make_update("Amount"), ctx)
+    await edit_conv.edit_value(make_update("55"), ctx)
+
+    # Someone else deletes the picked row before the user confirms.
+    storage_facade.delete_transaction_row(ids[1])
+
+    upd = make_update("Yes")
+    assert await edit_conv.edit_confirm(upd, ctx) == ConversationHandler.END
+    sent = upd.message.reply_text.call_args.args[0]
+    assert "moved" in sent.lower() and "/edit" in sent
+    # Remaining rows untouched.
+    rows = {r["id"]: r for r in _list_rows()}
+    assert set(rows) == {ids[0], ids[2]}
+    assert rows[ids[0]]["value"] == 10.0 and rows[ids[2]]["value"] == 30.0

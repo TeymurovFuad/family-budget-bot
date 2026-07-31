@@ -755,24 +755,21 @@ class TestEditConvCmdEdit:
     async def test_returns_edit_pick_when_transactions_exist(self):
         upd = make_update("/edit")
         ctx = make_ctx()
-        with patch("handlers.edit_conv.get_excel_path_for_reading", return_value="fake.xlsx"), \
-             patch("handlers.edit_conv.get_recent_transactions", return_value=[SAMPLE_TXN]):
+        with patch("handlers.edit_conv.get_recent_transactions", return_value=[SAMPLE_TXN]):
             result = await cmd_edit(upd, ctx)
         assert result == states.EDIT_PICK
 
     async def test_stores_txns_in_user_data(self):
         upd = make_update("/edit")
         ctx = make_ctx()
-        with patch("handlers.edit_conv.get_excel_path_for_reading", return_value="fake.xlsx"), \
-             patch("handlers.edit_conv.get_recent_transactions", return_value=[SAMPLE_TXN]):
+        with patch("handlers.edit_conv.get_recent_transactions", return_value=[SAMPLE_TXN]):
             await cmd_edit(upd, ctx)
         assert ctx.user_data["edit_txns"] == [SAMPLE_TXN]
 
     async def test_no_transactions_sends_message_and_returns_none(self):
         upd = make_update("/edit")
         ctx = make_ctx()
-        with patch("handlers.edit_conv.get_excel_path_for_reading", return_value="fake.xlsx"), \
-             patch("handlers.edit_conv.get_recent_transactions", return_value=[]):
+        with patch("handlers.edit_conv.get_recent_transactions", return_value=[]):
             result = await cmd_edit(upd, ctx)
         assert result is None
         upd.message.reply_text.assert_called()
@@ -780,8 +777,7 @@ class TestEditConvCmdEdit:
     async def test_exception_sends_error_message(self):
         upd = make_update("/edit")
         ctx = make_ctx()
-        with patch("handlers.edit_conv.get_excel_path_for_reading", return_value="fake.xlsx"), \
-             patch("handlers.edit_conv.get_recent_transactions", side_effect=RuntimeError("disk error")):
+        with patch("handlers.edit_conv.get_recent_transactions", side_effect=RuntimeError("disk error")):
             result = await cmd_edit(upd, ctx)
         assert result is None
         sent = upd.message.reply_text.call_args.args[0]

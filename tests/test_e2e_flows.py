@@ -555,8 +555,6 @@ RECENT_TXNS = [
 
 def edit_patches(update_field_mock=None):
     return [
-        patch("handlers.edit_conv.get_excel_path_for_reading",
-              return_value=Path("dummy.xlsx")),
         patch("handlers.edit_conv.get_recent_transactions",
               return_value=[dict(t) for t in RECENT_TXNS]),
         patch("handlers.edit_conv.load_reference_data", return_value=SAMPLE_LISTS),
@@ -651,8 +649,6 @@ class TestEditFlow:
 
 def delete_patches(recent=None, delete_mock=None):
     return [
-        patch("handlers.delete_conv.get_excel_path_for_reading",
-              return_value=Path("dummy.xlsx")),
         patch("handlers.delete_conv.get_recent_transactions",
               return_value=[dict(t) for t in (RECENT_TXNS if recent is None else recent)]),
         patch("handlers.delete_conv.delete_transaction_row",

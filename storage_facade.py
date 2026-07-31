@@ -8,6 +8,7 @@ today's Excel-backed call sites so the Phase 2 swap is mechanical:
   append_transaction(txn)          ↔ excel_ops.append_transaction
   delete_transaction_row(id, ...)  ↔ file_storage.delete_transaction_row
   update_transaction_field(...)    ↔ file_storage.update_transaction_field
+  get_recent_transactions(n)       ↔ file_storage.get_recent_transactions
   load_transactions()              ↔ data.load_data() (same DataFrame columns)
   load_reference_data()            ↔ data.load_reference_data() (same keys)
 
@@ -143,6 +144,40 @@ def update_transaction_field(id: int, field, value=None, expected: dict | None =
         sqlite_ops.update_transaction(conn, id, updates)
     finally:
         conn.close()
+
+
+def get_recent_transactions(n: int = 5) -> list[dict]:
+    """
+    Return the N most recent transactions as MasterData-header-keyed dicts,
+    oldest-first (mirroring file_storage.get_recent_transactions, which
+    returns the last N Excel rows in sheet order).
+
+    Each dict carries '_row_idx' — here the real SQLite primary key `id`,
+    the same keyspace update_transaction_field / delete_transaction_row
+    expect. Used by the /edit and /delete pickers.
+    """
+    conn = _conn()
+    try:
+        rows = sqlite_ops.list_transactions(conn, newest_first=True, limit=n)
+    finally:
+        conn.close()
+    rows.reverse()  # oldest-first, like the Excel tail
+    return [{
+        "Date":                r["date"],
+        "Year":                r["year"],
+        "Month":               r["month"],
+        "Value":               r["value"],
+        "Type":                r["type"],
+        "Category":            r["category"],
+        "Person":              r["person"],
+        "Description":         r["description"],
+        "IsRecurring":         r["is_recurring"],
+        "IsDone":              r["is_done"],
+        "Currency":            r["currency"],
+        "Value (base)":        r["value_base"],
+        "Date Modified (UTC)": r["date_modified_utc"],
+        "_row_idx":            r["id"],
+    } for r in rows]
 
 
 # Column order matches the MasterData sheet that data.load_data() reads.
