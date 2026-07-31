@@ -10,8 +10,9 @@ from telegram.helpers import escape_markdown
 
 import settings
 from config import ALLOWED_USERS, auth, auth_write, get_display_currency, log
-from data import load_data, load_rates, now_utc
+from data import load_rates, now_utc
 from formatters import format_base_as_currency
+from storage_facade import load_transactions
 from log_decorators import log_call
 from cycles import (
     async_record_cycle_start, async_remove_cycle_start, current_cycle_start,
@@ -244,7 +245,7 @@ async def _cmd_cycle_detect(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> N
     )
 
     df, rates, cycles = await loop.run_in_executor(
-        None, lambda: (load_data(), load_rates(), load_cycles())
+        None, lambda: (load_transactions(), load_rates(), load_cycles())
     )
     candidates = await loop.run_in_executor(
         None, lambda: detect_cycle_candidates(df, cycles, extra_keywords)

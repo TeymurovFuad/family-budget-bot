@@ -11,8 +11,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, get_display_currency, set_display_currency, log
 from log_decorators import log_call
-from data import load_budgets, load_rates, load_reference_data
+from data import load_budgets, load_rates
 from file_storage import get_excel_path_for_reading, update_category_budget_in_excel
+from storage_facade import load_reference_data
 from formatters import format_amount
 from validators import parse_amount
 from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT, KW_PICK, KW_ADD
