@@ -1,6 +1,6 @@
 # Architecture & Data Flow
 
-Visual overview of how Budget Bot works — from Telegram message to Excel and back.
+Visual overview of how Budget Bot works — from Telegram message to SQLite and back.
 
 ---
 
@@ -10,17 +10,32 @@ Visual overview of how Budget Bot works — from Telegram message to Excel and b
 graph TD
     TG["📱 Telegram\n(user)"]
     BOT["🤖 bot.py\n(Python process)"]
+    WEB["🌐 web/app.py\nFastAPI + HTMX\n(budget-web.service,\nWireGuard-only)"]
+    SF["storage_facade.py"]
+    DB["🗄️ SQLite\ndata/budget.db\n(sqlite_ops.py, WAL)"]
     SCHED["⏰ scheduled_report.py\n(GitHub Actions / cron)"]
-    EXCEL["📊 Expenses_Improved.xlsx"]
-    GCS["☁️ Cloud Storage\n(GCS / S3 / local disk)"]
+    EXCEL["📊 Excel workbook\n(import source /\nexport target)"]
 
     TG -- "message / command" --> BOT
     BOT -- "reply / chart / report" --> TG
-    BOT -- "read/write" --> EXCEL
-    EXCEL -- "stored in" --> GCS
-    SCHED -- "reads" --> GCS
+    BOT -- "read/write" --> SF
+    WEB -- "read-only" --> SF
+    SF --> DB
+    EXCEL -- "one-time import\nscripts/import_excel_to_sqlite.py" --> DB
+    DB -- "export (not yet scheduled)\nexcel_export.py" --> EXCEL
+    SCHED -- "reads (still Excel-direct)" --> EXCEL
     SCHED -- "weekly/monthly report" --> TG
 ```
+
+**Storage cutover (S1/S2, 2026-07):** SQLite is the bot's primary store for
+transactions and reference lists. Handlers go through `storage_facade.py` →
+`sqlite_ops.py` for those reads and writes; the workbook is imported once
+via `scripts/import_excel_to_sqlite.py` and can be regenerated via
+`excel_export.py` (automatic export scheduling is still pending). Currency
+rates, budget targets, and `scheduled_report.py` still read the Excel
+workbook — migration pending. The read-only web UI (`web/`) reads the same
+database and runs as its own systemd service, `deploy/budget-web.service`,
+reachable only over WireGuard.
 
 ---
 
@@ -75,7 +90,7 @@ sequenceDiagram
     participant TG as Telegram
     participant Bot as bot.py
     participant AI as ai_parser.py
-    participant Excel as Excel (via file_storage)
+    participant Excel as SQLite (via storage_facade)
 
     User->>TG: sends text / photo
     TG->>Bot: update event
@@ -124,7 +139,7 @@ flowchart TD
     DATE --> DESC["Short description\n(or /skip)"]
     DESC --> RECUR["Recurring?\nYes / No"]
     RECUR --> CONFIRM["📝 Confirm summary"]
-    CONFIRM -->|"✅ Save"| WRITE["append_transaction()\nwrite to Excel"]
+    CONFIRM -->|"✅ Save"| WRITE["append_transaction()\nwrite to SQLite\n(storage_facade)"]
     CONFIRM -->|"❌ Cancel"| END2([Cancelled])
     WRITE --> DUP{"Duplicate\ncheck"}
     DUP -->|"looks like duplicate"| WARN["⚠️ Possible duplicate\nSave anyway?"]
@@ -206,23 +221,41 @@ flowchart LR
 
 ---
 
-## Storage Backends
+## Storage Layer
+
+The bot and web UI share one storage layer:
 
 ```mermaid
 flowchart TD
-    BOT["bot.py"]
-    FS["file_storage.py\nget_excel_path_for_reading()\nExcelFileContext"]
+    BOT["bot.py\n(handlers)"]
+    WEB["web/app.py\n(read-only routes)"]
+    SF["storage_facade.py\nimplements storage_protocol.StorageBackend\nmirrors data.load_data() shape"]
+    OPS["sqlite_ops.py\ninit_db · insert/update/delete\nlist_transactions(filters)\nreference upserts · log_sync"]
+    DB["🗄️ data/budget.db\n(SQLITE_DB_PATH, WAL mode)"]
 
-    BOT --> FS
-
-    FS -->|"STORAGE_BACKEND=local"| LOCAL["📁 Local disk\nXLSX_PATH"]
-    FS -->|"STORAGE_BACKEND=gcs"| GCS["☁️ Google Cloud Storage"]
-    FS -->|"STORAGE_BACKEND=s3"| S3["☁️ S3-compatible\n(Oracle / R2 / AWS)"]
-
-    LOCAL --> EXCEL["📊 Excel file"]
-    GCS --> EXCEL
-    S3 --> EXCEL
+    BOT --> SF
+    WEB --> SF
+    SF --> OPS
+    OPS --> DB
 ```
+
+Transactions no longer flow through the workbook directly — Excel is an
+import source and export target (currency rates and budget targets are the
+remaining Excel-direct paths):
+
+```mermaid
+flowchart LR
+    EXCEL["📊 Excel workbook"]
+    IMP["scripts/import_excel_to_sqlite.py\n(one-time, idempotent backfill)"]
+    DB["🗄️ SQLite"]
+    EXP["excel_export.py\n(regenerate workbook —\nnot yet scheduled)"]
+
+    EXCEL --> IMP --> DB --> EXP --> EXCEL
+```
+
+`file_storage.py` and the `STORAGE_BACKEND=local|gcs|s3` backends still
+handle where the workbook file itself lives (local disk, GCS, S3-compatible)
+for import/export purposes.
 
 ---
 
@@ -239,23 +272,25 @@ graph TD
     BOT --> REP_H["handlers/reports.py\nall report commands + charts"]
 
     ADD_H --> AI["ai_parser.py\nNL + image → Transaction"]
-    ADD_H --> DATA["data.py\nload_data, load_rates\nload_reference_data"]
-    REP_H --> DATA
+    BULK_H --> AI
     REP_H --> FMT["formatters.py\nnumber formatting\nchart building"]
 
-    DATA --> FS["file_storage.py\nstorage backend abstraction"]
-    BULK_H --> AI
-    ADD_H --> EXCEL_OPS["excel_ops.py\nappend_transaction\nasync_append_batch\nrecovery queue"]
-    EDIT_H --> EXCEL_OPS
-    BULK_H --> EXCEL_OPS
+    ADD_H --> SF["storage_facade.py\nreads + writes\n(all handlers)"]
+    EDIT_H --> SF
+    BULK_H --> SF
+    REP_H --> SF
 
-    EXCEL_OPS --> SCHEMA["excel_schema.py\ncolumn declarations\nwrite_transaction_row"]
-    FS --> SCHEMA
+    SF --> OPS["sqlite_ops.py\nSQLite schema + CRUD"]
+    OPS --> DB["🗄️ data/budget.db"]
 
-    FS --> EXCEL["📊 Excel file"]
-    EXCEL_OPS --> FS
+    WEB["web/app.py\nFastAPI + HTMX\nweb/routes/ (read-only)"] --> SF
 
-    SCHED["scheduled_report.py\nGitHub Actions cron"] --> DATA
+    EXP["excel_export.py\nSQLite → workbook\n(not yet scheduled)"] --> OPS
+    EXP --> SCHEMA["excel_schema.py\ncolumn declarations\nwrite_transaction_row"]
+    EXP --> FS["file_storage.py\nworkbook location\n(local / GCS / S3)"]
+    FS --> EXCEL["📊 Excel file\n(import source / export target)"]
+
+    SCHED["scheduled_report.py\nGitHub Actions cron\n(still Excel-direct via\nfile_storage — not yet\nmigrated to SQLite)"] --> FS
     SCHED --> FMT
 ```
 
@@ -285,13 +320,15 @@ gantt
 
 | Rule | Detail |
 |---|---|
-| **No hardcoded lists** | Categories, currencies, types all read live from Lists sheet |
-| **Single category list** | Lists col C is used for all transaction types (Expense, Income, Savings) |
-| **_base fallback** | If `Value (base)` formula cache is empty, recomputed from `Value × rate` |
-| **No restart for data changes** | Any Lists sheet edit takes effect on the next bot message |
+| **SQLite is primary** | Handler transaction reads/writes and reference lists go through `storage_facade.py` → `sqlite_ops.py` (WAL mode); Excel is import source / export target (rates and budget targets are still Excel-read — migration pending) |
+| **One facade** | `storage_facade.py` implements `storage_protocol.StorageBackend` and mirrors the `data.load_data()` DataFrame shape, so report code was rewired without behaviour changes (golden-master tests, PR #100) |
+| **Web UI is read-only and fail-closed** | `web/app.py` refuses to start unless `WEB_PASSWORD` and `WEB_SESSION_SECRET` are set; bind to a WireGuard IP via `WEB_BIND_HOST`, never `0.0.0.0` |
+| **No hardcoded lists** | Categories, currencies, types come from reference tables in SQLite (originally imported from the Lists sheet) |
+| **Single category list** | One unified category list for all transaction types (Expense, Income, Savings) |
+| **_base fallback** | If `Value (base)` is empty, recomputed from `Value × rate` |
 | **Restart required** | Only `.py` file changes or `.env` changes require a restart |
-| **Storage agnostic** | Switch `STORAGE_BACKEND` in `.env` — no code change needed |
+| **Storage agnostic (workbook)** | The exported/imported workbook can live on local disk, GCS, or S3 — switch `STORAGE_BACKEND` in `.env` |
 | **One column layout** | `excel_schema.py` declares every sheet's columns by header name — no hardcoded positions anywhere |
-| **One row writer** | `write_transaction_row` (in `excel_schema.py`) is used by all three write paths: single add, bulk batch, recovery-queue replay |
-| **Atomic saves** | Every workbook save goes through `atomic_save`: write to temp file → keep rolling `.bak` → `os.replace` — a crash can't corrupt the data |
+| **Atomic workbook saves** | Every workbook save (export path) goes through `atomic_save`: write to temp file → keep rolling `.bak` → `os.replace` |
 | **Bulk drafts persist** | /bulk drafts are per-user JSON files on disk — they survive timeouts and restarts; `save`/`cancel` finalizes |
+| **Idempotent import** | `scripts/import_excel_to_sqlite.py` dedups by content hash — safe to re-run |

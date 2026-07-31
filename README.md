@@ -1,8 +1,9 @@
 # Budget Bot
 
-Personal finance assistant. Tracks expenses in an Excel file and sends
-weekly/monthly reports to Telegram. Supports local storage, Google Cloud
-Storage, and Amazon S3-compatible storage backends.
+Personal finance assistant. Tracks expenses in a SQLite database, sends
+weekly/monthly reports to Telegram, and serves a read-only web UI. Excel
+remains supported as an import source and export target, with local, Google
+Cloud Storage, and Amazon S3-compatible backends for the workbook file.
 
 📐 **[Architecture & data flow diagrams →](docs/architecture.md)**
 📖 **[Full command reference and Excel/bot documentation →](DOCUMENTATION.md)**
@@ -57,6 +58,43 @@ walked one at a time with inline pickers). With the flag on, `/summary` and
 `/budget` cover the current cycle (last salary → today) and the summary shows an
 **unaccounted** metric: salary − tracked expenses − tracked savings. The ledger
 lives in a `Cycles` sheet in the workbook; with the flag off nothing changes.
+
+---
+
+## Storage: SQLite primary, Excel as import/export
+
+The bot's primary datastore is a SQLite database at `data/budget.db`
+(override with `SQLITE_DB_PATH`). Transaction reads and writes and the
+reference lists go through `storage_facade.py`, which sits on top of
+`sqlite_ops.py` (WAL mode). Currency rates and budget targets are still
+read from the Excel workbook — that migration is pending.
+
+- **Initial import**: run `python scripts/import_excel_to_sqlite.py` once to
+  backfill an existing workbook into SQLite. The script is idempotent
+  (content-hash dedup) and supports `--dry-run`.
+- **Excel export**: `excel_export.py` regenerates a workbook from SQLite
+  (verify with `scripts/reconcile_sqlite_export.py`). Export is not yet
+  scheduled automatically — after the one-time import, the workbook is a
+  snapshot, not a live mirror. Automatic scheduling is planned (see
+  `BACKLOG.md`).
+- Reference lists (categories, currencies, types) are served from SQLite,
+  originally imported from the workbook's Lists sheet; currency rates and
+  budget targets are still read live from the workbook (see the Lists
+  section below).
+
+## Web UI (read-only)
+
+A read-only web UI lives in the `web/` package — FastAPI + HTMX + Jinja2,
+reading from the same SQLite database. Pages: transactions, summary, cycles
+(`web/app.py`, `web/routes/`). It runs as a separate systemd service,
+`deploy/budget-web.service`, alongside the bot on the same VM.
+
+It is intentionally not exposed publicly: bind it to a WireGuard interface
+IP via `WEB_BIND_HOST` (never `0.0.0.0`) and connect over the VPN. The app
+refuses to start unless both `WEB_PASSWORD` (shared login password) and
+`WEB_SESSION_SECRET` (session-cookie signing key) are set. Adding and
+editing transactions from the web UI is planned but not built yet — writes
+still go through the bot.
 
 ---
 
@@ -278,6 +316,10 @@ cleaned up automatically after each test.
 | `GCS_KEY_JSON` | bot + reports | for GCS | — |
 | `GCS_OBJECT_NAME` | bot + reports | — | `Expenses.xlsx` |
 | `XLSX_PATH` | local mode only | — | `data/Expenses.xlsx` |
+| `SQLITE_DB_PATH` | bot + web UI | — | `data/budget.db` |
+| `WEB_PASSWORD` | web UI | for web UI | — (app refuses to start without it) |
+| `WEB_SESSION_SECRET` | web UI | for web UI | — (app refuses to start without it) |
+| `WEB_BIND_HOST` | web UI | — | `127.0.0.1` — set to your WireGuard interface IP |
 | `DISPLAY_CURRENCY` | bot + reports | — | `PLN` |
 | `TIMEZONE` | bot + reports | — | `Europe/Warsaw` |
 | `BUDGET_CYCLE` | bot | — | `0` — set to `1` for salary-to-salary budget cycles (cycle-scoped `/summary` and `/budget`) |
@@ -348,7 +390,11 @@ export GCS_KEY_JSON="$(cat /path/to/service-account-key.json)"
 
 ## Excel structure — Lists sheet
 
-The **Lists** sheet in the Excel file controls all reference data. The bot reads it live on every request — no restart needed.
+The **Lists** sheet in the Excel file controls all reference data. Since the
+SQLite cutover, reference lists (categories, types) are served from SQLite via
+`storage_facade.py`, with the Lists sheet as their source at import time
+(`scripts/import_excel_to_sqlite.py`); currency rates (cols I:J) are still
+read live from the workbook.
 
 | Column | Content |
 |---|---|
@@ -576,7 +622,9 @@ places (e.g. Oracle VM + GitHub Actions), remember:
 
 | Piece | Where it runs | What it does |
 |---|---|---|
-| **Excel file** | Local disk (Oracle VM) or cloud storage (GCS/S3-compatible) | Permanent storage. Never committed to GitHub. |
+| **SQLite database** (`data/budget.db`) | Local disk (Oracle VM) | Primary storage for the bot and web UI. Never committed to GitHub. |
+| **Excel file** | Local disk (Oracle VM) or cloud storage (GCS/S3-compatible) | Import source / export target. Never committed to GitHub. |
+| **Web UI** (optional) | Oracle VM, `budget-web.service`, WireGuard-only | Read-only browser view of transactions, summary, cycles. |
 | **Scheduled reports** (optional) | GitHub Actions (free) | Reads the shared storage on a schedule. Sends weekly/monthly reports to Telegram. |
 | **Interactive bot** | Oracle VM (recommended), or Docker/Termux (alternatives) | Always-on. Handles `/add`, `/summary`, `/budget` etc. |
 
