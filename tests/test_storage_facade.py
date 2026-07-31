@@ -125,3 +125,67 @@ def test_load_reference_data_shape(sqlite_db):
     assert ref["years"] == [2024]
     assert "USD" in ref["currencies"]
     assert len(ref["months"]) == 12
+
+
+# ── append_transactions_batch (S1 Phase 2, Unit R4) ──────────────────────────
+
+def test_batch_append_inserts_all_rows(sqlite_db):
+    txns = [
+        _txn(description="row one"),
+        _txn(value=42.0, currency="USD", description="row two"),
+        _txn(value=7.5, description="row three"),
+    ]
+    storage_facade.append_transactions_batch(txns)
+    df = storage_facade.load_transactions()
+    assert len(df) == 3
+    usd_row = df[df["Description"] == "row two"].iloc[0]
+    assert usd_row["Value (base)"] == 168.0  # 42 * 4.0
+
+
+def test_batch_append_empty_list_is_noop(sqlite_db):
+    storage_facade.append_transactions_batch([])
+    assert storage_facade.load_transactions().empty
+
+
+def test_batch_append_is_all_or_nothing(sqlite_db):
+    """A failure mid-batch must roll back every row (mirrors the Excel batch
+    write, which saves the workbook once at the end — a mid-loop exception
+    persists nothing)."""
+    txns = [
+        _txn(description="good row"),
+        {"value": None, "currency": "USD", "date": datetime.date(2024, 6, 15),
+         "year": 2024, "month": "Jun", "type": "Expense",
+         "category": "Groceries", "person": "Alice",
+         "description": "bad row — value None"},
+        _txn(description="never reached"),
+    ]
+    with pytest.raises(TypeError):
+        storage_facade.append_transactions_batch(txns)
+    assert storage_facade.load_transactions().empty
+
+
+def test_batch_append_unknown_currency_logged_after_commit(sqlite_db):
+    storage_facade.append_transactions_batch(
+        [_txn(value=10.0, currency="XXX", description="typo currency")])
+    df = storage_facade.load_transactions()
+    assert len(df) == 1
+    assert df.iloc[0]["Value (base)"] == 10.0  # rate 1.0 fallback
+    conn = sqlite_ops.init_db(sqlite_db)
+    detail = conn.execute(
+        f"SELECT detail FROM {sqlite_ops.TABLE_SYNC_LOG}").fetchone()["detail"]
+    conn.close()
+    assert "XXX" in detail
+
+
+def test_bulk_conv_reference_reads_use_facade(sqlite_db):
+    """bulk_conv's load_reference_data must be the facade's, and the facade
+    must return the same category/person lists the handlers key on."""
+    import handlers.bulk_conv as bulk_conv
+    assert bulk_conv.load_reference_data is storage_facade.load_reference_data
+    conn = sqlite_ops.init_db(sqlite_db)
+    sqlite_ops.upsert_category(conn, "Groceries", 1200.0)
+    sqlite_ops.upsert_person(conn, "Alice")
+    conn.close()
+    ref = bulk_conv.load_reference_data()
+    assert ref["categories"] == ["Groceries"]
+    assert ref["persons"] == ["Alice"]

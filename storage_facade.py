@@ -6,6 +6,7 @@ Backed by SQLite (sqlite_ops.py). Function signatures deliberately mirror
 today's Excel-backed call sites so the Phase 2 swap is mechanical:
 
   append_transaction(txn)          ↔ excel_ops.append_transaction
+  append_transactions_batch(txns)  ↔ file_storage.append_transactions_batch
   delete_transaction_row(id, ...)  ↔ file_storage.delete_transaction_row
   update_transaction_field(...)    ↔ file_storage.update_transaction_field
   load_transactions()              ↔ data.load_data() (same DataFrame columns)
@@ -20,7 +21,9 @@ import pandas as pd
 import settings
 import sqlite_ops
 from models import MONTH_NAMES
-from sqlite_types import TransactionRow, TransactionSource, TransactionType
+from sqlite_types import (
+    SyncDirection, SyncStatus, TransactionRow, TransactionSource, TransactionType,
+)
 
 
 def _conn():
@@ -36,6 +39,26 @@ def _to_row_dict(transaction) -> dict:
     return transaction.to_row() if hasattr(transaction, "to_row") else dict(transaction)
 
 
+def _build_txn_row(row: dict, value_base: float, rate_used: float) -> TransactionRow:
+    date = row.get("date")
+    return TransactionRow(
+        date=date.isoformat() if hasattr(date, "isoformat") else date,
+        year=row.get("year"),
+        month=row.get("month"),
+        value=row.get("value"),
+        currency=row.get("currency") or settings.DISPLAY_CURRENCY,
+        value_base=value_base,
+        rate_used=rate_used,
+        type=row.get("type"),
+        category=row.get("category"),
+        person=row.get("person"),
+        description=row.get("description"),
+        is_recurring=row.get("is_recurring"),
+        is_done=True if row.get("is_done") is None else row.get("is_done"),
+        source=row.get("source", TransactionSource.BOT),
+    )
+
+
 def append_transaction(transaction) -> None:
     """Compute value_base/rate_used and insert into SQLite."""
     row = _to_row_dict(transaction)
@@ -45,23 +68,51 @@ def append_transaction(transaction) -> None:
         value_base, rate_used = sqlite_ops.compute_value_base(
             row["value"], row.get("currency"), rates, settings.DISPLAY_CURRENCY,
             conn=conn)
-        date = row.get("date")
-        sqlite_ops.insert_transaction(conn, TransactionRow(
-            date=date.isoformat() if hasattr(date, "isoformat") else date,
-            year=row.get("year"),
-            month=row.get("month"),
-            value=row.get("value"),
-            currency=row.get("currency") or settings.DISPLAY_CURRENCY,
-            value_base=value_base,
-            rate_used=rate_used,
-            type=row.get("type"),
-            category=row.get("category"),
-            person=row.get("person"),
-            description=row.get("description"),
-            is_recurring=row.get("is_recurring"),
-            is_done=True if row.get("is_done") is None else row.get("is_done"),
-            source=row.get("source", TransactionSource.BOT),
-        ))
+        sqlite_ops.insert_transaction(conn, _build_txn_row(row, value_base, rate_used))
+    finally:
+        conn.close()
+
+
+def append_transactions_batch(transactions: list) -> None:
+    """
+    Insert multiple transactions in ONE SQLite transaction (all-or-nothing).
+
+    Mirrors file_storage.append_transactions_batch's guarantee: the Excel
+    version writes every row to the in-memory workbook and saves once at the
+    end, so a mid-batch failure persists nothing. Here every insert runs with
+    commit=False inside a single implicit transaction; any exception rolls
+    the whole batch back before re-raising.
+    """
+    if not transactions:
+        return
+    conn = _conn()
+    try:
+        rates = sqlite_ops.load_rates_dict(conn)
+        display = str(settings.DISPLAY_CURRENCY).strip().upper()
+        unknown_ccys: set[str] = set()
+        try:
+            for transaction in transactions:
+                row = _to_row_dict(transaction)
+                # conn=None: compute_value_base's unknown-currency sync_log
+                # write would COMMIT mid-batch and break atomicity. Collect
+                # unknown currencies and log them after the batch commits.
+                value_base, rate_used = sqlite_ops.compute_value_base(
+                    row["value"], row.get("currency"), rates,
+                    settings.DISPLAY_CURRENCY, conn=None)
+                ccy = str(row.get("currency") or "").strip().upper()
+                if ccy and ccy != display and ccy not in rates:
+                    unknown_ccys.add(ccy)
+                sqlite_ops.insert_transaction(
+                    conn, _build_txn_row(row, value_base, rate_used), commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        for ccy in sorted(unknown_ccys):
+            sqlite_ops.log_sync(
+                conn, SyncDirection.IMPORT, SyncStatus.ERROR,
+                f"unknown currency '{ccy}' — no rate found, fell back to "
+                f"rate 1.0 (Excel VLOOKUP would be #N/A)")
     finally:
         conn.close()
 

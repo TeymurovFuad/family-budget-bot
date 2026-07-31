@@ -19,9 +19,10 @@ from telegram.ext import ContextTypes, ConversationHandler
 import ai_parser
 from ai_parser import parse_text, parse_image, _chunk_statement_text, is_off_peak
 from config import auth, auth_write, log
-from data import load_dedup_evidence, load_reference_data
+from data import load_dedup_evidence
 import settings
-from excel_ops import async_append_batch
+import storage_facade
+from storage_facade import load_reference_data
 import merchant_map
 from handlers.cycle import maybe_prompt_cycle_start
 from models import Transaction
@@ -40,6 +41,19 @@ from validators import (
     parse_amount,
     validate_parsed_row,
 )
+
+async def async_append_batch(transactions: list, user=None) -> None:
+    """
+    Bulk save → storage_facade (SQLite), off the event loop.
+
+    S1 Phase 2 Unit R4 replaced excel_ops.async_append_batch here; the facade
+    call keeps the same all-or-nothing guarantee (single SQLite transaction)
+    the Excel batch write provided (single save at the end).
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None, storage_facade.append_transactions_batch, transactions)
+
 
 # ── Statement-profile helpers ─────────────────────────────────────────────────
 

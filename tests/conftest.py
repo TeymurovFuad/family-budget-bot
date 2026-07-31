@@ -32,6 +32,49 @@ from models import Transaction
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
+@pytest.fixture(scope="session")
+def _sqlite_seed_template(tmp_path_factory):
+    """
+    Build ONE seeded SQLite DB per session (schema + the same default lists a
+    blank workbook has, per workbook_template.py's fallback). Per-test copies
+    are made by _isolate_sqlite_db — a file copy is far cheaper than the ~20
+    fsync'ing commits seeding takes on Windows.
+    """
+    import settings
+    import sqlite_ops
+
+    template = tmp_path_factory.mktemp("sqlite_seed") / "seed_budget.db"
+    conn = sqlite_ops.init_db(template)
+    for cat in ("Groceries", "Transport", "Housing", "Utilities", "Healthcare",
+                "Entertainment", "Travel", "Insurance", "Education", "Salary",
+                "Freelance", "Rental", "Bonus", "Bank Deposit", "Investment",
+                "Emergency Fund", "Other"):
+        sqlite_ops.upsert_category(conn, cat)
+    for code, rate in ((settings.DISPLAY_CURRENCY, 1.0), ("EUR", 4.28),
+                       ("USD", 3.95), ("GBP", 5.05), ("CHF", 4.45)):
+        sqlite_ops.upsert_rate(conn, code, rate)
+    conn.close()
+    return template
+
+
+@pytest.fixture(autouse=True)
+def _isolate_sqlite_db(tmp_path, monkeypatch, _sqlite_seed_template):
+    """
+    Point storage_facade/sqlite at a fresh temp DB for every test, seeded
+    with the same default lists a blank workbook has, so unpatched
+    storage_facade.load_reference_data() calls behave like
+    data.load_reference_data() on a blank Excel did before S1 Phase 2.
+    Also guarantees no test ever touches a real data/budget.db.
+    """
+    import shutil
+
+    import settings
+
+    db_path = tmp_path / "test_budget.db"
+    shutil.copy2(_sqlite_seed_template, db_path)
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", db_path)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_merchant_map(tmp_path, monkeypatch):
     """Point the merchant map at a temp file so no test touches data/."""
