@@ -474,6 +474,15 @@ Cycles must be done in order — each depends on the previous.
 > Other read paths and all write paths are still Excel-direct — remaining Phase 2 units
 > and W1's dual-write (or a direct flip per W4) are next.
 
+> **Cycle S1 Phase 2 — cross-store visibility (read before deploying any single unit):**
+> Bulk imports (R4/PR #98) write to SQLite; full cross-handler visibility depends on
+> R1 (reports) and R3 (write-paths) also completing their SQLite migration — verify all
+> Phase 2 units have merged before relying on bulk-imported data appearing in reports or
+> being editable. R4 is internally consistent on its own (its dedup evidence now reads
+> from SQLite via `storage_facade.load_dedup_evidence`, so re-uploads of the same
+> statement are correctly flagged), but until R1/R3 land, Excel-backed `/report`,
+> `/cycle`, edit/delete, `/add`, and `/quick` will not see rows imported via `/bulk`.
+
 ### Cycle W1 — SQLite as a shadow/parallel store
 - [x] Design schema: `transactions` (mirrors MasterData), reference tables (categories, persons, rates, goals) — done in `sqlite_ops.py` (PR #96); `cycles` and `merchant_map` tables still pending.
 - [x] Add a `sqlite_ops.py` layer — done (PR #96): `init_db`, `insert_transaction`, `update_transaction`, `delete_transaction`, `list_transactions(filters)`, reference upserts, `log_sync`.

@@ -1806,7 +1806,7 @@ class TestAddFlowIntegration:
 
 
 class TestBulkSaveCommandAndDestination:
-    """Regression: '/save' (with slash) must save; result must name the file."""
+    """Regression: '/save' (with slash) must save; confirmation is backend-neutral."""
 
     def test_apply_bulk_edit_accepts_slash_save(self):
         from handlers.bulk_conv import _apply_bulk_edit
@@ -1820,7 +1820,7 @@ class TestBulkSaveCommandAndDestination:
         action, reason, notes = _apply_bulk_edit("/cancel", [])
         assert action is False and reason == "cancel"
 
-    async def test_save_confirmation_names_destination_file(self):
+    async def test_save_confirmation_backend_neutral(self):
         upd = make_update("save", user_id=13579)
         ctx = make_ctx()
         ctx.user_data["bulk_parsed"] = [
@@ -1835,8 +1835,11 @@ class TestBulkSaveCommandAndDestination:
         mock_batch.assert_called_once()
         sent = upd.message.reply_text.call_args.args[0]
         assert "Saved 1 of 1" in sent
-        assert "MasterData" in sent
-        assert ".xlsx" in sent  # destination file named
+        # Bulk saves land in SQLite (S1 Phase 2 R4): the message must be
+        # backend-neutral, never claiming an Excel/GCS destination.
+        assert "budget store" in sent
+        assert "MasterData" not in sent
+        assert ".xlsx" not in sent
 
     async def test_large_text_announces_chunked_parsing(self):
         from handlers.bulk_conv import _announce_parse_plan

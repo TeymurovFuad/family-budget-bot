@@ -6,6 +6,7 @@ Backed by SQLite (sqlite_ops.py). Function signatures deliberately mirror
 today's Excel-backed call sites so the Phase 2 swap is mechanical:
 
   append_transaction(txn)          ↔ excel_ops.append_transaction
+  append_transactions_batch(txns)  ↔ file_storage.append_transactions_batch
   delete_transaction_row(id, ...)  ↔ file_storage.delete_transaction_row
   update_transaction_field(...)    ↔ file_storage.update_transaction_field
   get_recent_transactions(n)       ↔ file_storage.get_recent_transactions
@@ -16,6 +17,8 @@ This module structurally satisfies storage_protocol.StorageBackend — any
 future backend must expose the same five callables.
 """
 
+import logging
+from datetime import date as _date
 from pathlib import Path
 
 import pandas as pd
@@ -23,7 +26,12 @@ import pandas as pd
 import settings
 import sqlite_ops
 from models import MONTH_NAMES
-from sqlite_types import TransactionRow, TransactionSource, TransactionType
+from validators import make_dedup_key, make_loose_dedup_key
+from sqlite_types import (
+    SyncDirection, SyncStatus, TransactionRow, TransactionSource, TransactionType,
+)
+
+log = logging.getLogger(__name__)
 
 
 def _conn():
@@ -54,6 +62,26 @@ def _to_row_dict(transaction) -> dict:
     return transaction.to_row() if hasattr(transaction, "to_row") else dict(transaction)
 
 
+def _build_txn_row(row: dict, value_base: float, rate_used: float) -> TransactionRow:
+    date = row.get("date")
+    return TransactionRow(
+        date=date.isoformat() if hasattr(date, "isoformat") else date,
+        year=row.get("year"),
+        month=row.get("month"),
+        value=row.get("value"),
+        currency=row.get("currency") or settings.DISPLAY_CURRENCY,
+        value_base=value_base,
+        rate_used=rate_used,
+        type=row.get("type"),
+        category=row.get("category"),
+        person=row.get("person"),
+        description=row.get("description"),
+        is_recurring=row.get("is_recurring"),
+        is_done=True if row.get("is_done") is None else row.get("is_done"),
+        source=row.get("source", TransactionSource.BOT),
+    )
+
+
 def append_transaction(transaction) -> None:
     """Compute value_base/rate_used and insert into SQLite."""
     row = _to_row_dict(transaction)
@@ -63,23 +91,51 @@ def append_transaction(transaction) -> None:
         value_base, rate_used = sqlite_ops.compute_value_base(
             row["value"], row.get("currency"), rates, settings.DISPLAY_CURRENCY,
             conn=conn)
-        date = row.get("date")
-        sqlite_ops.insert_transaction(conn, TransactionRow(
-            date=date.isoformat() if hasattr(date, "isoformat") else date,
-            year=row.get("year"),
-            month=row.get("month"),
-            value=row.get("value"),
-            currency=row.get("currency") or settings.DISPLAY_CURRENCY,
-            value_base=value_base,
-            rate_used=rate_used,
-            type=row.get("type"),
-            category=row.get("category"),
-            person=row.get("person"),
-            description=row.get("description"),
-            is_recurring=row.get("is_recurring"),
-            is_done=True if row.get("is_done") is None else row.get("is_done"),
-            source=row.get("source", TransactionSource.BOT),
-        ))
+        sqlite_ops.insert_transaction(conn, _build_txn_row(row, value_base, rate_used))
+    finally:
+        conn.close()
+
+
+def append_transactions_batch(transactions: list) -> None:
+    """
+    Insert multiple transactions in ONE SQLite transaction (all-or-nothing).
+
+    Mirrors file_storage.append_transactions_batch's guarantee: the Excel
+    version writes every row to the in-memory workbook and saves once at the
+    end, so a mid-batch failure persists nothing. Here every insert runs with
+    commit=False inside a single implicit transaction; any exception rolls
+    the whole batch back before re-raising.
+    """
+    if not transactions:
+        return
+    conn = _conn()
+    try:
+        rates = sqlite_ops.load_rates_dict(conn)
+        display = str(settings.DISPLAY_CURRENCY).strip().upper()
+        unknown_ccys: set[str] = set()
+        try:
+            for transaction in transactions:
+                row = _to_row_dict(transaction)
+                # conn=None: compute_value_base's unknown-currency sync_log
+                # write would COMMIT mid-batch and break atomicity. Collect
+                # unknown currencies and log them after the batch commits.
+                value_base, rate_used = sqlite_ops.compute_value_base(
+                    row["value"], row.get("currency"), rates,
+                    settings.DISPLAY_CURRENCY, conn=None)
+                ccy = str(row.get("currency") or "").strip().upper()
+                if ccy and ccy != display and ccy not in rates:
+                    unknown_ccys.add(ccy)
+                sqlite_ops.insert_transaction(
+                    conn, _build_txn_row(row, value_base, rate_used), commit=False)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        for ccy in sorted(unknown_ccys):
+            sqlite_ops.log_sync(
+                conn, SyncDirection.IMPORT, SyncStatus.ERROR,
+                f"unknown currency '{ccy}' — no rate found, fell back to "
+                f"rate 1.0 (Excel VLOOKUP would be #N/A)")
     finally:
         conn.close()
 
@@ -243,6 +299,70 @@ def load_transactions(filters: dict | None = None) -> pd.DataFrame:
     df = df.dropna(subset=["_base", "Type", "Year", "Month"])
     df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
     return df
+
+
+def load_dedup_evidence(start=None, end=None) -> dict:
+    """
+    SQLite twin of data.load_dedup_evidence(): multiset evidence of stored
+    transactions for dedup-v2's count-aware, two-pass scan. Returns:
+
+        {
+          "strict": {strict_key: [(date_iso, description), ...]},
+          "loose":  {loose_key:  [(date_iso, description), ...]},
+        }
+
+    strict_key = date|value|currency|cleaned-description (validators.make_dedup_key)
+    loose_key  = date|value|currency, no description (validators.make_loose_dedup_key)
+
+    len(evidence["strict"][key]) / len(evidence["loose"][key]) is that key's
+    multiset count in the transactions table. Only rows whose date falls in
+    [start, end] (date objects, both optional/inclusive) are counted; dates
+    are compared on their first 10 chars so a stray time component never
+    excludes a boundary day. Returns empty dicts on any read failure —
+    dedup never blocks an import, it just stops flagging anything.
+    """
+    empty = {"strict": {}, "loose": {}}
+    try:
+        # Read-path guard (consistent with load_transactions/load_reference_data):
+        # never auto-create the DB from a read. Unlike those, a missing DB is
+        # not fatal here — the except below turns it into empty evidence,
+        # because dedup must never block an import.
+        _require_db()
+        conn = _conn()
+        try:
+            where = ["date IS NOT NULL", "value IS NOT NULL"]
+            params: list = []
+            if start is not None:
+                where.append("substr(date, 1, 10) >= ?")
+                params.append(start.isoformat() if hasattr(start, "isoformat") else str(start)[:10])
+            if end is not None:
+                where.append("substr(date, 1, 10) <= ?")
+                params.append(end.isoformat() if hasattr(end, "isoformat") else str(end)[:10])
+            rows = conn.execute(
+                f"SELECT date, value, currency, description "
+                f"FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE {' AND '.join(where)}",
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+        strict: dict[str, list[tuple[str, str]]] = {}
+        loose: dict[str, list[tuple[str, str]]] = {}
+        for r in rows:
+            try:
+                date_iso = _date.fromisoformat(str(r["date"])[:10]).isoformat()
+            except ValueError:
+                continue  # unparseable date — mirror the Excel reader's coerce+drop
+            value = r["value"]
+            ccy = r["currency"] or settings.DISPLAY_CURRENCY
+            desc = r["description"] if r["description"] is not None else ""
+            strict_key = make_dedup_key(date_iso, value, ccy, desc)
+            loose_key = make_loose_dedup_key(date_iso, value, ccy)
+            strict.setdefault(strict_key, []).append((date_iso, str(desc)))
+            loose.setdefault(loose_key, []).append((date_iso, str(desc)))
+        return {"strict": strict, "loose": loose}
+    except Exception as e:
+        log.warning("Could not load dedup evidence from SQLite: %s", e)
+        return empty
 
 
 def load_reference_data() -> dict:

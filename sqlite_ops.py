@@ -28,6 +28,9 @@ TABLE_GOALS = "goals"
 TABLE_SYNC_LOG = "sync_log"
 
 PRAGMA_WAL = "PRAGMA journal_mode=WAL"
+# Wait up to 5s for a competing writer's lock instead of failing immediately
+# with "database is locked" (bot + future web server share this DB).
+PRAGMA_BUSY_TIMEOUT = "PRAGMA busy_timeout=5000"
 
 _SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_TRANSACTIONS} (
@@ -93,6 +96,7 @@ def init_db(db_path) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = connect(db_path)
     conn.execute(PRAGMA_WAL)
+    conn.execute(PRAGMA_BUSY_TIMEOUT)
     conn.executescript(_SCHEMA)
     conn.commit()
     return conn
@@ -169,12 +173,17 @@ _TXN_COLUMNS = (
 )
 
 
-def insert_transaction(conn: sqlite3.Connection, row_dict: "TransactionRow | dict") -> int:
+def insert_transaction(conn: sqlite3.Connection, row_dict: "TransactionRow | dict",
+                       commit: bool = True) -> int:
     """
     Insert one transaction (a TransactionRow or a column-keyed dict).
     On content_hash conflict the insert is ignored (idempotent re-import)
     and the existing row's id is returned. Missing content_hash is computed
     from the row fields. Returns the row id.
+
+    Pass commit=False to leave the row inside the caller's open transaction
+    (used by storage_facade.append_transactions_batch for all-or-nothing
+    batch writes); the caller then owns COMMIT/ROLLBACK.
     """
     row = row_dict.to_db_dict() if isinstance(row_dict, TransactionRow) else dict(row_dict)
     if not row.get("content_hash"):
@@ -199,7 +208,8 @@ def insert_transaction(conn: sqlite3.Connection, row_dict: "TransactionRow | dic
            f"VALUES ({', '.join('?' for _ in cols)}) "
            f"ON CONFLICT(content_hash) DO NOTHING")
     cur = conn.execute(sql, [row[c] for c in cols])
-    conn.commit()
+    if commit:
+        conn.commit()
     if cur.rowcount == 1:
         return cur.lastrowid
     existing = conn.execute(
