@@ -3,20 +3,44 @@
 # budget web UI (and nothing else) over a private tunnel. Run once, as root,
 # on the same VM that hosts budget-bot.service / budget-web.service.
 #
+# Prompts interactively for anything it can't safely assume — nothing is
+# hardcoded. Pre-set the matching environment variable to skip a prompt
+# (useful for scripted/CI runs); leaving it unset always asks.
+#
 # After this script finishes, use add-wireguard-peer.sh once per device
 # (phone, laptop) to actually let a client connect.
 set -euo pipefail
 
 WG_DIR="/etc/wireguard"
-WG_IFACE="${WG_IFACE:-wg0}"
-WG_PORT="${WG_PORT:-51820}"
-WG_SERVER_IP="${WG_SERVER_IP:-10.8.0.1}"
-WG_SUBNET_CIDR="${WG_SUBNET_CIDR:-24}"
+
+prompt() {
+    # prompt <env_var_name> <question> <default>
+    local var="$1" question="$2" default="$3" value
+    if [ -n "${!var:-}" ]; then
+        printf '%s\n' "${!var}"
+        return
+    fi
+    read -r -p "${question} [${default}]: " value </dev/tty
+    printf '%s\n' "${value:-$default}"
+}
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run this as root (sudo $0)" >&2
     exit 1
 fi
+
+echo "Detecting default network interface for NAT..."
+DETECTED_EGRESS=$(ip route | awk '/^default/ {print $5; exit}')
+if [ -z "$DETECTED_EGRESS" ]; then
+    DETECTED_EGRESS="eth0"
+    echo "Could not auto-detect the default network interface — you'll need to confirm it below."
+fi
+
+WG_IFACE=$(prompt WG_IFACE "WireGuard interface name" "wg0")
+WG_PORT=$(prompt WG_PORT "WireGuard listen port (UDP)" "51820")
+WG_SERVER_IP=$(prompt WG_SERVER_IP "WireGuard server tunnel IP" "10.8.0.1")
+WG_SUBNET_CIDR=$(prompt WG_SUBNET_CIDR "WireGuard subnet size (CIDR bits)" "24")
+EGRESS_IFACE=$(prompt EGRESS_IFACE "Public network interface (for NAT)" "$DETECTED_EGRESS")
 
 if [ -f "$WG_DIR/$WG_IFACE.conf" ]; then
     echo "$WG_DIR/$WG_IFACE.conf already exists — refusing to overwrite an existing setup." >&2
@@ -24,29 +48,37 @@ if [ -f "$WG_DIR/$WG_IFACE.conf" ]; then
     exit 1
 fi
 
+echo
+echo "About to configure:"
+echo "  Interface:        $WG_IFACE"
+echo "  Listen port:      $WG_PORT/udp"
+echo "  Server tunnel IP: $WG_SERVER_IP/$WG_SUBNET_CIDR"
+echo "  NAT interface:    $EGRESS_IFACE"
+CONFIRM=$(prompt WG_CONFIRM "Proceed? (yes/no)" "yes")
+if [ "$CONFIRM" != "yes" ]; then
+    echo "Aborted — nothing was changed." >&2
+    exit 1
+fi
+
 echo "Installing WireGuard..."
 apt-get update -qq
 apt-get install -y -qq wireguard qrencode
 
-echo "Detecting default network interface for NAT..."
-EGRESS_IFACE=$(ip route | awk '/^default/ {print $5; exit}')
-if [ -z "$EGRESS_IFACE" ]; then
-    echo "Could not auto-detect the default network interface." >&2
-    echo "Set EGRESS_IFACE=<iface> and re-run." >&2
-    exit 1
-fi
-echo "Using egress interface: $EGRESS_IFACE"
-
 umask 077
 mkdir -p "$WG_DIR/peers"
-wg genkey | tee "$WG_DIR/server_private.key" | wg pubkey > "$WG_DIR/server_public.key"
-SERVER_PRIVATE_KEY=$(cat "$WG_DIR/server_private.key")
+
+# The server private key never leaves this file — it is not echoed to the
+# terminal, logged, or embedded anywhere else. Only the derived public key
+# (safe to share) is displayed.
+wg genkey | tee "$WG_DIR/server_private.key" >/dev/null
+wg pubkey < "$WG_DIR/server_private.key" > "$WG_DIR/server_public.key"
+chmod 600 "$WG_DIR/server_private.key"
 
 cat > "$WG_DIR/$WG_IFACE.conf" <<EOF
 [Interface]
 Address = ${WG_SERVER_IP}/${WG_SUBNET_CIDR}
 ListenPort = ${WG_PORT}
-PrivateKey = ${SERVER_PRIVATE_KEY}
+PrivateKey = $(cat "$WG_DIR/server_private.key")
 PostUp = iptables -A FORWARD -i ${WG_IFACE} -j ACCEPT; iptables -t nat -A POSTROUTING -o ${EGRESS_IFACE} -j MASQUERADE
 PostDown = iptables -D FORWARD -i ${WG_IFACE} -j ACCEPT; iptables -t nat -D POSTROUTING -o ${EGRESS_IFACE} -j MASQUERADE
 
@@ -70,7 +102,7 @@ systemctl enable "wg-quick@${WG_IFACE}" >/dev/null
 systemctl start "wg-quick@${WG_IFACE}"
 
 echo
-echo "WireGuard server is up."
+echo "WireGuard server is up. This is all safe to share/print — no private key below."
 echo "  Interface:    ${WG_IFACE}"
 echo "  Server IP:    ${WG_SERVER_IP}"
 echo "  Listen port:  ${WG_PORT} (UDP)"
@@ -82,6 +114,6 @@ echo "network security rules (Security List / Security Group / NSG) — ufw alon
 echo "is not enough on most cloud VMs."
 echo
 echo "Next step — add a device:"
-echo "  sudo $(dirname "$0")/add-wireguard-peer.sh <device-name>"
+echo "  sudo $(dirname "$0")/add-wireguard-peer.sh"
 echo
 echo "Then set WEB_BIND_HOST=${WG_SERVER_IP} in your .env and restart budget-web.service."
