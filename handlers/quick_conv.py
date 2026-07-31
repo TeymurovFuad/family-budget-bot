@@ -9,8 +9,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_quick
 from config import auth, auth_write, get_display_currency, log
-from data import load_rates, load_reference_data
-from excel_ops import append_transaction
+from data import load_rates
+from storage_facade import append_transaction, load_reference_data
 from formatters import format_base_as_currency, sanitize_description
 import merchant_map
 import settings
@@ -348,7 +348,10 @@ async def quick_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "User %s quick-add transaction saved: value=%s currency=%s category=%s",
             uid, transaction.value, transaction.currency, transaction.category,
         )
-        await append_transaction(transaction)
+        # storage_facade.append_transaction is sync (SQLite) — run it in the
+        # executor so the Telegram event loop is never blocked by the write.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, append_transaction, transaction)
         log.info("User %s quick-add saved", uid)
         await update.message.reply_text("✅ Saved.", reply_markup=ReplyKeyboardRemove())
         await check_budget_alert(update, transaction.category, ccy, rates)

@@ -22,9 +22,10 @@ from cycles import (
 )
 from log_decorators import log_call
 from data import (
-    load_data, load_rates, load_budgets, load_reference_data,
+    load_rates, load_budgets,
     now_utc, current_year_and_month, month_name, get_rate,
 )
+from storage_facade import load_reference_data, load_transactions
 from excel_ops import async_update_currency_rates
 from file_storage import get_excel_path_for_reading, load_budgets_from_excel
 from formatters import (
@@ -318,7 +319,7 @@ async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df    = load_data()
+        df    = load_transactions()
         rates = load_rates()
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
@@ -379,7 +380,7 @@ async def handle_summary_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE
     msg  = query.message
     ccy  = get_display_currency(query.from_user.id)
     try:
-        df    = load_data()
+        df    = load_transactions()
         rates = load_rates()
     except FileNotFoundError as e:
         await msg.reply_text(f"❌ {e}")
@@ -532,7 +533,7 @@ async def cmd_week(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df    = load_data()
+        df    = load_transactions()
         rates = load_rates()
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
@@ -573,7 +574,7 @@ async def cmd_budget(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df      = load_data()
+        df      = load_transactions()
         rates   = load_rates()
         budgets = load_budgets()
     except FileNotFoundError as e:
@@ -640,7 +641,7 @@ async def cmd_top(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df    = load_data()
+        df    = load_transactions()
         rates = load_rates()
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
@@ -691,7 +692,7 @@ async def cmd_savings(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        df = load_data()
+        df = load_transactions()
     except FileNotFoundError as e:
         await update.message.reply_text(f"❌ {e}"); return
 
@@ -771,7 +772,7 @@ async def cmd_report(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df      = load_data()
+        df      = load_transactions()
         rates   = load_rates()
         budgets = load_budgets()
     except FileNotFoundError as e:
@@ -976,7 +977,7 @@ async def cmd_chart(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     ccy = get_display_currency(uid)
     try:
-        df      = load_data()
+        df      = load_transactions()
         rates   = load_rates()
         budgets = load_budgets()
     except Exception as e:
@@ -1153,7 +1154,7 @@ async def handle_range_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        df      = load_data()
+        df      = load_transactions()
         rates   = load_rates()
         budgets = load_budgets()
     except FileNotFoundError as e:
@@ -1214,7 +1215,7 @@ async def handle_range_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         raise ApplicationHandlerStop
 
     try:
-        df      = load_data()
+        df      = load_transactions()
         rates   = load_rates()
         budgets = load_budgets()
     except FileNotFoundError as e:
@@ -1241,7 +1242,7 @@ async def check_budget_alert(update, category: str, ccy: str, rates: dict) -> No
     if not category or category in ("Income", "Savings"):
         return
     try:
-        df      = load_data()
+        df      = load_transactions()
         budgets = load_budgets_from_excel(get_excel_path_for_reading())
         budget  = budgets.get(category)
         if not budget:

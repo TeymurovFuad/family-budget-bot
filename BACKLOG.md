@@ -468,8 +468,11 @@ Cycles must be done in order — each depends on the previous.
 > constants, `sqlite_types.py` StrEnums + `TransactionRow` dataclass), `storage_facade.py`
 > (satisfies `storage_protocol.StorageBackend`, mirrors `data.load_data()` shape),
 > `scripts/import_excel_to_sqlite.py` (idempotent backfill via content_hash),
-> `excel_export.py` + `scripts/reconcile_sqlite_export.py`. Nothing is wired into the
-> running bot yet; W1's dual-write (or a direct flip per W4) is the next step.
+> `excel_export.py` + `scripts/reconcile_sqlite_export.py`.
+> **Phase 2, Unit R1:** `handlers/reports.py` reads now go through
+> `storage_facade.load_transactions()` (golden-master tests prove reply text unchanged).
+> Other read paths and all write paths are still Excel-direct — remaining Phase 2 units
+> and W1's dual-write (or a direct flip per W4) are next.
 
 > **Cycle S1 Phase 2 — cross-store visibility (read before deploying any single unit):**
 > Bulk imports (R4/PR #98) write to SQLite; full cross-handler visibility depends on

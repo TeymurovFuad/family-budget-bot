@@ -8,8 +8,12 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth_write, get_display_currency, log
 from log_decorators import log_call
-from data import load_rates, load_reference_data, now_utc
-from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, RowMovedError, _excel_write_lock
+from data import load_rates, now_utc
+from file_storage import RowMovedError
+from storage_facade import (
+    RowMismatchError, get_recent_transactions, load_reference_data,
+    update_transaction_field,
+)
 from formatters import format_base_as_currency, format_amount, sanitize_description
 from models import MONTH_NAMES
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
@@ -36,7 +40,9 @@ async def cmd_edit(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     try:
-        txns = get_recent_transactions(get_excel_path_for_reading(), n=10)
+        # SQLite-sourced: each row's _row_idx is the real SQLite id, the same
+        # keyspace update_transaction_field expects at confirm time.
+        txns = get_recent_transactions(n=10)
     except Exception as e:
         await update.message.reply_text(f"❌ {e}"); return
     if not txns:
@@ -181,11 +187,12 @@ async def edit_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         updates = {excel_col: new_value}
 
     try:
-        async with _excel_write_lock:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, update_transaction_field, row_idx, updates, None, expected)
+        # storage_facade.update_transaction_field is sync (SQLite handles its
+        # own locking) — run it in the executor to keep the event loop free.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, update_transaction_field, row_idx, updates, None, expected)
         await update.message.reply_text("✅ Updated.", reply_markup=ReplyKeyboardRemove())
-    except RowMovedError:
+    except (RowMovedError, RowMismatchError):
         log.warning("Edit aborted, row %d moved before it could be applied", row_idx)
         await update.message.reply_text(
             "⚠️ That transaction moved (another edit/delete happened first). Please run /edit again.",

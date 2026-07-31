@@ -9,6 +9,7 @@ today's Excel-backed call sites so the Phase 2 swap is mechanical:
   append_transactions_batch(txns)  ↔ file_storage.append_transactions_batch
   delete_transaction_row(id, ...)  ↔ file_storage.delete_transaction_row
   update_transaction_field(...)    ↔ file_storage.update_transaction_field
+  get_recent_transactions(n)       ↔ file_storage.get_recent_transactions
   load_transactions()              ↔ data.load_data() (same DataFrame columns)
   load_reference_data()            ↔ data.load_reference_data() (same keys)
 
@@ -18,6 +19,7 @@ future backend must expose the same five callables.
 
 import logging
 from datetime import date as _date
+from pathlib import Path
 
 import pandas as pd
 
@@ -34,6 +36,21 @@ log = logging.getLogger(__name__)
 
 def _conn():
     return sqlite_ops.init_db(settings.SQLITE_DB_PATH)
+
+
+def _require_db() -> None:
+    """
+    Read-path guard: refuse to read from a DB that was never seeded.
+
+    _conn() auto-creates an empty DB (correct for write paths, which should
+    create the DB on first write) — but a read against a never-seeded DB
+    would silently return empty reports instead of an error.
+    """
+    if not Path(settings.SQLITE_DB_PATH).exists():
+        raise FileNotFoundError(
+            f"SQLite DB not found at {settings.SQLITE_DB_PATH} — "
+            f"run scripts/import_excel_to_sqlite.py to seed it"
+        )
 
 
 class RowMismatchError(Exception):
@@ -202,6 +219,40 @@ def update_transaction_field(id: int, field, value=None, expected: dict | None =
         conn.close()
 
 
+def get_recent_transactions(n: int = 5) -> list[dict]:
+    """
+    Return the N most recent transactions as MasterData-header-keyed dicts,
+    oldest-first (mirroring file_storage.get_recent_transactions, which
+    returns the last N Excel rows in sheet order).
+
+    Each dict carries '_row_idx' — here the real SQLite primary key `id`,
+    the same keyspace update_transaction_field / delete_transaction_row
+    expect. Used by the /edit and /delete pickers.
+    """
+    conn = _conn()
+    try:
+        rows = sqlite_ops.list_transactions(conn, newest_first=True, limit=n)
+    finally:
+        conn.close()
+    rows.reverse()  # oldest-first, like the Excel tail
+    return [{
+        "Date":                r["date"],
+        "Year":                r["year"],
+        "Month":               r["month"],
+        "Value":               r["value"],
+        "Type":                r["type"],
+        "Category":            r["category"],
+        "Person":              r["person"],
+        "Description":         r["description"],
+        "IsRecurring":         r["is_recurring"],
+        "IsDone":              r["is_done"],
+        "Currency":            r["currency"],
+        "Value (base)":        r["value_base"],
+        "Date Modified (UTC)": r["date_modified_utc"],
+        "_row_idx":            r["id"],
+    } for r in rows]
+
+
 # Column order matches the MasterData sheet that data.load_data() reads.
 _DF_COLUMNS = [
     "Date", "Year", "Month", "Value", "Type", "Category", "Person",
@@ -216,6 +267,7 @@ def load_transactions(filters: dict | None = None) -> pd.DataFrame:
     same column names, plus the '_base' aggregation column, Year as Int64,
     IsDone as bool, rows without _base/Type/Year/Month dropped.
     """
+    _require_db()
     conn = _conn()
     try:
         rows = sqlite_ops.list_transactions(conn, filters)
@@ -271,6 +323,11 @@ def load_dedup_evidence(start=None, end=None) -> dict:
     """
     empty = {"strict": {}, "loose": {}}
     try:
+        # Read-path guard (consistent with load_transactions/load_reference_data):
+        # never auto-create the DB from a read. Unlike those, a missing DB is
+        # not fatal here — the except below turns it into empty evidence,
+        # because dedup must never block an import.
+        _require_db()
         conn = _conn()
         try:
             where = ["date IS NOT NULL", "value IS NOT NULL"]
@@ -315,6 +372,7 @@ def load_reference_data() -> dict:
 
       {months, txn_types, categories, persons, years, budgets, currencies}
     """
+    _require_db()
     conn = _conn()
     try:
         cats = conn.execute(
