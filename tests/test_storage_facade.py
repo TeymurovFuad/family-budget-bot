@@ -125,3 +125,24 @@ def test_load_reference_data_shape(sqlite_db):
     assert ref["years"] == [2024]
     assert "USD" in ref["currencies"]
     assert len(ref["months"]) == 12
+
+
+def test_read_paths_raise_when_db_missing(tmp_path, monkeypatch):
+    """Reads against a never-seeded DB must fail loudly, not return empty data."""
+    missing = tmp_path / "does_not_exist.db"
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", missing)
+    with pytest.raises(FileNotFoundError, match="import_excel_to_sqlite"):
+        storage_facade.load_transactions()
+    with pytest.raises(FileNotFoundError, match="import_excel_to_sqlite"):
+        storage_facade.load_reference_data()
+    # The guard itself must not have created the DB as a side effect.
+    assert not missing.exists()
+
+
+def test_write_path_still_creates_db_on_first_write(tmp_path, monkeypatch):
+    """append_transaction keeps auto-creating the DB (write-path behavior)."""
+    db_path = tmp_path / "fresh.db"
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", db_path)
+    storage_facade.append_transaction(_txn())
+    assert db_path.exists()
+    assert len(storage_facade.load_transactions()) == 1
