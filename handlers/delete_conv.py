@@ -1,12 +1,14 @@
 """/delete conversation."""
 
+import asyncio
+
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, log
 from log_decorators import log_call
-from excel_ops import async_delete_transaction_row
 from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
+from storage_facade import RowMismatchError, delete_transaction_row
 from states import DELETE_PICK
 import settings
 
@@ -70,7 +72,11 @@ async def delete_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     row_idx  = txn["_row_idx"]
     expected = {"Date": txn.get("Date"), "Value": txn.get("Value"), "Description": txn.get("Description")}
     try:
-        await async_delete_transaction_row(row_idx, expected)
+        # storage_facade.delete_transaction_row is sync (SQLite) — run it in
+        # the executor so the async handler never blocks the event loop
+        # (same pattern edit_conv uses for update_transaction_field).
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, delete_transaction_row, row_idx, expected)
         val   = txn.get("Value", "?")
         d_ccy = str(txn.get("Currency") or settings.DISPLAY_CURRENCY)
         label = str(txn.get("Description", "") or txn.get("Category", "") or "—")
@@ -79,7 +85,7 @@ async def delete_pick(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove(),
         )
-    except RowMovedError:
+    except (RowMovedError, RowMismatchError):
         log.warning("Delete aborted, row %d moved before it could be applied", row_idx)
         await update.message.reply_text(
             "⚠️ That transaction moved (another edit/delete happened first). Please run /delete again.",

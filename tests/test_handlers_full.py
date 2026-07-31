@@ -666,20 +666,20 @@ class TestAddConvConfirm:
     async def test_save_calls_append_transaction(self):
         ctx = self._make_ctx()
         upd = make_update("✅ Save")
-        mock_append = AsyncMock()
+        mock_append = MagicMock()
         with patch("handlers.add_conv.append_transaction", mock_append), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
              patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
              patch("handlers.add_conv._last_saved", {}):
             result = await add_confirm(upd, ctx)
-        mock_append.assert_awaited_once()
+        mock_append.assert_called_once()
         assert result == ConversationHandler.END
 
     async def test_save_sends_confirmation_message(self):
         ctx = self._make_ctx()
         upd = make_update("✅ Save")
-        with patch("handlers.add_conv.append_transaction", AsyncMock()), \
+        with patch("handlers.add_conv.append_transaction", MagicMock()), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
              patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
@@ -708,14 +708,14 @@ class TestAddConvConfirm:
         ctx = self._make_ctx()
         ctx.user_data["dup_warned"] = True
         upd = make_update("✅ Yes, save anyway")
-        mock_append = AsyncMock()
+        mock_append = MagicMock()
         with patch("handlers.add_conv.append_transaction", mock_append), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
              patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
              patch("handlers.add_conv._last_saved", {}):
             result = await add_confirm(upd, ctx)
-        mock_append.assert_awaited_once()
+        mock_append.assert_called_once()
         assert result == ConversationHandler.END
 
 
@@ -961,8 +961,7 @@ class TestEditConvConfirm:
         ctx = self._make_ctx()
         upd = make_update("Yes")
         mock_update_field = MagicMock()
-        with patch("handlers.edit_conv.update_transaction_field", mock_update_field), \
-             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+        with patch("handlers.edit_conv.update_transaction_field", mock_update_field):
             result = await edit_confirm(upd, ctx)
         assert result == ConversationHandler.END
 
@@ -975,8 +974,7 @@ class TestEditConvConfirm:
     async def test_yes_sends_updated_message(self):
         ctx = self._make_ctx()
         upd = make_update("Yes")
-        with patch("handlers.edit_conv.update_transaction_field", MagicMock()), \
-             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+        with patch("handlers.edit_conv.update_transaction_field", MagicMock()):
             await edit_confirm(upd, ctx)
         sent = upd.message.reply_text.call_args.args[0]
         assert "Updated" in sent or "✅" in sent
@@ -991,8 +989,7 @@ class TestEditConvConfirm:
         ctx = self._make_ctx()
         upd = make_update("Yes")
         mock_update_field = MagicMock()
-        with patch("handlers.edit_conv.update_transaction_field", mock_update_field), \
-             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+        with patch("handlers.edit_conv.update_transaction_field", mock_update_field):
             await edit_confirm(upd, ctx)
         args = mock_update_field.call_args.args
         assert args[0] == SAMPLE_TXN["_row_idx"]
@@ -1011,8 +1008,7 @@ class TestEditConvConfirm:
         ctx = self._make_ctx(field="Date", new_value=date(2023, 12, 31))
         upd = make_update("Yes")
         mock_update_field = MagicMock()
-        with patch("handlers.edit_conv.update_transaction_field", mock_update_field), \
-             patch("handlers.edit_conv._excel_write_lock", MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock())):
+        with patch("handlers.edit_conv.update_transaction_field", mock_update_field):
             await edit_confirm(upd, ctx)
         args = mock_update_field.call_args.args
         assert args[1] == {"Date": date(2023, 12, 31), "Year": 2023, "Month": "Dec"}
@@ -1021,9 +1017,7 @@ class TestEditConvConfirm:
         ctx = self._make_ctx()
         upd = make_update("Yes")
         with patch("handlers.edit_conv.update_transaction_field",
-                    MagicMock(side_effect=RowMovedError("moved"))), \
-             patch("handlers.edit_conv._excel_write_lock",
-                   MagicMock(__aenter__=AsyncMock(), __aexit__=AsyncMock(return_value=False))):
+                    MagicMock(side_effect=RowMovedError("moved"))):
             result = await edit_confirm(upd, ctx)
         assert result == ConversationHandler.END
         sent = upd.message.reply_text.call_args.args[0]
@@ -1040,11 +1034,11 @@ class TestDeleteConvPick:
     async def test_valid_pick_deletes_and_ends(self):
         ctx = self._make_ctx()
         upd = make_update("1")
-        mock_delete = AsyncMock()
-        with patch("handlers.delete_conv.async_delete_transaction_row", mock_delete):
+        mock_delete = MagicMock()
+        with patch("handlers.delete_conv.delete_transaction_row", mock_delete):
             result = await delete_pick(upd, ctx)
         assert result == ConversationHandler.END
-        mock_delete.assert_awaited_once()
+        mock_delete.assert_called_once()
         call_args = mock_delete.call_args.args
         assert call_args[0] == SAMPLE_TXN["_row_idx"]
         expected_snapshot = call_args[1]
@@ -1056,8 +1050,8 @@ class TestDeleteConvPick:
     async def test_row_moved_error_reports_friendly_message_and_ends(self):
         ctx = self._make_ctx()
         upd = make_update("1")
-        with patch("handlers.delete_conv.async_delete_transaction_row",
-                    AsyncMock(side_effect=RowMovedError("moved"))):
+        with patch("handlers.delete_conv.delete_transaction_row",
+                    MagicMock(side_effect=RowMovedError("moved"))):
             result = await delete_pick(upd, ctx)
         assert result == ConversationHandler.END
         sent = upd.message.reply_text.call_args.args[0]
@@ -1593,20 +1587,20 @@ class TestQuickConvConfirm:
     async def test_yes_saves_and_ends(self):
         ctx = self._make_ctx()
         upd = make_update("Yes")
-        mock_append = AsyncMock()
+        mock_append = MagicMock()
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.quick_conv.append_transaction", mock_append), \
              patch("handlers.quick_conv.check_budget_alert", AsyncMock()):
             result = await quick_confirm(upd, ctx)
-        mock_append.assert_awaited_once()
+        mock_append.assert_called_once()
         assert result == ConversationHandler.END
 
     async def test_yes_uses_parsed_date_when_saving(self):
         ctx = self._make_ctx()
         ctx.user_data["quick_parsed"]["date"] = "2026-05-24"
         upd = make_update("Yes")
-        mock_append = AsyncMock()
+        mock_append = MagicMock()
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.quick_conv.Transaction") as MockTransaction, \
@@ -1616,7 +1610,7 @@ class TestQuickConvConfirm:
         MockTransaction.assert_called_once()
         transaction_kwargs = MockTransaction.call_args.kwargs
         assert transaction_kwargs["date"] == __import__("datetime").date(2026, 5, 24)
-        mock_append.assert_awaited_once()
+        mock_append.assert_called_once()
         assert result == ConversationHandler.END
 
     async def test_rejects_freeform_confirmation_and_reprompts(self):
@@ -1624,7 +1618,7 @@ class TestQuickConvConfirm:
         upd = make_update("save as fun")
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.append_transaction", AsyncMock()), \
+             patch("handlers.quick_conv.append_transaction", MagicMock()), \
              patch("handlers.quick_conv.check_budget_alert", AsyncMock()):
             result = await quick_confirm(upd, ctx)
         assert result == states.QUICK_CONFIRM
@@ -1636,7 +1630,7 @@ class TestQuickConvConfirm:
         upd = make_update("Yes")
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.append_transaction", AsyncMock()), \
+             patch("handlers.quick_conv.append_transaction", MagicMock()), \
              patch("handlers.quick_conv.check_budget_alert", AsyncMock()):
             await quick_confirm(upd, ctx)
         sent = upd.message.reply_text.call_args.args[0]
@@ -1647,7 +1641,7 @@ class TestQuickConvConfirm:
         upd = make_update("Yes")
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.append_transaction", AsyncMock(side_effect=RuntimeError("fail"))), \
+             patch("handlers.quick_conv.append_transaction", MagicMock(side_effect=RuntimeError("fail"))), \
              patch("handlers.quick_conv.check_budget_alert", AsyncMock()):
             result = await quick_confirm(upd, ctx)
         assert result == ConversationHandler.END
@@ -1660,7 +1654,7 @@ class TestQuickConvConfirm:
         mock_alert = AsyncMock()
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.append_transaction", AsyncMock()), \
+             patch("handlers.quick_conv.append_transaction", MagicMock()), \
              patch("handlers.quick_conv.check_budget_alert", mock_alert):
             await quick_confirm(upd, ctx)
         mock_alert.assert_awaited_once()
@@ -1743,7 +1737,7 @@ class TestAddFlowIntegration:
              patch("handlers.add_conv.load_reference_data", return_value=SAMPLE_LISTS), \
              patch("handlers.add_conv.get_display_currency", return_value="PLN"), \
              patch("handlers.add_conv.get_rate", return_value=1.0), \
-             patch("handlers.add_conv.append_transaction", AsyncMock()) as mock_append, \
+             patch("handlers.add_conv.append_transaction", MagicMock()) as mock_append, \
              patch("handlers.add_conv.check_budget_alert", AsyncMock()), \
              patch("handlers.add_conv._last_saved", {}), \
              patch("merchant_map.detect_recurring", return_value=False):
@@ -1777,7 +1771,7 @@ class TestAddFlowIntegration:
             assert r == ConversationHandler.END
 
             # Person field defaults to household — saved transaction carries "".
-            saved_txn = mock_append.await_args.args[0]
+            saved_txn = mock_append.call_args.args[0]
             assert saved_txn.person == ""
 
         # After full flow user_data must be cleared

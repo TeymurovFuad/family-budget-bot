@@ -126,7 +126,7 @@ def add_patches(append_mock=None):
         patch("handlers.add_conv.load_rates", return_value=SAMPLE_RATES),
         patch("handlers.add_conv.load_reference_data", return_value=SAMPLE_LISTS),
         patch("handlers.add_conv.get_display_currency", return_value="PLN"),
-        patch("handlers.add_conv.append_transaction", append_mock or AsyncMock()),
+        patch("handlers.add_conv.append_transaction", append_mock or MagicMock()),
         patch("handlers.add_conv.check_budget_alert", AsyncMock()),
         patch("handlers.add_conv.maybe_prompt_cycle_start", AsyncMock()),
         patch.dict(add_conv._last_saved, {}, clear=True),
@@ -172,13 +172,13 @@ class TestAddFlow:
     async def test_add_golden_path(self):
         # Two-tap flow: amount → category → save. Currency/type/date/recurring
         # all default; description is empty unless edited from the confirm card.
-        append_mock = AsyncMock()
+        append_mock = MagicMock()
         state, ctx, updates = await self._drive(
             ["49.99", "Groceries", "✅ Save"],
             append_mock=append_mock,
         )
         assert state == ConversationHandler.END
-        append_mock.assert_awaited_once()
+        append_mock.assert_called_once()
         txn = append_mock.call_args.args[0]
         assert txn.value == 49.99
         assert txn.currency == "PLN"
@@ -191,7 +191,7 @@ class TestAddFlow:
     async def test_add_golden_path_foreign_currency_recurring(self):
         # Two-tap flow to confirm card, then edit currency and recurring via
         # the confirm-card edit flow before saving.
-        append_mock = AsyncMock()
+        append_mock = MagicMock()
         with applied(add_patches(append_mock)):
             ctx = make_ctx()
             _, upds = await drive_add(ctx, ["100", "Transport"])
@@ -283,19 +283,19 @@ class TestAddFlow:
         assert "YYYY-MM-DD" in all_replies(upd_bad)
 
     async def test_add_cancel_at_confirm_writes_nothing(self):
-        append_mock = AsyncMock()
+        append_mock = MagicMock()
         state, ctx, updates = await self._drive(
             ["50", "PLN", "Expense", "Groceries", "today",
              "desc", "No — one-off", "❌ Cancel"],
             append_mock=append_mock,
         )
         assert state == ConversationHandler.END
-        append_mock.assert_not_awaited()
+        append_mock.assert_not_called()
         assert "Cancelled" in all_replies(*updates)
         assert ctx.user_data == {}
 
     async def test_add_duplicate_warning_then_save_anyway(self):
-        append_mock = AsyncMock()
+        append_mock = MagicMock()
         with applied(add_patches(append_mock)):
             # Seed a just-saved identical transaction for this user.
             add_conv._last_saved[UID] = (
@@ -311,13 +311,13 @@ class TestAddFlow:
             # First save attempt warns about the duplicate, stays in confirm.
             assert state == states.ADD_CONFIRM
             assert "Possible duplicate" in all_replies(upd)
-            append_mock.assert_not_awaited()
+            append_mock.assert_not_called()
 
             # Confirm again — now it saves.
             upd2 = make_update("✅ Yes, save anyway")
             state = await add_conv.add_confirm(upd2, ctx)
             assert state == ConversationHandler.END
-            append_mock.assert_awaited_once()
+            append_mock.assert_called_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -655,14 +655,14 @@ def delete_patches(recent=None, delete_mock=None):
               return_value=Path("dummy.xlsx")),
         patch("handlers.delete_conv.get_recent_transactions",
               return_value=[dict(t) for t in (RECENT_TXNS if recent is None else recent)]),
-        patch("handlers.delete_conv.async_delete_transaction_row",
-              delete_mock or AsyncMock()),
+        patch("handlers.delete_conv.delete_transaction_row",
+              delete_mock or MagicMock()),
     ]
 
 
 class TestDeleteFlow:
     async def test_delete_golden_path(self):
-        delete_mock = AsyncMock()
+        delete_mock = MagicMock()
         with applied(delete_patches(delete_mock=delete_mock)):
             ctx = make_ctx()
             upd = make_update("/delete")
@@ -672,14 +672,14 @@ class TestDeleteFlow:
             upd2 = make_update("1")
             state = await delete_conv.delete_pick(upd2, ctx)
         assert state == ConversationHandler.END
-        delete_mock.assert_awaited_once()
+        delete_mock.assert_called_once()
         row_idx, expected = delete_mock.call_args.args
         assert row_idx == 8
         assert expected["Description"] == "train"
         assert "Deleted" in all_replies(upd2)
 
     async def test_delete_stale_row_guard(self):
-        delete_mock = AsyncMock(side_effect=RowMovedError("row moved"))
+        delete_mock = MagicMock(side_effect=RowMovedError("row moved"))
         with applied(delete_patches(delete_mock=delete_mock)):
             ctx = make_ctx()
             await delete_conv.cmd_delete(make_update("/delete"), ctx)

@@ -8,8 +8,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth_write, get_display_currency, log
 from log_decorators import log_call
-from data import load_rates, load_reference_data, now_utc
-from file_storage import get_excel_path_for_reading, get_recent_transactions, update_transaction_field, RowMovedError, _excel_write_lock
+from data import load_rates, now_utc
+from file_storage import get_excel_path_for_reading, get_recent_transactions, RowMovedError
+from storage_facade import RowMismatchError, load_reference_data, update_transaction_field
 from formatters import format_base_as_currency, format_amount, sanitize_description
 from models import MONTH_NAMES
 from states import EDIT_PICK, EDIT_FIELD, EDIT_VALUE, EDIT_CONFIRM
@@ -181,11 +182,12 @@ async def edit_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         updates = {excel_col: new_value}
 
     try:
-        async with _excel_write_lock:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, update_transaction_field, row_idx, updates, None, expected)
+        # storage_facade.update_transaction_field is sync (SQLite handles its
+        # own locking) — run it in the executor to keep the event loop free.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, update_transaction_field, row_idx, updates, None, expected)
         await update.message.reply_text("✅ Updated.", reply_markup=ReplyKeyboardRemove())
-    except RowMovedError:
+    except (RowMovedError, RowMismatchError):
         log.warning("Edit aborted, row %d moved before it could be applied", row_idx)
         await update.message.reply_text(
             "⚠️ That transaction moved (another edit/delete happened first). Please run /edit again.",
