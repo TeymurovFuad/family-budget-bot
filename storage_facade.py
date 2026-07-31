@@ -15,6 +15,8 @@ This module structurally satisfies storage_protocol.StorageBackend — any
 future backend must expose the same five callables.
 """
 
+from pathlib import Path
+
 import pandas as pd
 
 import settings
@@ -25,6 +27,21 @@ from sqlite_types import TransactionRow, TransactionSource, TransactionType
 
 def _conn():
     return sqlite_ops.init_db(settings.SQLITE_DB_PATH)
+
+
+def _require_db() -> None:
+    """
+    Read-path guard: refuse to read from a DB that was never seeded.
+
+    _conn() auto-creates an empty DB (correct for write paths, which should
+    create the DB on first write) — but a read against a never-seeded DB
+    would silently return empty reports instead of an error.
+    """
+    if not Path(settings.SQLITE_DB_PATH).exists():
+        raise FileNotFoundError(
+            f"SQLite DB not found at {settings.SQLITE_DB_PATH} — "
+            f"run scripts/import_excel_to_sqlite.py to seed it"
+        )
 
 
 class RowMismatchError(Exception):
@@ -159,6 +176,7 @@ def load_transactions(filters: dict | None = None) -> pd.DataFrame:
     same column names, plus the '_base' aggregation column, Year as Int64,
     IsDone as bool, rows without _base/Type/Year/Month dropped.
     """
+    _require_db()
     conn = _conn()
     try:
         rows = sqlite_ops.list_transactions(conn, filters)
@@ -199,6 +217,7 @@ def load_reference_data() -> dict:
 
       {months, txn_types, categories, persons, years, budgets, currencies}
     """
+    _require_db()
     conn = _conn()
     try:
         cats = conn.execute(

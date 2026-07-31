@@ -98,7 +98,7 @@ def _sample_df():
 
 def _patch_report_data(monkeypatch, df):
     import handlers.reports as reports
-    monkeypatch.setattr(reports, "load_data", lambda: df)
+    monkeypatch.setattr(reports, "load_transactions", lambda: df)
     monkeypatch.setattr(reports, "load_rates", lambda: {"PLN": 1.0})
     monkeypatch.setattr(reports, "load_budgets", lambda: {})
 
