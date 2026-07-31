@@ -42,6 +42,9 @@ ENV/
 # ── Project data files (real data — never commit) ─────────────────────────────
 data/*.xlsx
 data/*.json
+data/*.db
+data/*.db-wal
+data/*.db-shm
 
 data/bulk_drafts/
 
