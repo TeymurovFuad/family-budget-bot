@@ -320,11 +320,11 @@ class TestDetectRecurring:
         upd = make_update(RECURRING_YES_BUTTON)
         with patch("handlers.quick_conv.load_rates", return_value=SAMPLE_RATES), \
              patch("handlers.quick_conv.get_display_currency", return_value="PLN"), \
-             patch("handlers.quick_conv.append_transaction", AsyncMock()) as mock_append, \
+             patch("handlers.quick_conv.append_transaction", MagicMock()) as mock_append, \
              patch("handlers.quick_conv.check_budget_alert", AsyncMock()):
             result = await quick_confirm(upd, ctx)
         assert result == ConversationHandler.END
-        assert mock_append.await_args.args[0].is_recurring is True
+        assert mock_append.call_args.args[0].is_recurring is True
 
 
 # ── Items 3 + 7: /add two-tap defaults and edit-from-confirm ─────────────────

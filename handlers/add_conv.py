@@ -7,8 +7,8 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
 
 from config import TIMEZONE, auth_write, get_display_currency, _last_saved, log
-from data import load_rates, load_reference_data, now_utc, get_rate
-from excel_ops import append_transaction
+from data import load_rates, now_utc, get_rate
+from storage_facade import append_transaction, load_reference_data
 from formatters import sanitize_description
 from handlers.cycle import maybe_prompt_cycle_start
 from handlers.reports import check_budget_alert
@@ -372,7 +372,10 @@ async def add_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         transaction = state.to_transaction()
         log.info("User %s saving transaction: %s %s %s", uid, transaction.value, transaction.currency, transaction.category)
-        await append_transaction(transaction)
+        # storage_facade.append_transaction is sync (SQLite) — run it in the
+        # executor so the Telegram event loop is never blocked by the write.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, append_transaction, transaction)
         log.info("User %s transaction saved: %s %s %s", uid, transaction.value, transaction.currency, transaction.category)
         _last_saved[uid] = (
             transaction.value, transaction.currency,
