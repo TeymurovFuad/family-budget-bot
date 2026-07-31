@@ -39,6 +39,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import config
 import file_storage
+import settings
+import sqlite_ops
 
 from tests.test_auth_config import _REAL_AUTH_WRITE
 config.auth_write = _REAL_AUTH_WRITE
@@ -210,6 +212,15 @@ def budget_excel(tmp_path, monkeypatch):
     file_storage.create_blank_excel(path)
     monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", path)
     monkeypatch.setattr(file_storage, "USER_PREFS_PATH", tmp_path / "user_prefs.json")
+    # Category listing now comes from the SQLite-backed storage facade —
+    # seed the same categories the blank workbook starts with.
+    db_path = tmp_path / "budget.db"
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", db_path)
+    conn = sqlite_ops.init_db(db_path)
+    from data import load_reference_data as _excel_ref
+    for cat in _excel_ref().get("categories", []):
+        sqlite_ops.upsert_category(conn, cat, None)
+    conn.close()
     return path
 
 

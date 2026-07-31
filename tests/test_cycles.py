@@ -376,7 +376,7 @@ async def test_cmd_cycle_detect_warns_extra_keywords_not_saved(excel_path, monke
     must be told to add them via /keywords."""
     import handlers.cycle as hc
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_transactions", lambda: pd.DataFrame())
     monkeypatch.setattr(hc, "load_cycles", lambda: [])
     candidates = [{"date": date(2026, 6, 25), "amounts": [5000.0], "unambiguous": True}]
     monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: candidates)
@@ -391,7 +391,7 @@ async def test_cmd_cycle_detect_warns_extra_keywords_not_saved(excel_path, monke
 async def test_cmd_cycle_detect_no_warning_without_extra_keywords(excel_path, monkeypatch):
     import handlers.cycle as hc
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_transactions", lambda: pd.DataFrame())
     monkeypatch.setattr(hc, "load_cycles", lambda: [])
     candidates = [{"date": date(2026, 6, 25), "amounts": [5000.0], "unambiguous": True}]
     monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: candidates)
@@ -764,7 +764,7 @@ async def test_detect_fallback_window_when_no_salary_rows(excel_path, monkeypatc
     """No keyword hits -> largest income rows near the 1st offered as candidates."""
     import handlers.cycle as hc
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_transactions", lambda: pd.DataFrame())
     monkeypatch.setattr(hc, "load_cycles", lambda: [])
     monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: [])
     fb = [{"date": date(2026, 7, 1), "amounts": [9000.0], "unambiguous": True},
@@ -785,7 +785,7 @@ async def test_detect_fallback_window_when_no_salary_rows(excel_path, monkeypatc
 async def test_detect_no_candidates_and_no_fallback_reports_nothing(excel_path, monkeypatch):
     import handlers.cycle as hc
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(hc, "load_data", lambda: pd.DataFrame())
+    monkeypatch.setattr(hc, "load_transactions", lambda: pd.DataFrame())
     monkeypatch.setattr(hc, "load_cycles", lambda: [])
     monkeypatch.setattr(hc, "detect_cycle_candidates", lambda df, cyc, extra: [])
     monkeypatch.setattr(hc, "fallback_income_candidates", lambda df, anchor, cyc: [])
@@ -952,3 +952,52 @@ def test_group_by_month_order_independent():
     assert [[e["date_str"] for e in g] for g in groups] == [
         ["2026-05-24"], ["2026-06-02", "2026-06-25"],
     ]
+
+
+# ── Unit R2: /cycle detect reads from the SQLite storage facade ───────────────
+
+@pytest.fixture()
+def facade_db(tmp_path, monkeypatch):
+    """Fresh SQLite DB for storage_facade, seeded with a base-currency rate."""
+    import sqlite_ops
+    db_path = tmp_path / "budget.db"
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", db_path)
+    conn = sqlite_ops.init_db(db_path)
+    sqlite_ops.upsert_rate(conn, settings.DISPLAY_CURRENCY, 1.0)
+    conn.close()
+    return db_path
+
+
+def _seed_salary(txn_date, value=5000.0, description="monthly salary"):
+    import storage_facade
+    from models import Transaction
+    storage_facade.append_transaction(Transaction(
+        date=txn_date, value=value, currency=settings.DISPLAY_CURRENCY,
+        transaction_type="Income", category="Salary", person="Alice",
+        description=description, year=txn_date.year,
+        month=txn_date.strftime("%b")))
+
+
+async def test_cmd_cycle_detect_sources_facade_sqlite(excel_path, facade_db, monkeypatch):
+    """Unpatched /cycle detect finds a salary seeded only in SQLite — proof the
+    handler reads storage_facade.load_transactions(), not Excel load_data()."""
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    _seed_salary(date(2026, 6, 25))
+
+    upd = make_update()
+    await cmd_cycle(upd, make_ctx(["detect"]))
+
+    texts = [c.args[0] for c in upd.message.reply_text.call_args_list]
+    assert any("Found *1*" in t for t in texts), texts
+    markup = upd.message.reply_text.call_args.kwargs["reply_markup"]
+    callbacks = [b.callback_data for row in markup.inline_keyboard for b in row]
+    assert "detect:confirm_all" in callbacks
+
+
+def test_facade_dataframe_flows_through_cycle_totals(facade_db):
+    """The facade-sourced DataFrame keeps working in storage-agnostic cycles.py."""
+    import storage_facade
+    _seed_salary(date(2026, 6, 25))
+    df = storage_facade.load_transactions()
+    totals = cycle_totals(df, date(2026, 6, 1), date(2026, 6, 30))
+    assert totals["salary"] == 5000.0

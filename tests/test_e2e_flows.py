@@ -887,7 +887,7 @@ class TestCycleFlow:
             {"date": date(2026, 6, 1), "amounts": [5000.0], "unambiguous": True},
             {"date": date(2026, 7, 1), "amounts": [5100.0], "unambiguous": True},
         ]
-        with patch("handlers.cycle.load_data", return_value=MagicMock()), \
+        with patch("handlers.cycle.load_transactions", return_value=MagicMock()), \
              patch("handlers.cycle.load_cycles", return_value=[]), \
              patch("handlers.cycle.cycle_detect_keywords", return_value=["salary"]), \
              patch("handlers.cycle.detect_cycle_candidates", return_value=candidates):
@@ -903,7 +903,7 @@ class TestCycleFlow:
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
         candidates = [{"date": date(2026, 6, 1), "amounts": [5000.0], "unambiguous": True}]
         ctx = make_ctx(args=["detect"])
-        with patch("handlers.cycle.load_data", return_value=MagicMock()), \
+        with patch("handlers.cycle.load_transactions", return_value=MagicMock()), \
              patch("handlers.cycle.load_cycles", return_value=[]), \
              patch("handlers.cycle.cycle_detect_keywords", return_value=["salary"]), \
              patch("handlers.cycle.detect_cycle_candidates", return_value=candidates), \
@@ -915,7 +915,7 @@ class TestCycleFlow:
 
     async def test_cycle_detect_nothing_found(self, monkeypatch):
         monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-        with patch("handlers.cycle.load_data", return_value=MagicMock()), \
+        with patch("handlers.cycle.load_transactions", return_value=MagicMock()), \
              patch("handlers.cycle.load_cycles", return_value=[]), \
              patch("handlers.cycle.cycle_detect_keywords", return_value=["salary"]), \
              patch("handlers.cycle.detect_cycle_candidates", return_value=[]):
