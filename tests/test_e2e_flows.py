@@ -731,7 +731,7 @@ def make_df():
 
 def reports_patches(budgets=None):
     return [
-        patch("handlers.reports.load_data", return_value=make_df()),
+        patch("handlers.reports.load_transactions", return_value=make_df()),
         patch("handlers.reports.load_rates", return_value=SAMPLE_RATES),
         patch("handlers.reports.load_budgets", return_value=budgets or {}),
         patch("handlers.reports.get_display_currency", return_value="PLN"),

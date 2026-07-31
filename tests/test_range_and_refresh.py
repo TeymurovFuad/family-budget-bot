@@ -121,7 +121,7 @@ async def test_range_report_this_month_returns_data():
 
     df = _sample_df()
 
-    with patch("handlers.reports.load_data",    return_value=df), \
+    with patch("handlers.reports.load_transactions",    return_value=df), \
          patch("handlers.reports.load_rates",   return_value={"PLN": 1.0}), \
          patch("handlers.reports.load_budgets", return_value={}), \
          patch("handlers.reports.get_display_currency", return_value="PLN"):
@@ -180,7 +180,7 @@ async def test_range_preset_callback_routes_correctly(callback_data, expected_la
         })
     df = pd.DataFrame(rows)
 
-    with patch("handlers.reports.load_data",    return_value=df), \
+    with patch("handlers.reports.load_transactions",    return_value=df), \
          patch("handlers.reports.load_rates",   return_value={"PLN": 1.0}), \
          patch("handlers.reports.load_budgets", return_value={}), \
          patch("handlers.reports.get_display_currency", return_value="PLN"):
@@ -267,7 +267,7 @@ async def test_range_text_valid_range_consumed_and_stops_propagation():
     upd = _make_range_text_update("2026-01-01 to 2026-02-01")
     ctx = _make_ctx()
     ctx.user_data["awaiting_range"] = 555
-    with patch("handlers.reports.load_data", return_value=_sample_df()), \
+    with patch("handlers.reports.load_transactions", return_value=_sample_df()), \
          patch("handlers.reports.load_rates", return_value={"PLN": 1.0}), \
          patch("handlers.reports.load_budgets", return_value={}), \
          patch("handlers.reports.get_display_currency", return_value="PLN"), \
