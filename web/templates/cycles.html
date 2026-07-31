@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Cycles{% endblock %}
+{% block content %}
+<h1>Cycles</h1>
+{% if not enabled %}
+<p class="muted">Budget cycles are disabled (BUDGET_CYCLE=0) — reports use calendar months.</p>
+{% elif current %}
+<div class="card">
+  <h2>Current cycle: {{ current.label }}</h2>
+  <p>Started {{ current.start.isoformat() }} — day {{ current.day }}.</p>
+</div>
+{% else %}
+<p>No budget cycle recorded yet — use <code>/cycle started</code> in the bot.</p>
+{% endif %}
+{% if rows %}
+<table>
+  <thead><tr><th>Cycle</th><th>Span</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td>{{ r.label }}</td>
+      <td>{{ r.start.isoformat() }} → {{ r.end.isoformat() if r.end else "today" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
