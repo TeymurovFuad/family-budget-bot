@@ -29,6 +29,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 WG_IFACE=$(prompt WG_IFACE "WireGuard interface name" "wg0")
+[[ "$WG_IFACE" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Interface name must be alphanumeric/_/- only" >&2; exit 1; }
 WG_PORT=$(prompt WG_PORT "WireGuard listen port (UDP)" "51820")
 WG_SERVER_IP=$(prompt WG_SERVER_IP "WireGuard server tunnel IP" "10.8.0.1")
 WG_SUBNET_CIDR=$(prompt WG_SUBNET_CIDR "WireGuard subnet size (CIDR bits)" "24")
@@ -50,6 +51,7 @@ if [ -z "$DEVICE_NAME" ]; then
     echo "A device name is required." >&2
     exit 1
 fi
+[[ "$DEVICE_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Device name must be alphanumeric/_/- only (no spaces, slashes, or newlines)" >&2; exit 1; }
 
 CLIENT_CONF="$PEER_DIR/$DEVICE_NAME.conf"
 if [ -f "$CLIENT_CONF" ]; then
@@ -66,8 +68,8 @@ if [ "$WG_SERVER_ENDPOINT" = "<this-server-public-ip-or-hostname>" ]; then
     exit 1
 fi
 
-mkdir -p "$PEER_DIR"
 umask 077
+mkdir -p "$PEER_DIR"
 
 # Next free host address in the WG subnet: server is always .1, peers start at .2.
 NEXT_OCTET=$(( $(grep -oE "AllowedIPs = ${WG_SERVER_IP%.*}\.[0-9]+" "$CONF" 2>/dev/null | grep -oE '[0-9]+$' | sort -n | tail -1 || echo 1) + 1 ))
