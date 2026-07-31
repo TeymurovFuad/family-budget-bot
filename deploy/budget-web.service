@@ -1,0 +1,22 @@
+[Unit]
+Description=Budget Web UI (read-only, WireGuard-only)
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/budget-bot
+# Set in the EnvironmentFile: WEB_PASSWORD, WEB_SESSION_SECRET (required —
+# the app refuses to start without them) and WEB_BIND_HOST (your WireGuard
+# interface IP, e.g. 10.8.0.1 — never 0.0.0.0).
+EnvironmentFile=/home/ubuntu/budget-bot/.env
+Environment=WEB_BIND_HOST=127.0.0.1
+Environment=WEB_PORT=8080
+# --factory: create_app() runs validate_web_settings() and refuses to start
+# (unit fails visibly) when WEB_PASSWORD / WEB_SESSION_SECRET are missing.
+ExecStart=/home/ubuntu/budget-bot/venv/bin/uvicorn --factory web.app:create_app --host ${WEB_BIND_HOST} --port ${WEB_PORT}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

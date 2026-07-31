@@ -1,0 +1,82 @@
+"""
+web/auth.py — shared-password session auth for the read-only web UI.
+
+Intentionally minimal for a 2-5 person household behind WireGuard:
+one shared password (settings.WEB_PASSWORD), an itsdangerous-signed
+session cookie, no user accounts, no reset flow.
+
+Fail-closed: web/app.py refuses to start when WEB_PASSWORD or
+WEB_SESSION_SECRET is empty — validate_web_settings() below.
+"""
+
+import secrets
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+
+import settings
+
+SESSION_COOKIE = "budgetweb_session"
+SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days
+
+router = APIRouter()
+
+
+def validate_web_settings() -> None:
+    """Raise unless both auth settings are configured — never run open."""
+    if not settings.WEB_PASSWORD or not settings.WEB_SESSION_SECRET:
+        raise RuntimeError(
+            "Refusing to start: WEB_PASSWORD and WEB_SESSION_SECRET must both "
+            "be set (non-empty) in the environment. The web UI never runs "
+            "without authentication."
+        )
+
+
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(settings.WEB_SESSION_SECRET, salt="budget-web-session")
+
+
+class AuthRedirect(Exception):
+    """Raised by require_session; handled in app.py → redirect to /login."""
+
+
+def require_session(request: Request) -> None:
+    """FastAPI dependency — every protected route must depend on this."""
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        raise AuthRedirect()
+    try:
+        _serializer().loads(token, max_age=SESSION_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        raise AuthRedirect()
+
+
+def _templates(request: Request):
+    return request.app.state.templates
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_form(request: Request):
+    return _templates(request).TemplateResponse(
+        request, "login.html", {"error": None})
+
+
+@router.post("/login")
+async def login(request: Request, password: str = Form("")):
+    if not settings.WEB_PASSWORD or not secrets.compare_digest(
+            password.encode(), settings.WEB_PASSWORD.encode()):
+        return _templates(request).TemplateResponse(
+            request, "login.html", {"error": "Wrong password."}, status_code=401)
+    resp = RedirectResponse("/", status_code=303)
+    resp.set_cookie(
+        SESSION_COOKIE, _serializer().dumps("ok"),
+        max_age=SESSION_MAX_AGE, httponly=True, samesite="lax")
+    return resp
+
+
+@router.post("/logout")
+async def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp

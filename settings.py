@@ -80,8 +80,8 @@ try:
 except ValueError:
     CYCLE_REPROMPT_MIN_AGE_DAYS = 20
 
-# SQLite primary store (Cycle S1) — foundation only, unused by the bot until
-# Phase 2 wires handlers to storage_facade.py.
+# SQLite primary store (Cycle S1) — the bot and web UI read/write it via
+# storage_facade.py.
 SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(DATA_DIR / "budget.db"))).expanduser()
 if not SQLITE_DB_PATH.is_absolute():
     SQLITE_DB_PATH = PROJECT_ROOT / SQLITE_DB_PATH
@@ -92,6 +92,21 @@ try:
     EXCEL_EXPORT_INTERVAL_MINUTES = int(os.getenv("EXCEL_EXPORT_INTERVAL_MINUTES", "15"))
 except ValueError:
     EXCEL_EXPORT_INTERVAL_MINUTES = 15
+
+# Web UI (Cycle S2) — read-only FastAPI app, served by its own systemd unit
+# (deploy/budget-web.service), never wired into the bot process.
+# WEB_PASSWORD / WEB_SESSION_SECRET have NO defaults on purpose: web/app.py
+# fails closed (refuses to start) when either is empty.
+WEB_PASSWORD = os.getenv("WEB_PASSWORD", "")
+WEB_SESSION_SECRET = os.getenv("WEB_SESSION_SECRET", "")
+# Set this to your WireGuard interface IP (e.g. 10.8.0.1). Defaults to
+# loopback — safe but unreachable over the VPN until configured. Never use
+# 0.0.0.0: the app must not listen on public interfaces.
+WEB_BIND_HOST = os.getenv("WEB_BIND_HOST", "127.0.0.1")
+try:
+    WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+except ValueError:
+    WEB_PORT = 8080
 
 # Logging configuration
 LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_LOG_DIR))).expanduser()

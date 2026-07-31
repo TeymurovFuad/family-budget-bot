@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+{% block content %}
+<h1>Summary <span class="muted">({{ currency }})</span></h1>
+{% for c in cards %}
+<div class="card">
+  <h2>{{ c.label }}</h2>
+  <p class="muted">{{ c.start.isoformat() }} → {{ c.end.isoformat() }}</p>
+  <dl>
+    <dt>Income</dt><dd data-field="income">{{ "%.2f"|format(c.income) }}</dd>
+    <dt>Expenses</dt><dd data-field="expense">{{ "%.2f"|format(c.expense) }}</dd>
+    <dt>Savings</dt><dd data-field="savings">{{ "%.2f"|format(c.savings) }}</dd>
+    <dt>Net</dt><dd data-field="net">{{ "%.2f"|format(c.net) }}</dd>
+    <dt>Daily avg</dt><dd data-field="daily_avg">{{ "%.2f"|format(c.daily_avg) }}</dd>
+    <dt>Savings rate</dt><dd data-field="savings_rate">{{ "%.1f"|format(c.savings_rate * 100) }}%</dd>
+    {% if c.unaccounted is not none %}
+    <dt>Unaccounted</dt><dd data-field="unaccounted">{{ "%.2f"|format(c.unaccounted) }}</dd>
+    {% endif %}
+  </dl>
+</div>
+{% else %}
+<p>No data yet.</p>
+{% endfor %}
+{% endblock %}

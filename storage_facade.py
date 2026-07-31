@@ -1,6 +1,6 @@
 """
-storage_facade.py — the single storage interface future bot code will call
-(Cycle S1 Phase 1 foundation; unused by the running bot until Phase 2).
+storage_facade.py — the single storage interface the bot (and the S2 web UI)
+calls (Cycle S1 foundation, wired into the handlers in Phase 2).
 
 Backed by SQLite (sqlite_ops.py). Function signatures deliberately mirror
 today's Excel-backed call sites so the Phase 2 swap is mechanical:

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Transactions{% endblock %}
+{% block content %}
+<h1>Transactions <span class="muted">{{ month_label }}</span></h1>
+<form class="filters" method="get" action="/transactions"
+      hx-get="/transactions" hx-target="#txn-table" hx-swap="outerHTML"
+      hx-trigger="change">
+  <select name="person">
+    <option value="">All persons</option>
+    {% for p in persons %}
+    <option value="{{ p }}" {% if p == person %}selected{% endif %}>{{ p }}</option>
+    {% endfor %}
+  </select>
+  <select name="category">
+    <option value="">All categories</option>
+    {% for c in categories %}
+    <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Filter</button></noscript>
+</form>
+{% include "_txn_table.html" %}
+{% endblock %}
