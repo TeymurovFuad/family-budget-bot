@@ -37,19 +37,31 @@ def _clean(v):
     return v
 
 
-def df_row_to_txn(row, rates: dict[str, float]) -> TransactionRow:
+def _strip_injection_guard(desc):
+    """
+    Undo excel_schema.write_transaction_row's formula-injection guard: a
+    description starting with = + - @ is written to Excel with a leading '.
+    Strip it on import so the round trip (export → re-import) does not change
+    the description — and therefore the content_hash — of such rows.
+    """
+    if isinstance(desc, str) and desc[:1] == "'" and desc[1:2] in ("=", "+", "-", "@"):
+        return desc[1:]
+    return desc
+
+
+def df_row_to_txn(row, rates: dict[str, float], conn=None) -> TransactionRow:
     """Map one data.load_data() DataFrame row to a TransactionRow."""
     value = float(row["Value"])
     currency = str(_clean(row.get("Currency")) or settings.DISPLAY_CURRENCY).strip().upper()
     value_base, rate_used = sqlite_ops.compute_value_base(
-        value, currency, rates, settings.DISPLAY_CURRENCY)
+        value, currency, rates, settings.DISPLAY_CURRENCY, conn=conn)
 
     date = _clean(row.get("Date"))
     if hasattr(date, "date"):
         date = date.date()
     date_modified = _clean(row.get("Date Modified (UTC)"))
 
-    return TransactionRow(
+    txn = TransactionRow(
         date=date.isoformat() if date is not None else None,
         year=int(row["Year"]),
         month=_clean(row.get("Month")),
@@ -60,12 +72,19 @@ def df_row_to_txn(row, rates: dict[str, float]) -> TransactionRow:
         type=_clean(row.get("Type")),
         category=_clean(row.get("Category")),
         person=_clean(row.get("Person")),
-        description=_clean(row.get("Description")),
+        description=_strip_injection_guard(_clean(row.get("Description"))),
         is_recurring=bool(_clean(row.get("IsRecurring")) or False),
         is_done=bool(row.get("IsDone", True)),
         date_modified_utc=str(date_modified) if date_modified is not None else None,
         source=TransactionSource.EXCEL_IMPORT,
     )
+    # Hash over the raw source values (including a possibly-None
+    # date_modified_utc) so re-running the import is idempotent —
+    # insert_transaction must not stamp a fresh timestamp into the hash.
+    txn.content_hash = sqlite_ops.content_hash_for_row(
+        txn.date, txn.value, txn.currency, txn.type,
+        txn.category, txn.person, txn.description, txn.date_modified_utc)
+    return txn
 
 
 def run_import(db_path=None, dry_run: bool = False) -> dict:
@@ -91,11 +110,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
             conn.close()
         for _, row in df.iterrows():
             txn = df_row_to_txn(row, rates)
-            h = sqlite_ops.content_hash_for_row(
-                txn.date, txn.value, txn.currency, txn.type,
-                txn.category, txn.person, txn.description,
-                txn.date_modified_utc)
-            stats["skipped" if h in existing else "inserted"] += 1
+            stats["skipped" if txn.content_hash in existing else "inserted"] += 1
         return stats
 
     conn = sqlite_ops.init_db(db_path)
@@ -103,7 +118,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
         count_sql = f"SELECT COUNT(*) FROM {sqlite_ops.TABLE_TRANSACTIONS}"
         before = conn.execute(count_sql).fetchone()[0]
         for _, row in df.iterrows():
-            sqlite_ops.insert_transaction(conn, df_row_to_txn(row, rates))
+            sqlite_ops.insert_transaction(conn, df_row_to_txn(row, rates, conn=conn))
         after = conn.execute(count_sql).fetchone()[0]
         stats["inserted"] = after - before
         stats["skipped"] = stats["total"] - stats["inserted"]

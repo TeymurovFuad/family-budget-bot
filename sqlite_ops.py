@@ -112,10 +112,13 @@ def init_db(db_path) -> sqlite3.Connection:
 #     excel_schema.load_currency_rates_from_path), so we upper() the code.
 #   - an unknown currency makes the Excel formula error (#N/A); here we fall
 #     back to rate 1.0 so a row is never lost, mirroring data.load_data()'s
-#     fallback `rates.get(ccy.upper(), 1.0)`.
+#     fallback `rates.get(ccy.upper(), 1.0)`. When that fallback fires and a
+#     connection is provided, the event is recorded in sync_log so a typo'd
+#     currency is visible instead of silently valued at rate 1.0.
 
 
-def compute_value_base(value, currency, rates_dict, display_currency=None) -> tuple[float, float]:
+def compute_value_base(value, currency, rates_dict, display_currency=None,
+                       conn: "sqlite3.Connection | None" = None) -> tuple[float, float]:
     """Return (value_base, rate_used) for a transaction value in `currency`."""
     if display_currency is None:
         display_currency = settings.DISPLAY_CURRENCY
@@ -123,7 +126,13 @@ def compute_value_base(value, currency, rates_dict, display_currency=None) -> tu
     ccy = str(currency or "").strip().upper()
     if not ccy or ccy == str(display_currency).strip().upper():
         return value, 1.0
-    rate = float(rates_dict.get(ccy, 1.0))
+    if ccy not in rates_dict:
+        if conn is not None:
+            log_sync(conn, SyncDirection.IMPORT, SyncStatus.ERROR,
+                     f"unknown currency '{ccy}' — no rate found, fell back to "
+                     f"rate 1.0 (Excel VLOOKUP would be #N/A)")
+        return value, 1.0
+    rate = float(rates_dict[ccy])
     return value * rate, rate
 
 
@@ -169,13 +178,19 @@ def insert_transaction(conn: sqlite3.Connection, row_dict: "TransactionRow | dic
     """
     row = row_dict.to_db_dict() if isinstance(row_dict, TransactionRow) else dict(row_dict)
     if not row.get("content_hash"):
+        # Default date_modified_utc BEFORE hashing: it is part of the content
+        # hash, so two otherwise-identical bot rows written at different
+        # moments must not collide (and be silently dropped by ON CONFLICT DO
+        # NOTHING). When the caller supplies content_hash (the Excel importer,
+        # which hashes over the raw source values), date_modified_utc is
+        # stored exactly as given — even None — so re-imports stay idempotent.
+        if not row.get("date_modified_utc"):
+            row["date_modified_utc"] = datetime.now(timezone.utc).isoformat()
         row["content_hash"] = content_hash_for_row(
             row.get("date"), row.get("value"), row.get("currency"),
             row.get("type"), row.get("category"), row.get("person"),
             row.get("description"), row.get("date_modified_utc"),
         )
-    if not row.get("date_modified_utc"):
-        row["date_modified_utc"] = datetime.now(timezone.utc).isoformat()
     for flag in ("is_recurring", "is_done"):
         if row.get(flag) is not None:
             row[flag] = int(bool(row[flag]))

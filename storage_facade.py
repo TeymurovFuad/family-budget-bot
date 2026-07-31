@@ -43,7 +43,8 @@ def append_transaction(transaction) -> None:
     try:
         rates = sqlite_ops.load_rates_dict(conn)
         value_base, rate_used = sqlite_ops.compute_value_base(
-            row["value"], row.get("currency"), rates, settings.DISPLAY_CURRENCY)
+            row["value"], row.get("currency"), rates, settings.DISPLAY_CURRENCY,
+            conn=conn)
         date = row.get("date")
         sqlite_ops.insert_transaction(conn, TransactionRow(
             date=date.isoformat() if hasattr(date, "isoformat") else date,
@@ -136,7 +137,7 @@ def update_transaction_field(id: int, field, value=None, expected: dict | None =
             new_ccy = updates.get("currency", row["currency"])
             rates = sqlite_ops.load_rates_dict(conn)
             vb, rate = sqlite_ops.compute_value_base(
-                new_value, new_ccy, rates, settings.DISPLAY_CURRENCY)
+                new_value, new_ccy, rates, settings.DISPLAY_CURRENCY, conn=conn)
             updates.setdefault("value_base", vb)
             updates.setdefault("rate_used", rate)
         sqlite_ops.update_transaction(conn, id, updates)

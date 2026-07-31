@@ -67,6 +67,42 @@ def test_second_run_skips_duplicates(populated_excel, tmp_path):
         conn.close()
 
 
+def test_export_reimport_round_trip_adds_nothing(populated_excel, tmp_path, monkeypatch):
+    """Import → export → re-import must be a no-op (idempotent round trip)."""
+    import file_storage
+    from excel_export import generate_excel_from_sqlite
+
+    # Include a formula-injection description: written to Excel with a leading
+    # apostrophe guard, it must still round-trip to the same content_hash.
+    append_transactions_batch([
+        Transaction(date=datetime.date(2024, 8, 2), value=9.99, currency="PLN",
+                    transaction_type="Expense", category="Groceries",
+                    person="Alice", description="=SUM(A1:A9) sneaky"),
+    ])
+
+    db = tmp_path / "roundtrip.db"
+    first = run_import(db_path=db, dry_run=False)
+    assert first["inserted"] == 3
+
+    exported = tmp_path / "exported.xlsx"
+    generate_excel_from_sqlite(db, populated_excel, exported)
+
+    # Point the importer's reader at the freshly exported workbook.
+    monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", exported)
+    second = run_import(db_path=db, dry_run=False)
+    assert second["inserted"] == 0, "re-importing an export must not create duplicates"
+
+    conn = sqlite_ops.init_db(db)
+    try:
+        rows = sqlite_ops.list_transactions(conn)
+        assert len(rows) == 3
+        # The stored description carries no injection-guard apostrophe.
+        descs = {r["description"] for r in rows}
+        assert "=SUM(A1:A9) sneaky" in descs
+    finally:
+        conn.close()
+
+
 def test_dry_run_writes_nothing(populated_excel, tmp_path):
     db = tmp_path / "import.db"
     stats = run_import(db_path=db, dry_run=True)

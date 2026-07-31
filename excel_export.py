@@ -63,10 +63,19 @@ def generate_excel_from_sqlite(db_path, template_path, output_path) -> None:
         vbase_col = idx.get("value_base", 12)
 
         r = find_next_data_row(ws)
+        dm_col = None
         for row in rows:
             write_transaction_row(ws, r, _sqlite_row_to_excel_row(row), lu_range)
             # Override the VLOOKUP formula with the materialized value.
             ws.cell(r, vbase_col, row.get("value_base"))
+            # Override the write-time timestamp write_transaction_row stamps
+            # with the stored date_modified_utc, so re-importing this export
+            # reproduces the same content_hash (idempotent round trip).
+            if dm_col is None:
+                # Recompute after the first write: write_transaction_row
+                # creates the Date Modified header if the template lacks it.
+                dm_col = col_indices(ws, MasterDataSchema).get("date_modified", 13)
+            ws.cell(r, dm_col, row.get("date_modified_utc"))
             r += 1
 
         ensure_monthly_summary_rows_from_masterdata(wb)
