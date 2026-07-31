@@ -80,6 +80,19 @@ try:
 except ValueError:
     CYCLE_REPROMPT_MIN_AGE_DAYS = 20
 
+# SQLite primary store (Cycle S1) — foundation only, unused by the bot until
+# Phase 2 wires handlers to storage_facade.py.
+SQLITE_DB_PATH = Path(os.getenv("SQLITE_DB_PATH", str(DATA_DIR / "budget.db"))).expanduser()
+if not SQLITE_DB_PATH.is_absolute():
+    SQLITE_DB_PATH = PROJECT_ROOT / SQLITE_DB_PATH
+EXCEL_EXPORT_PATH = Path(os.getenv("EXCEL_EXPORT_PATH", str(DATA_DIR / "Expenses_Export.xlsx"))).expanduser()
+if not EXCEL_EXPORT_PATH.is_absolute():
+    EXCEL_EXPORT_PATH = PROJECT_ROOT / EXCEL_EXPORT_PATH
+try:
+    EXCEL_EXPORT_INTERVAL_MINUTES = int(os.getenv("EXCEL_EXPORT_INTERVAL_MINUTES", "15"))
+except ValueError:
+    EXCEL_EXPORT_INTERVAL_MINUTES = 15
+
 # Logging configuration
 LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_LOG_DIR))).expanduser()
 if not LOG_DIR.is_absolute():
