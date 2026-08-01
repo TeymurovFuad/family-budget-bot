@@ -1690,6 +1690,39 @@ Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
   rest of the code still assumes PLN. Locale-neutrality follow-up to the
   earlier PLN-hardcoding sweep.
 
+## Follow-up: PR #116 review notes (S3 web write path, 2026-08-02)
+
+### Architect
+
+- [ ] **`asyncio.get_event_loop()` deprecated** — used in 3 places in `storage_facade.py` (~lines 89, 132, 165); raises `RuntimeError` in Python 3.12+ inside an async context. Replace with `asyncio.get_running_loop()`. (`storage_facade.py`)
+- [ ] **`load_transactions()` now appends `_id` column** — audit all non-test callers for exact-column assertions before removing the column. One-time scan needed.
+
+### Reviewer
+
+- [ ] **`id` parameter shadows `builtins.id`** — in `_update_web_transaction_sync`, `_delete_web_transaction_sync`, and route handlers. Rename to `txn_id` or `row_id`.
+- [ ] **Late `from models import MONTH_NAMES` import in hot path** — import is inside `validate_web_transaction_form` in `validators.py`; move to top of file.
+- [ ] **Dead inner imports in `_conn()` in `web/routes/transactions.py`** — `sqlite_ops` and `settings` already imported at module level; remove the inner imports.
+
+### Tester
+
+- [ ] **`GET /transactions/{id}/row` has zero test coverage** — auth and 404 branch both untested.
+- [ ] **404 branches untested for all 4 `{id}` routes** — edit GET, delete-confirm GET, edit POST, delete POST.
+- [ ] **No auth-boundary test for any of the 7 new routes** — confirm `require_session` is enforced on each.
+- [ ] **`test_post_new_valid_returns_200_hx_trigger` does not verify DB insertion** — assert the row was actually written to SQLite.
+- [ ] **`test_post_edit_success_returns_row_fragment` does not verify DB update** — assert the field change landed in SQLite.
+- [ ] **Zero/negative amount edge cases not covered** in `validate_web_transaction_form` tests.
+
+### Designer
+
+- [ ] **`.btn--danger` text color hardcodes `light-dark(#ffffff, #1f2933)`** — replace with a token (`--danger-contrast`) or `var(--accent-contrast)`. (`web/static/style.css`)
+- [ ] **`var(--accent-soft)` used in `@keyframes edit-row-in`** — verify token is defined in base `style.css`; if absent, define it or replace with `color-mix(in srgb, var(--accent) 12%, var(--surface))`.
+- [ ] **Row Edit/Delete `aria-label` values are non-specific** — "Edit transaction" / "Delete transaction" are indistinguishable by screen-reader users; include description or category in the label.
+
+### TW
+
+- [ ] **`docs/architecture.md` has no route catalogue for the 6 new write routes** — add when next touching the architecture docs.
+- [ ] **`is_recurring` checkbox is silently dropped on add** — `_add_web_transaction_sync` hardcodes `False`; document the limitation or fix it.
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
