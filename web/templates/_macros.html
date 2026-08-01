@@ -4,9 +4,12 @@
 
 {# Render a money value. kind: 'pos' | 'neg' | 'save' | 'neutral'.
    The caller decides the kind (sign/semantics); this macro only renders.
-   pos/neg get an explicit +/- sign; save/neutral render unsigned. #}
-{% macro amount(value, kind='neutral', field=none) -%}
-<span class="amount amount--{{ kind }}"{% if field %} data-field="{{ field }}"{% endif %}>{{ '%+.2f'|format(value) if kind in ('pos', 'neg') else '%.2f'|format(value) }}</span>
+   pos/neg get an explicit +/- sign; save/neutral render unsigned.
+   signed=false keeps the pos/neg colour but drops the +/- prefix (stat
+   tiles whose label already carries the semantics). ccy appends a small
+   per-value currency code so switchable-currency pages stay unambiguous. #}
+{% macro amount(value, kind='neutral', field=none, ccy=none, signed=true) -%}
+<span class="amount amount--{{ kind }}"{% if field %} data-field="{{ field }}"{% endif %}>{{ '%+.2f'|format(value) if signed and kind in ('pos', 'neg') else '%.2f'|format(value) }}</span>{% if ccy %} <span class="amount-ccy">{{ ccy }}</span>{% endif %}
 {%- endmacro %}
 
 {# Prev / "Page X of Y" / Next. base_url must already carry the page's

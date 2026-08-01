@@ -25,10 +25,14 @@ router = APIRouter()
 
 
 def _typical_cycle_length(ledger: list) -> int | None:
-    """Median length in days of COMPLETED cycles; None with <2 boundaries."""
+    """
+    Median length in days of COMPLETED cycles; None with fewer than 2
+    completed cycles (i.e. <3 boundaries) — a single data point is not a
+    reliable "typical" length, so the progress bar is omitted instead.
+    """
     lengths = sorted((ledger[i + 1][0] - ledger[i][0]).days
                      for i in range(len(ledger) - 1))
-    if not lengths:
+    if len(lengths) < 2:
         return None
     mid = len(lengths) // 2
     if len(lengths) % 2:
