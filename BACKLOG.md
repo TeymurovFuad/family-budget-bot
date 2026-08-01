@@ -502,9 +502,20 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       display-currency preference (`web/currency.py`, signed cookie, display-only conversion —
       nothing persisted); shared design system extracted to `web/static/style.css`.
 - [ ] **Web UI redesign — page wiring:** Transactions (date-range picker, description search,
-      sortable columns, pagination), Summary (month/cycle navigation instead of always
-      "today"), Cycles (apply design system) — the three pages do not consume the foundation's
-      new params yet.
+      sortable columns, pagination) — does not consume the foundation's new params yet.
+      Summary + Cycles done (see below).
+- [x] **Web UI redesign — Summary + Cycles pages (v2 "Ledger"):** period navigation
+      (`?period=` prev/next + picker with date jump, disabled at boundaries), primary card
+      with stat hero/grid/proportion bar, previous-periods history; Cycles current-cycle
+      card with day hero + progress bar (only when a typical length is derivable from
+      completed cycles), and every history row links to
+      `/transactions?date_from=&date_to=` for its range (fixes the dead-end finding).
+      **Also fixes the dead currency switcher**: the nav control previously set a session
+      cookie that nothing read back — Summary now converts every monetary value via
+      `get_session_currency` + `convert_from_base`, with net recomputed from converted
+      parts so displayed numbers reconcile (tests in `tests/test_web_summary_cycles_v2.py`);
+      golden-master parity kept — default route path still calls
+      `build_summary_context()` with no kwargs.
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict

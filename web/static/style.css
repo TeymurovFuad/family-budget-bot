@@ -181,3 +181,84 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
   font-weight: 600; background: var(--surface-2);
   border: 1px solid var(--border-soft); border-radius: 999px;
 }
+
+/* ── Period navigation (Summary) ───────────────────────────────────────── */
+
+.period-nav {
+  display: flex; gap: var(--space-2); align-items: center;
+  margin-bottom: var(--space-4);
+}
+.period-nav .btn { white-space: nowrap; }
+.period-nav .btn.disabled { opacity: .4; pointer-events: none; }
+.period-picker { flex: 1; text-align: center; position: relative; }
+.period-picker summary {
+  cursor: pointer; font-weight: 600; padding: .4rem .6rem;
+  border-radius: var(--radius-sm); display: inline-block;
+}
+.period-picker summary:hover { background: var(--surface-2); }
+.period-picker-panel {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 10;
+  margin-top: var(--space-1); padding: var(--space-3);
+  background: Canvas; border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 4px 16px
+    color-mix(in srgb, CanvasText 18%, transparent);
+  display: flex; flex-direction: column; gap: var(--space-2);
+  min-width: 16rem;
+}
+.period-picker-panel form { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.period-picker-panel select { flex: 1; }
+
+/* ── Stat hero / grid / bar (Summary + Cycles cards) ───────────────────── */
+
+.stat-hero { text-align: center; margin: var(--space-4) 0; }
+.stat-hero .amount, .stat-hero .stat-hero-value {
+  font-size: var(--fs-hero); font-weight: 700;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
+.stat-label {
+  display: block; font-size: var(--fs-xs); text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink-soft);
+}
+.stat-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--space-2);
+}
+.stat-tile {
+  background: var(--surface); border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+.stat-value {
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.stat-bar {
+  display: flex; height: .5rem; border-radius: 999px; overflow: hidden;
+  background: var(--surface-2); margin-top: var(--space-4);
+}
+.stat-bar span { display: block; height: 100%; }
+.stat-bar .seg-expense { background: var(--money-neg); }
+.stat-bar .seg-save { background: var(--money-save); }
+
+/* ── Summary history (previous periods) ────────────────────────────────── */
+
+.summary-history { margin-top: var(--space-5); }
+.summary-history .history-title { font-size: var(--fs-sm); margin: 0 0 var(--space-2); }
+.history-row {
+  display: flex; gap: var(--space-3); align-items: baseline;
+  padding: .45rem .2rem; border-top: 1px solid var(--border-soft);
+  text-decoration: none; color: inherit; flex-wrap: wrap;
+}
+.history-row:hover { background: var(--surface); }
+.history-row .history-label { font-weight: 600; }
+.history-row .history-nums { margin-left: auto; }
+
+/* ── Cycles page ───────────────────────────────────────────────────────── */
+
+.cycle-progress {
+  height: .5rem; border-radius: 999px; overflow: hidden;
+  background: var(--surface-2); margin-top: var(--space-3);
+}
+.cycle-progress > span { display: block; height: 100%; background: var(--accent); }
+.date-num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+tr.current-row td { background: var(--surface); font-weight: 600; }
+.row-txn-link { font-size: var(--fs-xs); padding: .15rem .5rem; min-height: 0; }
