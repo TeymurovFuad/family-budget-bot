@@ -17,6 +17,9 @@
 <form class="toolbar" method="get" action="/transactions"
       hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
       hx-trigger="submit, change target:select">
+  {# Keep a non-default page size across filter changes (default is
+     deliberately never emitted, mirroring sort/per_page URL rules). #}
+  {% if per_page != per_page_default %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
   <input type="search" name="q" value="{{ q }}" placeholder="Search description&hellip;"
          aria-label="Search description"
          hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"

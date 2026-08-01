@@ -8,6 +8,7 @@ never PYTHONHASHSEED-dependent hash()).
 """
 
 import os
+import re
 import subprocess
 import sys
 import zlib
@@ -153,6 +154,34 @@ def test_data_theme_rendered_when_set(web_client):
     resp = web_client.get("/")
     assert 'data-theme="light"' in resp.text
     assert 'value="dark"' in resp.text
+
+
+# ── login page: theme tokens, no raw system colors ───────────────────────────
+
+def test_login_page_uses_tokens_not_canvas(web_client):
+    html = web_client.get("/login").text
+    # No raw system-color keywords left from before the light-dark()
+    # migration ("Canvas" also catches "CanvasText").
+    assert "Canvas" not in html
+    assert "var(--bg)" in html and "var(--ink)" in html
+    assert "light-dark(" in html
+    assert "color-scheme: light dark" in html
+
+
+# ── OS-preference coin flip (CSS-only) ────────────────────────────────────────
+# Actual @media behavior needs a real browser; a Python suite can only
+# assert the rule's presence and selector scoping, which we do here.
+
+def test_os_dark_coin_flip_rule_scoped_to_no_explicit_theme():
+    css = open("web/static/style.css", encoding="utf-8").read()
+    # Explicit user choice keeps its own rule…
+    assert '[data-theme="dark"] .theme-toggle svg { transform: scaleX(-1); }' in css
+    # …and the OS-preference rule only applies when NO explicit data-theme
+    # attribute exists, so it can never override the user's toggle.
+    assert re.search(
+        r'@media \(prefers-color-scheme: dark\) \{\s*'
+        r'html:not\(\[data-theme\]\) \.theme-toggle svg '
+        r'\{ transform: scaleX\(-1\); \}', css)
 
 
 # ── category colors: deterministic, process-stable ───────────────────────────

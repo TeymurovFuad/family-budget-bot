@@ -10,7 +10,8 @@ sqlite_ops — user input never lands in SQL text):
   - person/category are checked against reference data;
   - dates must parse as ISO dates;
   - sort is a fixed token → (sort_by, sort_dir) map;
-  - offset is a clamped integer.
+  - offset is a clamped integer;
+  - per_page must be one of PER_PAGE_OPTIONS, else the default.
 
 Default date range on a param-less first load: the current budget cycle
 when settings.BUDGET_CYCLE is on and a boundary exists, else the current
@@ -41,7 +42,12 @@ from web.currency import convert_from_base, load_rates
 
 router = APIRouter()
 
-PER_PAGE = 50
+# Rows-per-page whitelist. per_page is validated against this tuple BEFORE
+# it reaches storage_facade/sqlite_ops (whose `limit` param is a raw int
+# with no validation of its own) — anything off-list falls back to the
+# default, same posture as every other param on this route.
+PER_PAGE_OPTIONS = (25, 50, 100)
+PER_PAGE_DEFAULT = 50
 
 # Combined sort token → (sort_by column, sort_dir). Tokens are the only
 # accepted values; anything else falls back to the default. The columns
@@ -125,15 +131,19 @@ def _range_label(date_from: date | None, date_to: date | None, today: date) -> s
     return "all time"
 
 
-def _query_string(q, date_from, date_to, person, category, sort_key) -> str:
+def _query_string(q, date_from, date_to, person, category, sort_key,
+                  per_page=PER_PAGE_DEFAULT) -> str:
     """Canonical query string for pagination/chip-clear links. The date keys
-    are always present (present-but-empty means an explicit 'all time')."""
+    are always present (present-but-empty means an explicit 'all time');
+    sort and per_page appear only when non-default."""
     params = [("q", q), ("date_from", date_from), ("date_to", date_to),
               ("person", person), ("category", category)]
     pairs = [(k, v) for k, v in params
              if v or k in ("date_from", "date_to")]
     if sort_key != DEFAULT_SORT:
         pairs.append(("sort", sort_key))
+    if per_page != PER_PAGE_DEFAULT:
+        pairs.append(("per_page", per_page))
     return urlencode(pairs)
 
 
@@ -141,7 +151,8 @@ def _query_string(q, date_from, date_to, person, category, sort_key) -> str:
             dependencies=[Depends(require_session)])
 async def transactions(request: Request, q: str = "", date_from: str = "",
                        date_to: str = "", person: str = "", category: str = "",
-                       sort: str = DEFAULT_SORT, offset: int = 0):
+                       sort: str = DEFAULT_SORT, offset: int = 0,
+                       per_page: int = PER_PAGE_DEFAULT):
     today = datetime.now(settings.TIMEZONE).date()
     cycle_start = _current_cycle_start(today)
     ref = load_reference_data()
@@ -152,6 +163,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     category = category if category in ref["categories"] else ""
     q = str(q).strip()
     sort_key = sort if sort in SORT_OPTIONS else DEFAULT_SORT
+    per_page = per_page if per_page in PER_PAGE_OPTIONS else PER_PAGE_DEFAULT
     sort_by, sort_dir, _ = SORT_OPTIONS[sort_key]
 
     # Date range: absent params → defaults; present-but-empty → all time;
@@ -170,16 +182,16 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     total = count_transactions(filters or None,
                                date_from=d_from, date_to=d_to,
                                description_contains=q or None)
-    total_pages = max(1, ceil(total / PER_PAGE))
+    total_pages = max(1, ceil(total / per_page))
     offset = max(0, int(offset))
-    offset = min(offset, (total_pages - 1) * PER_PAGE)
-    page = offset // PER_PAGE + 1
+    offset = min(offset, (total_pages - 1) * per_page)
+    page = offset // per_page + 1
 
     df = load_transactions(filters or None,
                            date_from=d_from, date_to=d_to,
                            description_contains=q or None,
                            sort_by=sort_by, sort_dir=sort_dir,
-                           limit=PER_PAGE, offset=offset)
+                           limit=per_page, offset=offset)
 
     # Display currency: convert each row's stored base value into the
     # session currency (display-only; see web/currency.py).
@@ -217,7 +229,8 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
 
     date_from_str = d_from.isoformat() if d_from else ""
     date_to_str = d_to.isoformat() if d_to else ""
-    query = _query_string(q, date_from_str, date_to_str, person, category, sort_key)
+    query = _query_string(q, date_from_str, date_to_str, person, category,
+                          sort_key, per_page)
     base_url = f"/transactions?{query}"
 
     def _clear_url(**removed) -> str:
@@ -226,7 +239,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
         kept.update(removed)
         return "/transactions?" + _query_string(
             kept["q"], kept["date_from"], kept["date_to"],
-            kept["person"], kept["category"], sort_key)
+            kept["person"], kept["category"], sort_key, per_page)
 
     chips = []
     if q:
@@ -246,12 +259,25 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     } for key, label, p_from, p_to in _preset_ranges(today, cycle_start)]
     for p in presets:
         p["url"] = "/transactions?" + _query_string(
-            q, p["dates"][0], p["dates"][1], person, category, sort_key)
+            q, p["dates"][0], p["dates"][1], person, category, sort_key,
+            per_page)
     active_preset = next((p["key"] for p in presets
                           if p["dates"] == (date_from_str, date_to_str)), "")
 
     any_filter = bool(q or person or category
                       or (d_from, d_to) != _default_range(today, cycle_start))
+
+    # Current filter state for the rows-per-page form's hidden inputs —
+    # same emission rules as _query_string (dates always present, q/person/
+    # category only when set, sort only when non-default), so a plain
+    # non-JS submit of that form reproduces the canonical URL.
+    current_filters = {k: v for k, v in
+                       [("q", q), ("date_from", date_from_str),
+                        ("date_to", date_to_str), ("person", person),
+                        ("category", category)]
+                       if v or k in ("date_from", "date_to")}
+    if sort_key != DEFAULT_SORT:
+        current_filters["sort"] = sort_key
 
     ctx = {
         "rows": rows, "groups": groups, "grouped": grouped,
@@ -260,7 +286,9 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
         "date_from": date_from_str, "date_to": date_to_str,
         "sort": sort_key, "sort_options": SORT_OPTIONS,
         "total": total, "page": page, "total_pages": total_pages,
-        "per_page": PER_PAGE, "base_url": base_url,
+        "per_page": per_page, "per_page_options": PER_PAGE_OPTIONS,
+        "per_page_default": PER_PAGE_DEFAULT,
+        "current_filters": current_filters, "base_url": base_url,
         "range_label": _range_label(d_from, d_to, today),
         "chips": chips, "any_filter": any_filter,
         "presets": presets, "active_preset": active_preset,

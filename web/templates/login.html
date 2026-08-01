@@ -5,8 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Budget — Log in</title>
 <style>
-  body { margin: 0; font-family: system-ui, sans-serif; background: Canvas;
-         color: CanvasText; display: grid; place-items: center; min-height: 100vh; }
+  /* Standalone page (no base.html / style.css) — mirror the app's
+     light-dark() neutral tokens inline so the login screen matches the
+     rest of the UI instead of the browser's raw system colors. */
+  :root {
+    color-scheme: light dark;
+    --bg:  light-dark(#faf7f2, #14181d);
+    --ink: light-dark(#1f2933, #e8e6e1);
+  }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg);
+         color: var(--ink); display: grid; place-items: center; min-height: 100vh; }
   form { display: grid; gap: .75rem; width: min(20rem, 90vw); }
   input, button { font: inherit; padding: .6rem; }
   .error { color: #c0392b; }

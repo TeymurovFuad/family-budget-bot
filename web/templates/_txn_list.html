@@ -37,7 +37,8 @@
       {% for r in rows %}{{ txn_row(r, show_date=true) }}{% endfor %}
     </section>
   {% endif %}
-  {{ pagination(page, total_pages, base_url, '#txn-list', per_page) }}
+  {{ pagination(page, total_pages, base_url, '#txn-list', per_page,
+                per_page_options, '/transactions', current_filters) }}
 {% else %}
   <div class="empty">
     <p class="empty-title">No transactions match</p>
