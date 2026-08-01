@@ -153,6 +153,7 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
 .amount--pos  { color: var(--money-pos); }
 .amount--neg  { color: var(--money-neg); }
 .amount--save { color: var(--money-save); }
+.amount-ccy   { font-size: var(--fs-xs); color: var(--ink-soft); }
 
 /* ── Chips ─────────────────────────────────────────────────────────────── */
 

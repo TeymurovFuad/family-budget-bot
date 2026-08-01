@@ -191,6 +191,31 @@ def test_history_rows_are_converted_too(client):
     assert shown == pytest.approx(expected, abs=0.01)
 
 
+def test_unknown_rate_falls_back_to_honest_base_values(client, monkeypatch):
+    """Session currency with no known rate: show BASE values under the BASE
+    label — never a wrong number under a wrong currency label."""
+    import web.currency as currency_mod
+    import web.routes.summary as summary_mod
+    # Let POST /currency accept the code, but give summary no rate for it.
+    monkeypatch.setattr(currency_mod, "available_currencies",
+                        lambda: [str(settings.DISPLAY_CURRENCY), "XXX"])
+    monkeypatch.setattr(summary_mod, "load_rates", lambda: {})
+    resp = client.post("/currency", data={"currency": "XXX"},
+                       follow_redirects=False)
+    assert resp.status_code == 303
+
+    base = build_summary_context(today=TODAY)["cards"]
+    page = client.get("/").text
+    # (a) numbers are the untouched base-currency values for every card
+    assert _incomes(page) == [f"{c['income']:.2f}" for c in base]
+    f = _fields(page)
+    assert f["expense"] == pytest.approx(base[0]["expense"])
+    assert f["net"] == pytest.approx(base[0]["net"])
+    # (b) the label reverts to the base currency, not the unavailable one
+    assert f"({settings.DISPLAY_CURRENCY})" in page
+    assert "(XXX)" not in page and ">XXX<" not in page
+
+
 # ── Cycles page ──────────────────────────────────────────────────────────────
 
 def test_cycles_rows_link_to_transactions(client):
@@ -202,14 +227,34 @@ def test_cycles_rows_link_to_transactions(client):
     assert f"/transactions?date_from=2025-06-27&amp;date_to={TODAY.isoformat()}" in page
 
 
-def test_cycles_current_card_and_progress(client):
+def test_cycles_current_card_no_progress_from_single_completed_cycle(client):
+    """One completed cycle is a single data point — no 'typical' length yet."""
     page = client.get("/cycles").text
     assert "Current cycle" in page
     assert ">24<" in page  # day 24 of the Jun 27 cycle on Jul 20
-    # Exactly one completed cycle (30 days) → typical length derivable.
+    assert "cycle-progress" not in page
+    assert "Typical cycle" not in page
+    assert "current-row" in page
+
+
+def test_cycles_progress_from_two_completed_cycles(excel_path, monkeypatch):
+    """Two completed cycles (30d each) → typical length 30, bar rendered."""
+    from fastapi.testclient import TestClient
+    from web.app import create_app
+    record_cycle_starts_batch(
+        [date(2025, 4, 28), date(2025, 5, 28), date(2025, 6, 27)])
+    monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
+    monkeypatch.setattr(settings, "WEB_PASSWORD", "test-pass")
+    monkeypatch.setattr(settings, "WEB_SESSION_SECRET", "test-secret")
+    _freeze_today(monkeypatch)
+    client = TestClient(create_app())
+    client.post("/login", data={"password": "test-pass"}, follow_redirects=False)
+    page = client.get("/cycles").text
+    assert "Current cycle" in page
     assert "Typical cycle: 30 days" in page
     assert 'class="cycle-progress"' in page
-    assert "current-row" in page
+    # Day 24 of a typical 30-day cycle → 80%.
+    assert "width: 80%" in page
 
 
 def test_cycles_zero_recorded(excel_path, monkeypatch):

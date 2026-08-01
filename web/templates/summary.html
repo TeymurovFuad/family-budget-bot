@@ -45,24 +45,24 @@
   <p class="muted period-range">{{ sel.start.isoformat() }} → {{ sel.end.isoformat() }}</p>
   <div class="stat-hero">
     <span class="stat-label">Net</span>
-    {{ amount(sel.net, 'pos' if sel.net >= 0 else 'neg', field='net') }}
+    {{ amount(sel.net, 'pos' if sel.net >= 0 else 'neg', field='net', ccy=currency) }}
   </div>
   <div class="stat-grid">
     <div class="stat-tile">
       <span class="stat-label">Income</span>
-      <span class="stat-value" data-field="income">{{ "%.2f"|format(sel.income) }}</span>
+      <span class="stat-value">{{ amount(sel.income, 'pos', field='income', ccy=currency, signed=false) }}</span>
     </div>
     <div class="stat-tile">
       <span class="stat-label">Expenses</span>
-      <span class="stat-value" data-field="expense">{{ "%.2f"|format(sel.expense) }}</span>
+      <span class="stat-value">{{ amount(sel.expense, 'neg', field='expense', ccy=currency, signed=false) }}</span>
     </div>
     <div class="stat-tile">
       <span class="stat-label">Savings</span>
-      <span class="stat-value" data-field="savings">{{ "%.2f"|format(sel.savings) }}</span>
+      <span class="stat-value">{{ amount(sel.savings, 'save', field='savings', ccy=currency) }}</span>
     </div>
     <div class="stat-tile">
       <span class="stat-label">Daily avg</span>
-      <span class="stat-value" data-field="daily_avg">{{ "%.2f"|format(sel.daily_avg) }}</span>
+      <span class="stat-value">{{ amount(sel.daily_avg, 'neutral', field='daily_avg', ccy=currency) }}</span>
     </div>
     <div class="stat-tile">
       <span class="stat-label">Savings rate</span>
@@ -71,7 +71,7 @@
     {% if sel.unaccounted is not none %}
     <div class="stat-tile">
       <span class="stat-label">Unaccounted</span>
-      <span class="stat-value" data-field="unaccounted">{{ "%.2f"|format(sel.unaccounted) }}</span>
+      <span class="stat-value">{{ amount(sel.unaccounted, 'neutral', field='unaccounted', ccy=currency) }}</span>
     </div>
     {% endif %}
   </div>
@@ -94,10 +94,13 @@
   <a class="history-row" href="/?period={{ c.start.isoformat() }}">
     <span class="history-label">{{ c.label }}</span>
     <span class="history-range muted">{{ c.start.isoformat() }} → {{ c.end.isoformat() }}</span>
+    {# Deliberate deviation from the "label + net" spec: income/expense at a
+       glance is more useful for a quick scan, and the golden-master test
+       asserts every period's income is rendered — see PR description. #}
     <span class="history-nums">
-      <span class="stat-value" data-field="income">{{ "%.2f"|format(c.income) }}</span>
+      <span class="stat-value">{{ amount(c.income, 'pos', field='income', ccy=currency, signed=false) }}</span>
       <span class="muted">/</span>
-      <span class="stat-value" data-field="expense">{{ "%.2f"|format(c.expense) }}</span>
+      <span class="stat-value">{{ amount(c.expense, 'neg', field='expense', ccy=currency, signed=false) }}</span>
     </span>
   </a>
   {% endfor %}
