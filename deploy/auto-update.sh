@@ -26,11 +26,17 @@ venv/bin/pip install -r requirements.txt --quiet
 sudo systemctl restart "$SERVICE"
 echo "Deployed $(git rev-parse --short HEAD) and restarted $SERVICE"
 
-# The web UI is optional — only restart it if it's actually installed on this
-# host (setups without the web UI never enabled budget-web.service).
-if systemctl list-unit-files "${WEB_SERVICE}.service" --no-legend 2>/dev/null | grep -q .; then
-    sudo systemctl restart "$WEB_SERVICE"
-    echo "Also restarted $WEB_SERVICE"
+# The web UI is optional — only restart it if it's enabled on this host
+# (setups without the web UI never enabled budget-web.service). A restart
+# failure here must never abort the script or block notify_update() below —
+# git pull already succeeded, and the next timer run would short-circuit at
+# the LOCAL=REMOTE check above, so a hard failure here would be permanent.
+if systemctl is-enabled --quiet "${WEB_SERVICE}.service" 2>/dev/null; then
+    if sudo systemctl restart "$WEB_SERVICE"; then
+        echo "Also restarted $WEB_SERVICE"
+    else
+        echo "auto-update: failed to restart $WEB_SERVICE, continuing"
+    fi
 fi
 
 notify_update() {
