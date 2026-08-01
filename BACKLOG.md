@@ -495,6 +495,16 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
 
 ### Still pending
 
+- [x] **Web UI redesign — foundation (backend only):** `sqlite_ops.list_transactions` /
+      `storage_facade.load_transactions` extended with date-range filtering, description
+      search (parameterized `LIKE`), whitelisted sort column + direction, and `limit`/`offset`
+      pagination; matching `count_transactions` for page counts; session-cookie
+      display-currency preference (`web/currency.py`, signed cookie, display-only conversion —
+      nothing persisted); shared design system extracted to `web/static/style.css`.
+- [ ] **Web UI redesign — page wiring:** Transactions (date-range picker, description search,
+      sortable columns, pagination), Summary (month/cycle navigation instead of always
+      "today"), Cycles (apply design system) — the three pages do not consume the foundation's
+      new params yet.
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict

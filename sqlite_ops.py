@@ -238,32 +238,92 @@ def delete_transaction(conn: sqlite3.Connection, id: int) -> None:
 
 
 _FILTER_COLUMNS = ("year", "month", "category", "person", "type")
+_SORT_COLUMNS = frozenset({"date", "value", "category", "person", "description"})
+_SORT_DIRECTIONS = frozenset({"asc", "desc"})
 
 
-def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
-                      *, newest_first: bool = False,
-                      limit: int | None = None) -> list[dict]:
-    """
-    Return transactions as dicts, optionally filtered by year, month,
-    category, person, and/or type. Ordered by date then id (ascending by
-    default; both descending with newest_first=True). Pass limit to cap the
-    result — combined with newest_first=True this yields the N most recent
-    rows.
-    """
+def _build_where(filters: dict | None, date_from, date_to,
+                 description_contains) -> tuple[list[str], list]:
+    """Shared WHERE builder for list/count. Every value is a bind parameter."""
     where, params = [], []
     for key, val in (filters or {}).items():
         if key not in _FILTER_COLUMNS:
             raise ValueError(f"Unsupported filter: {key}")
         where.append(f"{key} = ?")
         params.append(val)
+    if date_from is not None and date_to is not None:
+        where.append("date BETWEEN ? AND ?")
+        params.extend([str(date_from), str(date_to)])
+    elif date_from is not None:
+        where.append("date >= ?")
+        params.append(str(date_from))
+    elif date_to is not None:
+        where.append("date <= ?")
+        params.append(str(date_to))
+    if description_contains is not None:
+        # SQLite LIKE is case-insensitive for ASCII only. Parameterized —
+        # the search term is never interpolated into the SQL text.
+        where.append("description LIKE ?")
+        params.append(f"%{description_contains}%")
+    return where, params
+
+
+def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
+                      *, newest_first: bool = False,
+                      limit: int | None = None,
+                      offset: int | None = None,
+                      date_from=None, date_to=None,
+                      description_contains: str | None = None,
+                      sort_by: str | None = None,
+                      sort_dir: str = "asc") -> list[dict]:
+    """
+    Return transactions as dicts, optionally filtered by year, month,
+    category, person, and/or type. Ordered by date then id (ascending by
+    default; both descending with newest_first=True). Pass limit to cap the
+    result — combined with newest_first=True this yields the N most recent
+    rows.
+
+    Extended filtering (Cycle S3 web-UI foundation, all backward-compatible):
+      date_from / date_to      — inclusive ISO-date range on `date`
+      description_contains     — substring LIKE match (ASCII case-insensitive,
+                                 SQLite default collation)
+      sort_by / sort_dir       — whitelisted column + direction; overrides
+                                 newest_first when given, id tie-breaker keeps
+                                 ordering stable
+      offset                   — pagination alongside limit
+    """
+    if sort_by is not None and sort_by not in _SORT_COLUMNS:
+        raise ValueError(f"Unsupported sort column: {sort_by}")
+    if sort_dir not in _SORT_DIRECTIONS:
+        raise ValueError(f"Unsupported sort direction: {sort_dir}")
+    where, params = _build_where(filters, date_from, date_to, description_contains)
     sql = f"SELECT * FROM {TABLE_TRANSACTIONS}"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY date DESC, id DESC" if newest_first else " ORDER BY date, id"
-    if limit is not None:
+    if sort_by is not None:
+        # sort_by/sort_dir are whitelist-validated above — never raw input.
+        direction = sort_dir.upper()
+        sql += f" ORDER BY {sort_by} {direction}, id {direction}"
+    else:
+        sql += " ORDER BY date DESC, id DESC" if newest_first else " ORDER BY date, id"
+    if limit is not None or offset is not None:
         sql += " LIMIT ?"
-        params.append(int(limit))
+        params.append(-1 if limit is None else int(limit))  # -1 = no limit (SQLite)
+        if offset is not None:
+            sql += " OFFSET ?"
+            params.append(int(offset))
     return [dict(r) for r in conn.execute(sql, params)]
+
+
+def count_transactions(conn: sqlite3.Connection, filters: dict | None = None,
+                       date_from=None, date_to=None,
+                       description_contains: str | None = None) -> int:
+    """Total row count for the same filter surface as list_transactions."""
+    where, params = _build_where(filters, date_from, date_to, description_contains)
+    sql = f"SELECT COUNT(*) FROM {TABLE_TRANSACTIONS}"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return conn.execute(sql, params).fetchone()[0]
 
 
 # ── Reference upserts ────────────────────────────────────────────────────────
