@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if session_theme(request) %} data-theme="{{ session_theme(request) }}"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,6 +26,18 @@
         {% endfor %}
       </select>
       <noscript><button type="submit">Set</button></noscript>
+    </form>
+    {# Theme toggle: plain POST + full-page reload, like the currency
+       switcher. No preference set ⇒ button targets "dark". #}
+    <form method="post" action="/theme" class="theme-toggle">
+      <button type="submit" name="theme" value="{{ 'light' if session_theme(request) == 'dark' else 'dark' }}"
+              aria-label="Switch to {{ 'light' if session_theme(request) == 'dark' else 'dark' }} theme"
+              title="Theme">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M8 1.5 A6.5 6.5 0 0 0 8 14.5 Z" fill="currentColor"/>
+        </svg>
+      </button>
     </form>
     <form method="post" action="/logout"><button type="submit">Log out</button></form>
   </div>

@@ -38,10 +38,14 @@
 {%- endmacro %}
 
 {# Small pill. With clear_url it becomes a removable filter chip with a
-   trailing "×" link that clears the filter. #}
-{% macro chip(text, clear_url=none) -%}
+   trailing "×" link that clears the filter. With cat_idx (0-7, from the
+   cat_color_idx filter) it becomes a color-coded category chip; filter
+   chips and other plain chips are unaffected. #}
+{% macro chip(text, clear_url=none, cat_idx=none) -%}
 {%- if clear_url -%}
 <span class="chip chip--filter">{{ text }}<a class="chip-clear" href="{{ clear_url }}" aria-label="Clear filter: {{ text }}">&times;</a></span>
+{%- elif cat_idx is not none -%}
+<span class="chip chip--cat" style="--cat: var(--cat-{{ cat_idx }})">{{ text }}</span>
 {%- else -%}
 <span class="chip">{{ text }}</span>
 {%- endif -%}
