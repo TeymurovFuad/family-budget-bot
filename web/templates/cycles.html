@@ -1,28 +1,44 @@
 {% extends "base.html" %}
 {% block title %}Cycles{% endblock %}
 {% block content %}
-<h1>Cycles</h1>
+<div class="page-head">
+  <h1>Cycles</h1>
+</div>
 {% if not enabled %}
 <p class="muted">Budget cycles are disabled (BUDGET_CYCLE=0) — reports use calendar months.</p>
 {% elif current %}
-<div class="card">
+<div class="card card-primary">
   <h2>Current cycle: {{ current.label }}</h2>
-  <p>Started {{ current.start.isoformat() }} — day {{ current.day }}.</p>
+  <p class="muted">Started <span class="date-num">{{ current.start.isoformat() }}</span></p>
+  <div class="stat-hero">
+    <span class="stat-label">Day</span>
+    <span class="stat-value stat-hero-value">{{ current.day }}</span>
+  </div>
+  {% if progress_pct is not none %}
+  <div class="cycle-progress" role="img"
+       aria-label="Day {{ current.day }} of a typical {{ typical_length }}-day cycle">
+    <span style="width: {{ progress_pct }}%"></span>
+  </div>
+  <p class="muted">Typical cycle: {{ typical_length }} days</p>
+  {% endif %}
 </div>
 {% else %}
 <p>No budget cycle recorded yet — use <code>/cycle started</code> in the bot.</p>
 {% endif %}
 {% if rows %}
+<div class="table-scroll">
 <table>
-  <thead><tr><th>Cycle</th><th>Span</th></tr></thead>
+  <thead><tr><th>Cycle</th><th>Span</th><th></th></tr></thead>
   <tbody>
   {% for r in rows %}
-    <tr>
-      <td>{{ r.label }}</td>
-      <td>{{ r.start.isoformat() }} → {{ r.end.isoformat() if r.end else "today" }}</td>
+    <tr{% if r.is_current %} class="current-row"{% endif %}>
+      <td><a href="{{ r.txn_url }}">{{ r.label }}</a></td>
+      <td class="date-num">{{ r.start.isoformat() }} → {{ r.end.isoformat() if r.end else "today" }}</td>
+      <td><a class="btn row-txn-link" href="{{ r.txn_url }}">Transactions</a></td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+</div>
 {% endif %}
 {% endblock %}

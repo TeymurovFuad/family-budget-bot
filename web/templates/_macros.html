@@ -5,8 +5,8 @@
 {# Render a money value. kind: 'pos' | 'neg' | 'save' | 'neutral'.
    The caller decides the kind (sign/semantics); this macro only renders.
    pos/neg get an explicit +/- sign; save/neutral render unsigned. #}
-{% macro amount(value, kind='neutral') -%}
-<span class="amount amount--{{ kind }}">{{ '%+.2f'|format(value) if kind in ('pos', 'neg') else '%.2f'|format(value) }}</span>
+{% macro amount(value, kind='neutral', field=none) -%}
+<span class="amount amount--{{ kind }}"{% if field %} data-field="{{ field }}"{% endif %}>{{ '%+.2f'|format(value) if kind in ('pos', 'neg') else '%.2f'|format(value) }}</span>
 {%- endmacro %}
 
 {# Prev / "Page X of Y" / Next. base_url must already carry the page's

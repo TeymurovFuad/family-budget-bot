@@ -508,9 +508,18 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       pagination (50/page), removable filter chips, and session-currency conversion of
       displayed amounts (fixes the previously dead nav currency switcher on this page).
       Plain-GET fallback throughout when JS/htmx is absent.
-- [ ] **Web UI redesign — page wiring, Summary + Cycles:** Summary (month/cycle
-      navigation instead of always "today"), Cycles (apply design system) — these two
-      pages do not consume the foundation's new params yet.
+- [x] **Web UI redesign — page wiring, Summary + Cycles:** period navigation
+      (`?period=` prev/next + picker with date jump, disabled at boundaries), primary card
+      with stat hero/grid/proportion bar, previous-periods history; Cycles current-cycle
+      card with day hero + progress bar (only when a typical length is derivable from
+      completed cycles), and every history row links to
+      `/transactions?date_from=&date_to=` for its range (fixes the dead-end finding).
+      **Also fixes the dead currency switcher on this page**: the nav control previously
+      set a session cookie that nothing read back — Summary now converts every monetary
+      value via `get_session_currency` + `convert_from_base`, with net recomputed from
+      converted parts so displayed numbers reconcile (tests in
+      `tests/test_web_summary_cycles_v2.py`); golden-master parity kept — default route
+      path still calls `build_summary_context()` with no kwargs.
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict
