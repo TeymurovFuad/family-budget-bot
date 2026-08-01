@@ -1,0 +1,42 @@
+{# _txn_list.html — the #txn-list fragment: transaction list + pagination.
+   Rendered inside <div id="txn-list"> on the full page, and returned alone
+   for HX-Request fragment swaps (innerHTML). Two render paths: date-grouped
+   with sticky day headers (date sorts) or a flat list with inline dates
+   (all other sorts). #}
+{% from "_macros.html" import amount, chip, pagination %}
+
+{%- macro txn_row(r, show_date=false) %}
+<div class="txn">
+  <div class="txn-main">
+    <div class="txn-desc">{{ r.description or r.category or 'Uncategorised' }}</div>
+    <div class="txn-sub">
+      {%- if r.category %}{{ chip(r.category) }}{% endif %}
+      <span>{{ r.person }}</span>
+      {%- if show_date %}<span class="txn-inline-date">{{ r.date_label }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="txn-amt">{{ amount(r.amount, r.kind) }} <span class="txn-ccy">{{ display_currency }}</span></div>
+</div>
+{%- endmacro %}
+
+{% if rows %}
+  {% if grouped %}
+    {% for g in groups %}
+    <section class="txn-group">
+      <h2 class="txn-date">{{ g.label }}</h2>
+      {% for r in g.rows %}{{ txn_row(r) }}{% endfor %}
+    </section>
+    {% endfor %}
+  {% else %}
+    <section class="txn-group txn-group--flat">
+      {% for r in rows %}{{ txn_row(r, show_date=true) }}{% endfor %}
+    </section>
+  {% endif %}
+  {{ pagination(page, total_pages, base_url, '#txn-list', per_page) }}
+{% else %}
+  <div class="empty">
+    <p class="empty-title">No transactions match</p>
+    <p class="empty-hint">Try widening the date range or clearing a filter.</p>
+    {% if any_filter %}<a class="btn" href="/transactions">Reset filters</a>{% endif %}
+  </div>
+{% endif %}

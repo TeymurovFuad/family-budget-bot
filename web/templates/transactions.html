@@ -1,23 +1,54 @@
 {% extends "base.html" %}
+{% from "_macros.html" import chip %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
-<h1>Transactions <span class="muted">{{ month_label }}</span></h1>
-<form class="filters" method="get" action="/transactions"
-      hx-get="/transactions" hx-target="#txn-table" hx-swap="outerHTML"
-      hx-trigger="change">
-  <select name="person">
-    <option value="">All persons</option>
-    {% for p in persons %}
-    <option value="{{ p }}" {% if p == person %}selected{% endif %}>{{ p }}</option>
-    {% endfor %}
-  </select>
-  <select name="category">
-    <option value="">All categories</option>
-    {% for c in categories %}
-    <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
-    {% endfor %}
-  </select>
+<div class="page-head">
+  <h1>Transactions</h1>
+  <span class="muted">{{ total }} transaction{{ '' if total == 1 else 's' }} &middot; {{ range_label }}</span>
+</div>
+
+{# One GET form: htmx-enhanced (change on selects/dates via the target:
+   filter so the search input's own debounced trigger doesn't double-fire),
+   degrades to a plain GET submit without JS. Offset is deliberately not a
+   form field — any filter/search/sort change resets to page 1; only the
+   pagination links carry offset. #}
+<form class="toolbar" method="get" action="/transactions"
+      hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
+      hx-trigger="change target:select, change target:input[type='date']">
+  <input type="search" name="q" value="{{ q }}" placeholder="Search description&hellip;"
+         aria-label="Search description"
+         hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
+         hx-trigger="input changed delay:400ms, search" hx-include="closest form">
+  <div class="toolbar-row">
+    <input type="date" name="date_from" value="{{ date_from }}" aria-label="From date">
+    <input type="date" name="date_to" value="{{ date_to }}" aria-label="To date">
+    <select name="person" aria-label="Person">
+      <option value="">All persons</option>
+      {% for p in persons %}
+      <option value="{{ p }}" {% if p == person %}selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+    <select name="category" aria-label="Category">
+      <option value="">All categories</option>
+      {% for c in categories %}
+      <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort" aria-label="Sort order">
+      {% for key, opt in sort_options.items() %}
+      <option value="{{ key }}" {% if key == sort %}selected{% endif %}>{{ opt[2] }}</option>
+      {% endfor %}
+    </select>
+    <a class="btn btn--ghost" href="/transactions">Reset</a>
+  </div>
   <noscript><button type="submit">Filter</button></noscript>
 </form>
-{% include "_txn_table.html" %}
+
+{% if chips %}
+<div class="chips">
+  {% for c in chips %}{{ chip(c.text, c.clear_url) }}{% endfor %}
+</div>
+{% endif %}
+
+<div id="txn-list">{% include "_txn_list.html" %}</div>
 {% endblock %}
