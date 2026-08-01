@@ -66,11 +66,14 @@ Test coverage gaps, module size, AI output contract, and tooling quality.
 - [x] **`CATEGORY_TYPE_HINTS` dict** — done: defined at `handlers/setup_conv.py:56`; used in `handlers/add_conv.py:15,70` to pre-select transaction type.
 - [x] **Monthly Summary sheet never updated by the bot** — done: `file_storage.py:420` calls `ensure_monthly_summary_rows_from_masterdata(wb)` after writing all batch rows, covering multi-month imports.
 
-### Group F — SQLite + web UI (deferred)
+### Group F — SQLite + web UI (S1/S2 shipped; S3 pending)
 
-Full SQLite shadow store and web UI — phased integration, deferred until bot core is stable.
+SQLite is now the bot's primary store (S1, PRs #96/#100/#97/#99/#98) and a
+read-only web UI is live (S2, PR #101). Remaining: web write path (S3a/S3b)
+and scheduled Excel export.
 
-See "Roadmap: Web UI + SQLite — phased integration" below for the full Cycle W1–W4 design.
+See "Roadmap: Web UI + SQLite — phased integration" below for status and the
+remaining work.
 
 ---
 
@@ -142,7 +145,7 @@ Six groups by file domain — agents A–E chain sequentially (each PR targets t
 | **C — Conversation handlers** | `handlers/add_conv.py`, `handlers/quick_conv.py`, `handlers/edit_conv.py`, `handlers/delete_conv.py` | /add default-and-confirm, quick-add one-tap recovery, recurring detection, person attribution, local fast-path quick-add, empty SALARY_CATEGORY fix |
 | **D — Reports + cycles** | `handlers/reports.py`, `handlers/cycle.py`, `cycles.py`, `scheduled_report.py` | /savings cycle-aware, lazy backfill, none-this-month, candidate window, past/entire-period walk, before-first-boundary, multi-salary picker, timezone fix, report chunking |
 | **E — Infra + scripts** | `scripts/`, `logger.py`, `bot.py` (wiring only) | Log retention, draft archival, magic numbers sweep, 300-line cap, recovery replay Date fix, off-peak batching |
-| **F — Web UI** | `web/` (new), `sqlite_ops.py` (shipped in PR #96, with `sqlite_types.py`, `storage_protocol.py`, `storage_facade.py`) | SQLite shadow store → read API + UI → web write path → flip SQLite primary (Cycles W1–W4) |
+| **F — Web UI** | `web/` (shipped in PR #101), `sqlite_ops.py` (shipped in PR #96, with `sqlite_types.py`, `storage_protocol.py`, `storage_facade.py`) | ~~SQLite shadow store → dual-write~~ superseded by direct cutover: S1 (SQLite primary) + S2 (read-only web UI) shipped; S3 web write path + scheduled Excel export pending |
 
 **Collision rules:**
 - `bot.py` — Group E only, wiring/constants changes only
@@ -454,78 +457,85 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       replies with a plain-text fallback would have surfaced the /help
       failure to the user on day one instead of silence. (`bot.py`)
 
-## Roadmap: Web UI + SQLite — phased integration (added 2026-07-26)
+## Roadmap: Web UI + SQLite — phased integration (added 2026-07-26; superseded and largely shipped 2026-07)
 
-Goal: a simple web UI that mirrors the Excel view, backed by SQLite, introduced
-incrementally so the bot never breaks and the household can switch gradually.
-Excel stays the source of truth until Cycle 4 explicitly flips it.
+Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
 
-Each cycle is a self-contained deliverable that ships value on its own.
-Cycles must be done in order — each depends on the previous.
+> **Plan change — direct cutover instead of dual-write.** The original
+> W1–W4 plan below (SQLite as a shadow/parallel store, gradual dual-write,
+> "Excel stays authoritative") was **abandoned partway through** in favor of
+> a direct cutover: one-time Excel → SQLite import, then all handlers
+> rewired to read/write SQLite via `storage_facade.py`. Excel is now an
+> import source / export target, not a live mirror. The work actually
+> shipped as cycles **S1** (storage) and **S2** (web UI); **S3** (web write
+> path) is next.
 
-> **Progress (PR #96, Cycle S1 Phase 1):** the storage foundation shipped ahead of W1 —
-> `sqlite_ops.py` (WAL schema: transactions/categories/persons/rates/goals/sync_log, table-name
-> constants, `sqlite_types.py` StrEnums + `TransactionRow` dataclass), `storage_facade.py`
-> (satisfies `storage_protocol.StorageBackend`, mirrors `data.load_data()` shape),
-> `scripts/import_excel_to_sqlite.py` (idempotent backfill via content_hash),
-> `excel_export.py` + `scripts/reconcile_sqlite_export.py`.
-> **Phase 2, Unit R1:** `handlers/reports.py` reads now go through
-> `storage_facade.load_transactions()` (golden-master tests prove reply text unchanged).
-> Other read paths and all write paths are still Excel-direct — remaining Phase 2 units
-> and W1's dual-write (or a direct flip per W4) are next.
+### Shipped
 
-> **Cycle S1 Phase 2 — cross-store visibility (read before deploying any single unit):**
-> Bulk imports (R4/PR #98) write to SQLite; full cross-handler visibility depends on
-> R1 (reports) and R3 (write-paths) also completing their SQLite migration — verify all
-> Phase 2 units have merged before relying on bulk-imported data appearing in reports or
-> being editable. R4 is internally consistent on its own (its dedup evidence now reads
-> from SQLite via `storage_facade.load_dedup_evidence`, so re-uploads of the same
-> statement are correctly flagged), but until R1/R3 land, Excel-backed `/report`,
-> `/cycle`, edit/delete, `/add`, and `/quick` will not see rows imported via `/bulk`.
+- [x] **S1 Phase 1 — SQLite foundation (PR #96):** `sqlite_ops.py` (WAL
+      schema: transactions/categories/persons/rates/goals/sync_log, table-name
+      constants), `sqlite_types.py` (StrEnums + `TransactionRow` dataclass),
+      `storage_facade.py` (satisfies `storage_protocol.StorageBackend`,
+      mirrors `data.load_data()` shape), `scripts/import_excel_to_sqlite.py`
+      (idempotent backfill via content_hash), `excel_export.py` +
+      `scripts/reconcile_sqlite_export.py`.
+- [x] **S1 Phase 2 — handlers rewired to `storage_facade` (direct cutover):**
+      - R1 (PR #100): `handlers/reports.py` reads via
+        `storage_facade.load_transactions()` — golden-master tests prove
+        reply text unchanged.
+      - R2 (PR #97): `handlers/cycle.py` + `handlers/misc.py`.
+      - R3 (PR #99): add/quick/edit/delete conversation handlers (write paths).
+      - R4 (PR #98): `handlers/bulk_conv.py` reference reads + dedup evidence
+        (`storage_facade.load_dedup_evidence`).
+- [x] **S2 — read-only web UI (PR #101):** FastAPI + HTMX + Jinja2 in `web/`
+      (`web/app.py`, `web/routes/` — transactions, summary, cycles), shared
+      password auth (`WEB_PASSWORD` + signed session via
+      `WEB_SESSION_SECRET`, fail-closed at startup), systemd unit
+      `deploy/budget-web.service`, WireGuard-only via `WEB_BIND_HOST`.
 
-### Cycle W1 — SQLite as a shadow/parallel store
-- [x] Design schema: `transactions` (mirrors MasterData), reference tables (categories, persons, rates, goals) — done in `sqlite_ops.py` (PR #96); `cycles` and `merchant_map` tables still pending.
-- [x] Add a `sqlite_ops.py` layer — done (PR #96): `init_db`, `insert_transaction`, `update_transaction`, `delete_transaction`, `list_transactions(filters)`, reference upserts, `log_sync`.
-- [ ] Wire dual-write: every `write_transaction_row` / `delete_transaction` / edit also writes to SQLite. Reads still come from Excel. Bot behaviour unchanged.
-- [x] Backfill script — done (PR #96) as `scripts/import_excel_to_sqlite.py`: re-runnable, `--dry-run`, content_hash skips duplicates.
-- [ ] CI: SQLite write failures are logged and non-fatal (Excel is still authoritative — a SQLite bug must never block a save).
-- Done when: SQLite stays in sync with Excel through normal bot usage for one week without divergence.
+### Still pending
 
-### Cycle W2 — Read API + minimal web UI (view only)
-- [ ] FastAPI (or Flask) micro-service (`web/app.py`) reading from SQLite only. Runs on the same VM, different port.
-- [ ] Three pages: Transactions list (filterable by month/category/person), Summary (mirrors /summary numbers), Cycles list.
-- [ ] Auth: single shared password (env var `WEB_PASSWORD`) — no multi-user, no OAuth.
-- [ ] Transactions list matches Excel exactly: same columns, same sort order, paginated.
-- [ ] Deploy: systemd unit `budget-web.service`, documented in `deploy/` alongside the bot service.
-- [x] Redesign foundation (backend only): `sqlite_ops.list_transactions` / `storage_facade.load_transactions`
-      extended with date-range filtering, description search (parameterized `LIKE`), whitelisted
-      sort column + direction, and `limit`/`offset` pagination; matching `count_transactions` for
-      page counts; session-cookie display-currency preference (`web/currency.py`, signed cookie,
-      display-only conversion — nothing persisted); shared design system extracted to
-      `web/static/style.css`. Page-level wiring (Transactions/Summary/Cycles redesigns) is a
-      separate follow-up — the three pages do not use these params yet.
-- Done when: the household can browse transactions in a browser and numbers match the bot's /summary.
+- [x] **Web UI redesign — foundation (backend only):** `sqlite_ops.list_transactions` /
+      `storage_facade.load_transactions` extended with date-range filtering, description
+      search (parameterized `LIKE`), whitelisted sort column + direction, and `limit`/`offset`
+      pagination; matching `count_transactions` for page counts; session-cookie
+      display-currency preference (`web/currency.py`, signed cookie, display-only conversion —
+      nothing persisted); shared design system extracted to `web/static/style.css`.
+- [ ] **Web UI redesign — page wiring:** Transactions (date-range picker, description search,
+      sortable columns, pagination), Summary (month/cycle navigation instead of always
+      "today"), Cycles (apply design system) — the three pages do not consume the foundation's
+      new params yet.
+- [ ] **S3a — add transaction via web UI**: same fields as /add, same
+      validation (reuse `validators.py`), writes through `storage_facade`.
+- [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict
+      detection (bot and web editing the same row between reads).
+- [ ] **Schedule `excel_export.py`** so the workbook becomes a live-updating
+      export instead of a one-time-import-then-frozen artifact (systemd timer
+      or in-bot job; verify with `scripts/reconcile_sqlite_export.py`).
+- [ ] Migrate the remaining Excel-direct paths: currency rates + budget
+      targets reads (`data.load_rates` / `load_budgets`), rates-refresh write
+      (`excel_ops.async_update_currency_rates`), and `scheduled_report.py`.
+- [ ] `cycles` and `merchant_map` tables in `sqlite_ops.py` (deferred from
+      PR #96).
+- [ ] **SQLite concurrency**: WAL mode enabled (`sqlite_ops.init_db`,
+      PR #96); still to verify bot + web server don't deadlock once the web
+      write path (S3) exists.
 
-### Cycle W3 — Web UI write path (add / edit / delete)
-- [ ] Add transaction form in the web UI — same fields as /add, same validation (reuse `validators.py`).
-- [ ] Edit and delete in the web UI — same row-lock semantics as the bot (`_excel_write_lock`).
-- [ ] Dual-write: web UI writes to SQLite first, then queues an Excel write (same `atomic_save` path as the bot). Recovery queue handles failures.
-- [ ] Conflict detection: if the same row was edited in Excel and the web UI between reads, surface a conflict warning.
-- Done when: a transaction added via web UI appears in the bot's /summary and in Excel.
+### Superseded (kept for history — do not implement)
 
-### Cycle W4 — SQLite as primary, Excel as export
-- [ ] Flip reads: bot reads from SQLite instead of Excel for all queries (`/summary`, `/report`, `/top`, etc.).
-- [ ] Excel becomes an export target: "Export to Excel" button in the web UI generates a fresh workbook from SQLite on demand.
-- [ ] Remove dual-write: bot writes to SQLite only; Excel is regenerated on export, not kept in sync.
-- [ ] Migration: run a final reconciliation to ensure SQLite and Excel match before flipping.
-- [ ] Retire `file_storage.py` Excel read paths (keep write path for export only).
-- Done when: the bot runs for two weeks reading from SQLite with no regressions; Excel export produces a correct workbook.
+The original phased plan: W1 dual-write shadow store ("every
+`write_transaction_row` also writes to SQLite, reads still come from Excel",
+"SQLite write failures non-fatal — Excel is still authoritative"), W2 read
+API + view-only UI, W3 web write path with dual-write to Excel, W4 flip
+reads to SQLite and retire dual-write. W2's scope shipped as S2; W4's
+"SQLite as primary, Excel as export" end-state was reached directly by
+S1 Phase 2 without ever wiring the W1/W3 dual-write. W3's user-facing scope
+survives as S3a/S3b above (minus dual-write).
 
-### Decisions (resolved 2026-07-26)
+### Decisions (resolved 2026-07-26, confirmed in what shipped)
 - [x] **UI framework**: HTMX + Jinja2 templates served by FastAPI. Server-side rendering, no JS framework — closest Python equivalent to Blazor/Razor Pages.
-- [x] **Hosting**: systemd service + Nginx reverse proxy on the same Oracle Cloud VM. No Docker — same pattern as the existing bot service.
-- [x] **Access**: WireGuard VPN. No public web surface. Phone and laptop connect via WireGuard app (QR code setup). Web UI only reachable inside the VPN tunnel.
-- [ ] **SQLite concurrency**: WAL mode enabled (`sqlite_ops.init_db`, PR #96); still to verify bot + web server don't deadlock under concurrent writes.
+- [x] **Hosting**: systemd service (`deploy/budget-web.service`) on the same Oracle Cloud VM. No Docker — same pattern as the existing bot service.
+- [x] **Access**: WireGuard VPN. No public web surface. Phone and laptop connect via WireGuard app (QR code setup). Web UI only reachable inside the VPN tunnel (`WEB_BIND_HOST` = WireGuard interface IP).
 
 ---
 
