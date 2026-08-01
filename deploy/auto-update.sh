@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# auto-update.sh — pull-and-restart the bot only when the remote branch moved.
-# Runs from a systemd timer (see budget-bot-update.timer). Safe to run manually.
+# auto-update.sh — pull-and-restart the bot (and the web UI, if installed)
+# only when the remote branch moved. Runs from a systemd timer (see
+# budget-bot-update.timer). Safe to run manually.
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/home/ubuntu/budget-bot}"
 SERVICE="${SERVICE:-budget-bot}"
+WEB_SERVICE="${WEB_SERVICE:-budget-web}"
 
 cd "$REPO_DIR"
 
@@ -23,6 +25,13 @@ git pull --ff-only origin "$BRANCH"
 venv/bin/pip install -r requirements.txt --quiet
 sudo systemctl restart "$SERVICE"
 echo "Deployed $(git rev-parse --short HEAD) and restarted $SERVICE"
+
+# The web UI is optional — only restart it if it's actually installed on this
+# host (setups without the web UI never enabled budget-web.service).
+if systemctl list-unit-files "${WEB_SERVICE}.service" --no-legend 2>/dev/null | grep -q .; then
+    sudo systemctl restart "$WEB_SERVICE"
+    echo "Also restarted $WEB_SERVICE"
+fi
 
 notify_update() {
     local env_file="$REPO_DIR/.env"
