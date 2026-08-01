@@ -24,6 +24,7 @@ class TransactionSource(StrEnum):
     """transactions.source — where a row entered the store."""
     BOT = "bot"
     EXCEL_IMPORT = "excel_import"
+    WEB = "web"
 
 
 class SyncDirection(StrEnum):

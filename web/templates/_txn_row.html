@@ -1,0 +1,24 @@
+{# _txn_row.html — Read-only transaction row fragment. #}
+<div class="txn" id="txn-{{ id }}">
+  <div class="txn-main">
+    <div class="txn-desc">{{ row.description or row.category or 'Uncategorised' }}</div>
+    <div class="txn-sub">
+      {%- if row.category %}<span class="chip">{{ row.category }}</span>{% endif %}
+      {%- if row.person %}<span>{{ row.person }}</span>{% endif %}
+      <span class="txn-inline-date">{{ (row.date or '')[:10] }}</span>
+    </div>
+  </div>
+  <div class="txn-amt">{{ row.value_base or row.value or 0 }} <span class="txn-ccy">{{ display_currency }}</span></div>
+  <div class="txn-row-actions">
+    <button type="button" class="btn-row-action"
+            hx-get="/transactions/{{ id }}/edit"
+            hx-target="#txn-{{ id }}"
+            hx-swap="outerHTML"
+            aria-label="Edit transaction">Edit</button>
+    <button type="button" class="btn-row-action btn-row-action--delete"
+            hx-get="/transactions/{{ id }}/delete-confirm"
+            hx-target="#txn-{{ id }}"
+            hx-swap="outerHTML"
+            aria-label="Delete transaction">Delete</button>
+  </div>
+</div>

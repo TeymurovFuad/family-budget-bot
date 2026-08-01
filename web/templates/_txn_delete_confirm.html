@@ -1,0 +1,18 @@
+{# _txn_delete_confirm.html — Delete confirmation strip fragment. #}
+<div class="txn-delete-confirm" id="txn-{{ id }}">
+  <p class="confirm-msg">
+    Delete <strong>{{ row.description or row.category or 'this transaction' }}</strong>?
+    <span class="confirm-amount">{{ row.value_base or row.value or 0 }}</span>
+  </p>
+  <form method="post" action="/transactions/{{ id }}/delete"
+        hx-post="/transactions/{{ id }}/delete"
+        hx-target="#txn-{{ id }}"
+        hx-swap="outerHTML">
+    <input type="hidden" name="lock_token" value="{{ row.date_modified_utc or '' }}">
+    <button type="button" class="btn btn--ghost"
+            hx-get="/transactions/{{ id }}/row"
+            hx-target="#txn-{{ id }}"
+            hx-swap="outerHTML">Cancel</button>
+    <button type="submit" class="btn btn--danger">Delete</button>
+  </form>
+</div>

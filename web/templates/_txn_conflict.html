@@ -1,0 +1,12 @@
+{# _txn_conflict.html — Optimistic-lock conflict banner fragment. #}
+<div class="txn-conflict" id="txn-{{ id }}">
+  <span class="conflict-icon" aria-hidden="true">&#9888;</span>
+  <div class="conflict-body">
+    <strong>Edit conflict</strong>
+    <p>{{ message or 'This transaction was modified by another session.' }}</p>
+    <button type="button" class="btn-reload"
+            hx-get="/transactions/{{ id }}/edit"
+            hx-target="#txn-{{ id }}"
+            hx-swap="outerHTML">Reload latest version</button>
+  </div>
+</div>

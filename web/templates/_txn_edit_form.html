@@ -1,0 +1,70 @@
+{# _txn_edit_form.html — Inline edit row fragment (HTMX target). #}
+<div class="txn-edit-row" id="txn-{{ row.id }}">
+  <form method="post" action="/transactions/{{ row.id }}/edit"
+        hx-post="/transactions/{{ row.id }}/edit"
+        hx-target="#txn-{{ row.id }}"
+        hx-swap="outerHTML">
+    <input type="hidden" name="lock_token" value="{{ row.date_modified_utc or '' }}">
+    <div class="txn-edit-fields">
+      <div class="form-field">
+        <label for="edit-date-{{ row.id }}">Date</label>
+        <input id="edit-date-{{ row.id }}" type="date" name="date"
+               value="{{ (row.date or '')[:10] }}"
+               class="{{ 'is-invalid' if errors.date else '' }}"
+               required>
+        {% if errors.date %}<span class="field-error">{{ errors.date }}</span>{% endif %}
+      </div>
+      <div class="form-field form-field--amount">
+        <label for="edit-amount-{{ row.id }}">Amount</label>
+        <input id="edit-amount-{{ row.id }}" type="text" name="amount"
+               value="{{ row.value or '' }}"
+               class="{{ 'is-invalid' if errors.amount else '' }}"
+               inputmode="decimal" required>
+        {% if errors.amount %}<span class="field-error">{{ errors.amount }}</span>{% endif %}
+      </div>
+      <div class="form-field">
+        <label for="edit-type-{{ row.id }}">Type</label>
+        <select id="edit-type-{{ row.id }}" name="type"
+                class="{{ 'is-invalid' if errors.type else '' }}">
+          {% for t in txn_types %}
+          <option value="{{ t }}" {% if row.type == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+        {% if errors.type %}<span class="field-error">{{ errors.type }}</span>{% endif %}
+      </div>
+      <div class="form-field form-field--desc">
+        <label for="edit-desc-{{ row.id }}">Description</label>
+        <input id="edit-desc-{{ row.id }}" type="text" name="description"
+               value="{{ row.description or '' }}">
+      </div>
+      <div class="form-field">
+        <label for="edit-cat-{{ row.id }}">Category</label>
+        <select id="edit-cat-{{ row.id }}" name="category">
+          <option value="">— none —</option>
+          {% for c in categories %}
+          <option value="{{ c }}" {% if row.category == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="edit-person-{{ row.id }}">Person</label>
+        <select id="edit-person-{{ row.id }}" name="person">
+          <option value="">— none —</option>
+          {% for p in persons %}
+          <option value="{{ p }}" {% if row.person == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="txn-edit-actions">
+      <button type="button" class="btn btn--ghost"
+              hx-get="/transactions/{{ row.id }}/row"
+              hx-target="#txn-{{ row.id }}"
+              hx-swap="outerHTML">Cancel</button>
+      <button type="submit" class="btn btn--primary">
+        Save
+        <span class="htmx-indicator" aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</div>

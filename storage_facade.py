@@ -17,8 +17,9 @@ This module structurally satisfies storage_protocol.StorageBackend — any
 future backend must expose the same five callables.
 """
 
+import asyncio
 import logging
-from datetime import date as _date
+from datetime import date as _date, datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -55,6 +56,10 @@ def _require_db() -> None:
 
 class RowMismatchError(Exception):
     """The row no longer matches the snapshot the caller captured — aborted."""
+
+
+class ConflictError(Exception):
+    """Optimistic lock mismatch — another writer modified the row first."""
 
 
 def _to_row_dict(transaction) -> dict:
@@ -302,6 +307,11 @@ def load_transactions(filters: dict | None = None, *,
         "_base":               r["value_base"],
     } for r in rows], columns=_DF_COLUMNS)
 
+    # "_id" carries the SQLite primary key for write-path operations (edit/delete).
+    # It lives outside _DF_COLUMNS so the golden master column test (which compares
+    # sqlite_df.columns to excel_df.columns) continues to pass.
+    df["_id"] = [r["id"] for r in rows]
+
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
     df["_base"] = pd.to_numeric(df["_base"], errors="coerce")
@@ -389,6 +399,120 @@ def load_dedup_evidence(start=None, end=None) -> dict:
     except Exception as e:
         log.warning("Could not load dedup evidence from SQLite: %s", e)
         return empty
+
+
+def _add_web_transaction_sync(fields: dict) -> int:
+    """Blocking insert for a web-sourced transaction. Returns the new row id."""
+    row = dict(fields)
+    row["source"] = TransactionSource.WEB
+    conn = _conn()
+    try:
+        rates = sqlite_ops.load_rates_dict(conn)
+        value = row.get("value", 0.0)
+        currency = row.get("currency") or settings.DISPLAY_CURRENCY
+        value_base, rate_used = sqlite_ops.compute_value_base(
+            value, currency, rates, settings.DISPLAY_CURRENCY, conn=conn)
+        txn_row = TransactionRow(
+            date=row.get("date"),
+            year=row.get("year"),
+            month=row.get("month"),
+            value=value,
+            currency=currency,
+            value_base=value_base,
+            rate_used=rate_used,
+            type=row.get("type"),
+            category=row.get("category"),
+            person=row.get("person"),
+            description=row.get("description"),
+            is_recurring=False,
+            is_done=True,
+            source=TransactionSource.WEB,
+        )
+        return sqlite_ops.insert_transaction(conn, txn_row)
+    finally:
+        conn.close()
+
+
+async def add_web_transaction(fields: dict) -> int:
+    """Insert a web-sourced transaction. Returns the new row id."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _add_web_transaction_sync, fields)
+
+
+def _update_web_transaction_sync(id: int, lock_token: str, fields: dict) -> None:
+    """Blocking update with BEGIN IMMEDIATE and optimistic-lock check."""
+    conn = _conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            f"SELECT date_modified_utc FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?",
+            (id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            raise KeyError(f"Transaction {id} not found.")
+        stored_token = row["date_modified_utc"] or ""
+        if stored_token != lock_token:
+            conn.rollback()
+            raise ConflictError(
+                f"Transaction {id} was modified by another writer. Reload and retry.")
+        updates = dict(fields)
+        updates["date_modified_utc"] = datetime.now(timezone.utc).isoformat()
+        bad = [k for k in updates if k not in sqlite_ops._TXN_COLUMNS]
+        if bad:
+            conn.rollback()
+            raise ValueError(f"Unknown transaction column(s): {bad}")
+        assignments = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(
+            f"UPDATE {sqlite_ops.TABLE_TRANSACTIONS} SET {assignments} WHERE id = ?",
+            [*updates.values(), id])
+        conn.commit()
+    except (ConflictError, KeyError, ValueError):
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+async def update_web_transaction(id: int, lock_token: str, fields: dict) -> None:
+    """Update a transaction with optimistic-lock check. Raises ConflictError on mismatch."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _update_web_transaction_sync, id, lock_token, fields)
+
+
+def _delete_web_transaction_sync(id: int, lock_token: str) -> None:
+    """Blocking delete with BEGIN IMMEDIATE and optimistic-lock check."""
+    conn = _conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            f"SELECT date_modified_utc FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?",
+            (id,)).fetchone()
+        if row is None:
+            conn.rollback()
+            raise KeyError(f"Transaction {id} not found.")
+        stored_token = row["date_modified_utc"] or ""
+        if stored_token != lock_token:
+            conn.rollback()
+            raise ConflictError(
+                f"Transaction {id} was modified by another writer. Reload and retry.")
+        conn.execute(
+            f"DELETE FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?", (id,))
+        conn.commit()
+    except (ConflictError, KeyError):
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+async def delete_web_transaction(id: int, lock_token: str) -> None:
+    """Delete a transaction with optimistic-lock check. Raises ConflictError on mismatch."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _delete_web_transaction_sync, id, lock_token)
 
 
 def load_reference_data() -> dict:

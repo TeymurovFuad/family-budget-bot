@@ -231,7 +231,9 @@ def test_load_transactions_matches_load_data(golden_env):
     excel_df = data.load_data().reset_index(drop=True)
     sqlite_df = storage_facade.load_transactions().reset_index(drop=True)
 
-    assert list(excel_df.columns) == list(sqlite_df.columns)
+    # "_id" is a private SQLite primary-key column for the web write path;
+    # it has no Excel equivalent — exclude it from the parity check.
+    assert list(excel_df.columns) == list(sqlite_df.drop(columns=["_id"], errors="ignore").columns)
     assert len(excel_df) == len(sqlite_df) == len(FIXTURE_TXNS)
 
     e_dates = pd.to_datetime(excel_df["Date"]).dt.date.tolist()

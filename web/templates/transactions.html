@@ -5,6 +5,14 @@
 <div class="page-head">
   <h1>Transactions</h1>
   <span class="muted">{{ total }} transaction{{ '' if total == 1 else 's' }} &middot; {{ range_label }}</span>
+  <button type="button" class="btn btn--primary btn--add-txn"
+          hx-get="/transactions/new"
+          hx-target="#modal-slot"
+          hx-swap="innerHTML"
+          aria-label="Add transaction">
+    <span class="btn-icon" aria-hidden="true">+</span>
+    <span class="btn-label">Add transaction</span>
+  </button>
 </div>
 
 {# One GET form: htmx-enhanced (submit + change on selects only — date
@@ -74,5 +82,9 @@
 </div>
 {% endif %}
 
-<div id="txn-list">{% include "_txn_list.html" %}</div>
+<div id="txn-list"
+     hx-trigger="txnSaved from:body"
+     hx-get="/transactions"
+     hx-target="#txn-list"
+     hx-swap="innerHTML">{% include "_txn_list.html" %}</div>
 {% endblock %}
