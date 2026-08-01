@@ -85,14 +85,35 @@ read from the Excel workbook — that migration is pending.
 ## Web UI (read-only)
 
 A read-only web UI lives in the `web/` package — FastAPI + HTMX + Jinja2,
-reading from the same SQLite database. Pages: transactions, summary, cycles
+reading from the same SQLite database, with a plain-GET fallback everywhere
+so it works without JavaScript. Pages: transactions, summary, cycles
 (`web/app.py`, `web/routes/`). It runs as a separate systemd service,
-`deploy/budget-web.service`, alongside the bot on the same VM.
+`deploy/budget-web.service`, alongside the bot on the same VM; the
+auto-update timer restarts it together with the bot when new code lands.
+
+What the pages offer:
+
+- **Transactions** — date-grouped ledger with sticky day headers, date-range
+  filtering (Apply button + preset chips: This cycle / This month / Last 30
+  days / This year / All time), description search, sortable columns, and
+  pagination (50 rows per page by default; 25/50/100 selectable).
+- **Summary** — period navigation (prev/next + picker), a hero Net figure
+  with stat tiles and an income/expense proportion bar, and links into the
+  filtered transactions list.
+- **Cycles** — current-cycle "Day N" card with a progress bar (once enough
+  completed cycles exist to derive a typical length), plus a history whose
+  rows link to the matching transactions date range.
+- **Display currency and light/dark theme** are switchable from the nav bar;
+  both are session-scoped preferences stored in the signed session cookie
+  (display-only — nothing is persisted server-side). Colors use CSS
+  `light-dark()` tokens, and categories get deterministic color-coding.
 
 It is intentionally not exposed publicly: bind it to a WireGuard interface
-IP via `WEB_BIND_HOST` (never `0.0.0.0`) and connect over the VPN. The app
-refuses to start unless both `WEB_PASSWORD` (shared login password) and
-`WEB_SESSION_SECRET` (session-cookie signing key) are set. Adding and
+IP via `WEB_BIND_HOST` (never `0.0.0.0`) and connect over the VPN — the
+`deploy/setup-wireguard-server.sh` and `deploy/add-wireguard-peer.sh`
+scripts set up the server and add phone/laptop peers (QR code for mobile).
+The app refuses to start unless both `WEB_PASSWORD` (shared login password)
+and `WEB_SESSION_SECRET` (session-cookie signing key) are set. Adding and
 editing transactions from the web UI is planned but not built yet — writes
 still go through the bot.
 

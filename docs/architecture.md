@@ -35,7 +35,25 @@ via `scripts/import_excel_to_sqlite.py` and can be regenerated via
 rates, budget targets, and `scheduled_report.py` still read the Excel
 workbook — migration pending. The read-only web UI (`web/`) reads the same
 database and runs as its own systemd service, `deploy/budget-web.service`,
-reachable only over WireGuard.
+reachable only over WireGuard (`deploy/setup-wireguard-server.sh` /
+`deploy/add-wireguard-peer.sh` set up the VPN); `deploy/auto-update.sh`
+restarts it alongside the bot when new code lands.
+
+**Web UI v2 (S2 redesign, PRs #104–#112):** the pages are a full "Ledger"
+design — Transactions with date-grouped sticky headers, date-range filter
+(Apply button + preset chips), description search, whitelisted sort, and
+paginated output (25/50/100 rows per page, default 50); Summary with
+period navigation and a stat hero; Cycles with a current-cycle progress
+card linking into filtered Transactions. Filtering/sort/pagination live in
+the query layer (`sqlite_ops.list_transactions` /
+`count_transactions` via `storage_facade.load_transactions`) — the SQLite
+schema itself was untouched by the redesign. Display currency and
+light/dark theme are per-session preferences carried in the signed session
+cookie (`web/currency.py`, `web/theme.py` — `POST /currency`, `POST
+/theme`); currency conversion is display-only and nothing is persisted
+server-side. Category chips are color-coded deterministically
+(`zlib.crc32` hash → 8-hue palette, `web/app.py`), and all colors are CSS
+`light-dark()` tokens in `web/static/style.css`.
 
 ---
 
@@ -323,6 +341,7 @@ gantt
 | **SQLite is primary** | Handler transaction reads/writes and reference lists go through `storage_facade.py` → `sqlite_ops.py` (WAL mode); Excel is import source / export target (rates and budget targets are still Excel-read — migration pending) |
 | **One facade** | `storage_facade.py` implements `storage_protocol.StorageBackend` and mirrors the `data.load_data()` DataFrame shape, so report code was rewired without behaviour changes (golden-master tests, PR #100) |
 | **Web UI is read-only and fail-closed** | `web/app.py` refuses to start unless `WEB_PASSWORD` and `WEB_SESSION_SECRET` are set; bind to a WireGuard IP via `WEB_BIND_HOST`, never `0.0.0.0` |
+| **Session cookie carries display prefs** | The signed session cookie holds the login flag plus per-session display currency and light/dark theme (`web/currency.py`, `web/theme.py`); conversion is display-only, nothing persisted server-side |
 | **No hardcoded lists** | Categories, currencies, types come from reference tables in SQLite (originally imported from the Lists sheet) |
 | **Single category list** | One unified category list for all transaction types (Expense, Income, Savings) |
 | **_base fallback** | If `Value (base)` is empty, recomputed from `Value × rate` |

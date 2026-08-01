@@ -69,8 +69,11 @@ Test coverage gaps, module size, AI output contract, and tooling quality.
 ### Group F — SQLite + web UI (S1/S2 shipped; S3 pending)
 
 SQLite is now the bot's primary store (S1, PRs #96/#100/#97/#99/#98) and a
-read-only web UI is live (S2, PR #101). Remaining: web write path (S3a/S3b)
-and scheduled Excel export.
+read-only web UI is live (S2): initial FastAPI+HTMX version (PR #101),
+WireGuard setup scripts (PR #102), auto-update restarting the web service
+(PR #105), and a full v2 "Ledger" redesign (PRs #104, #106–#112 — filters,
+search, sort, pagination, session currency + theme, colorful palette).
+Remaining: web write path (S3a/S3b) and scheduled Excel export.
 
 See "Roadmap: Web UI + SQLite — phased integration" below for status and the
 remaining work.
@@ -247,10 +250,17 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-07-27 — PRs through #50 merged; Run 3 Wave 1 complete)*
+> *(Last updated: 2026-08-01 — PRs through #112 merged; SQLite cutover (S1)
+> and the full web UI v2 redesign (S2) are shipped. See "Roadmap: Web UI +
+> SQLite" for what shipped per PR and what remains: S3a/S3b web write path,
+> scheduled Excel export, remaining Excel-direct reads, cycles/merchant_map
+> tables, SQLite concurrency verification.)*
 
 ### PR state at last update
-- **PRs #1–#50 merged.**
+- **PRs #1–#112 merged.** Highlights since the notes below were written:
+  S1 SQLite cutover (#96–#100), read-only web UI (#101), WireGuard scripts
+  (#102), docs pass (#103), web UI v2 redesign (#104, #106–#112),
+  auto-update restarts budget-web (#105). Details in the roadmap section.
 - **PR #50 merged 2026-07-27**: /setup onboarding — 7-step ConversationHandler
   (`handlers/setup_conv.py`): creates workbook from template, category add/rename,
   budget-per-category, currency setup, summary + rate fetch. Category types persisted
@@ -301,6 +311,9 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
+  0. **S3 — web write path** (S3a add, S3b edit/delete with optimistic
+     locking) + scheduled `excel_export.py` + remaining Excel-direct
+     migrations — see "Roadmap: Web UI + SQLite → Still pending".
   1. ~~Run 3 Wave 1 (PRs #47–#50)~~ — ✅ merged 2026-07-27.
   2. **Run 3 Wave 2 — infra/performance**: reference-data TTL cache, JSONL recovery
      queue, split file_storage, typed DeepSeek model, lost-update protection,
@@ -492,23 +505,30 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       password auth (`WEB_PASSWORD` + signed session via
       `WEB_SESSION_SECRET`, fail-closed at startup), systemd unit
       `deploy/budget-web.service`, WireGuard-only via `WEB_BIND_HOST`.
-
-### Still pending
-
-- [x] **Web UI redesign — foundation (backend only):** `sqlite_ops.list_transactions` /
+- [x] **WireGuard setup scripts (PR #102):** `deploy/setup-wireguard-server.sh`
+      (server install + config) and `deploy/add-wireguard-peer.sh` (add a
+      phone/laptop peer, QR code for mobile).
+- [x] **Docs pass for S1/S2 (PR #103):** README, `docs/architecture.md`, and
+      this roadmap updated for the SQLite cutover + initial web UI.
+- [x] **Auto-update restarts the web UI (PR #105):** `deploy/auto-update.sh`
+      also restarts `budget-web.service` (if installed) after a pull.
+- [x] **Web UI v2 redesign — foundation, backend only (PR #104):** `sqlite_ops.list_transactions` /
       `storage_facade.load_transactions` extended with date-range filtering, description
       search (parameterized `LIKE`), whitelisted sort column + direction, and `limit`/`offset`
       pagination; matching `count_transactions` for page counts; session-cookie
       display-currency preference (`web/currency.py`, signed cookie, display-only conversion —
       nothing persisted); shared design system extracted to `web/static/style.css`.
-- [x] **Web UI redesign — page wiring, Transactions:** v2 "Ledger" page — date-grouped
+- [x] **Web UI v2 — design tokens + shared Jinja macros (PR #106):** design-token
+      layer in `web/static/style.css` and shared macros in
+      `web/templates/_macros.html` — `amount()`, `pagination()`, `chip()`.
+- [x] **Web UI v2 redesign — page wiring, Transactions (PR #107):** v2 "Ledger" page — date-grouped
       list (sticky day headers; flat variant for non-date sorts), date-range picker
       (defaults to current cycle when `BUDGET_CYCLE=1`, else calendar month; cleared
       dates = all time), debounced description search, combined sort select, bottom
-      pagination (50/page), removable filter chips, and session-currency conversion of
+      pagination (50/page default; 25/50/100 selectable since PR #112), removable filter chips, and session-currency conversion of
       displayed amounts (fixes the previously dead nav currency switcher on this page).
       Plain-GET fallback throughout when JS/htmx is absent.
-- [x] **Web UI redesign — page wiring, Summary + Cycles:** period navigation
+- [x] **Web UI v2 redesign — page wiring, Summary + Cycles (PR #108; polish in PR #109):** period navigation
       (`?period=` prev/next + picker with date jump, disabled at boundaries), primary card
       with stat hero/grid/proportion bar, previous-periods history; Cycles current-cycle
       card with day hero + progress bar (only when a typical length is derivable from
@@ -520,7 +540,10 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       converted parts so displayed numbers reconcile (tests in
       `tests/test_web_summary_cycles_v2.py`); golden-master parity kept — default route
       path still calls `build_summary_context()` with no kwargs.
-- [x] **Web UI v2 — real-usage bug fixes (Transactions + Summary):** fixes for
+- [x] **Web UI v2 — Summary/Cycles polish (PR #109):** currency code shown
+      next to every converted value via the shared `amount()` macro;
+      cycle-progress card threshold corrected (requires 2+ completed cycles).
+- [x] **Web UI v2 — real-usage bug fixes, Transactions + Summary (PR #110):** fixes for
       breakage reported by a household member using the shipped v2 pages —
       (1) date filter silently not applying on mobile: date inputs no longer
       rely on the native picker's `change` event; always-visible Apply button
@@ -534,6 +557,24 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       with chevron; (5) Summary period-select/date-jump/nav links htmx-swap
       `#summary-body` via `hx-select` (no backend change, plain-GET fallback
       kept). Golden-master untouched.
+- [x] **Web UI v2 — colorful palette + theme (PR #111):** grayscale
+      `color-mix(CanvasText, Canvas)` neutrals replaced with explicit
+      `light-dark()` color tokens in `web/static/style.css` (richer color in
+      both schemes automatically); manual light/dark toggle (coin icon in the
+      nav, `POST /theme` in `web/theme.py`, same signed-session-cookie
+      mechanism as the currency switcher — unset = follow OS scheme);
+      deterministic category color-coding (8-hue palette keyed by
+      `zlib.crc32` of the category name — not Python's randomized `hash()` —
+      `web/app.py`).
+- [x] **Web UI v2 — rows-per-page + follow-ups (PR #112):** selectable page
+      size 25/50/100 (default 50, whitelist `PER_PAGE_OPTIONS` in
+      `web/routes/transactions.py`); `login.html` leftover raw
+      `Canvas`/`CanvasText` colors migrated to the token system; theme-toggle
+      coin now also flips under OS-preference-only dark mode, not just an
+      explicit user choice.
+
+### Still pending
+
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict
