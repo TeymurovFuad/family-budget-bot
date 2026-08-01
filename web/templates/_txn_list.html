@@ -6,7 +6,7 @@
 {% from "_macros.html" import amount, chip, pagination %}
 
 {%- macro txn_row(r, show_date=false) %}
-<div class="txn">
+<div class="txn" id="txn-{{ r.id }}">
   <div class="txn-main">
     <div class="txn-desc">{{ r.description or r.category or 'Uncategorised' }}</div>
     <div class="txn-sub">
@@ -16,6 +16,20 @@
     </div>
   </div>
   <div class="txn-amt">{{ amount(r.amount, r.kind) }} <span class="txn-ccy">{{ display_currency }}</span></div>
+  {%- if r.id %}
+  <div class="txn-row-actions">
+    <button type="button" class="btn-row-action"
+            hx-get="/transactions/{{ r.id }}/edit"
+            hx-target="#txn-{{ r.id }}"
+            hx-swap="outerHTML"
+            aria-label="Edit transaction">Edit</button>
+    <button type="button" class="btn-row-action btn-row-action--delete"
+            hx-get="/transactions/{{ r.id }}/delete-confirm"
+            hx-target="#txn-{{ r.id }}"
+            hx-swap="outerHTML"
+            aria-label="Delete transaction">Delete</button>
+  </div>
+  {%- endif %}
 </div>
 {%- endmacro %}
 

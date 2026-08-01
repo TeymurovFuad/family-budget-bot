@@ -299,3 +299,69 @@ def validate_parsed_row(
     normalized["person"] = normalized_person
     normalized["date"] = parsed_date
     return True, "", normalized, corrections
+
+
+# ── Web-form validation ────────────────────────────────────────────────────────
+
+def validate_web_transaction_form(data: dict) -> tuple[dict, dict]:
+    """
+    Validate and clean a web transaction form submission.
+
+    Returns (cleaned, errors).  errors is an empty dict on success.
+    Fields validated:
+      - date      : required, ISO parseable, not in the future
+      - amount    : required, parseable via parse_amount
+      - type      : required, one of Expense/Income/Savings
+      - category  : optional string
+      - person    : optional string
+      - description: optional string
+    """
+    errors: dict[str, str] = {}
+    cleaned: dict = {}
+
+    # date
+    raw_date = str(data.get("date") or "").strip()
+    if not raw_date:
+        errors["date"] = "Date is required."
+    else:
+        try:
+            parsed_date = date.fromisoformat(raw_date)
+            today = datetime.now(timezone.utc).date()
+            if parsed_date > today:
+                errors["date"] = "Date must not be in the future."
+            else:
+                cleaned["date"] = parsed_date.isoformat()
+                cleaned["year"] = parsed_date.year
+                from models import MONTH_NAMES
+                cleaned["month"] = MONTH_NAMES[parsed_date.month - 1]
+        except ValueError:
+            errors["date"] = "Date must be a valid ISO date (YYYY-MM-DD)."
+
+    # amount
+    raw_amount = data.get("amount", "")
+    if raw_amount == "" or raw_amount is None:
+        errors["amount"] = "Amount is required."
+    else:
+        try:
+            value, _ = parse_amount(raw_amount)
+            cleaned["value"] = value
+        except ValueError:
+            errors["amount"] = "Amount must be a valid number."
+
+    # type
+    raw_type = str(data.get("type") or "").strip()
+    valid_types = {"Expense", "Income", "Savings"}
+    if not raw_type:
+        errors["type"] = "Type is required."
+    elif raw_type not in valid_types:
+        errors["type"] = f"Type must be one of: {', '.join(sorted(valid_types))}."
+    else:
+        cleaned["type"] = raw_type
+
+    # optional fields
+    cleaned["category"] = str(data.get("category") or "").strip() or None
+    cleaned["person"] = str(data.get("person") or "").strip() or None
+    cleaned["description"] = str(data.get("description") or "").strip() or None
+    cleaned["currency"] = str(data.get("currency") or "").strip() or None
+
+    return cleaned, errors

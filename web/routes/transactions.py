@@ -31,12 +31,22 @@ from datetime import date, datetime, timedelta
 from math import ceil
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 
 import cycles
 import settings
-from storage_facade import count_transactions, load_reference_data, load_transactions
+from storage_facade import (
+    ConflictError,
+    add_web_transaction,
+    count_transactions,
+    delete_web_transaction,
+    load_reference_data,
+    load_transaction_by_id,
+    load_transactions,
+    update_web_transaction,
+)
+from validators import validate_web_transaction_form
 from web.auth import get_session_currency, require_session
 from web.currency import convert_from_base, load_rates
 
@@ -205,6 +215,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
         kind = _TYPE_KIND.get(r["Type"], "neutral")
         converted = convert_from_base(float(r["_base"]), display_currency, rates)
         rows.append({
+            "id": r["_id"] if "_id" in df.columns else None,
             "date": str(d)[:10],
             "date_label": _fmt_day(row_date, today) if row_date else str(d)[:10],
             # amount() renders pos/neg with an explicit %+.2f sign — pass
@@ -297,3 +308,187 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     template = ("_txn_list.html" if request.headers.get("HX-Request")
                 else "transactions.html")
     return request.app.state.templates.TemplateResponse(request, template, ctx)
+
+
+# ── GET /transactions/new ──────────────────────────────────────────────────────
+
+@router.get("/transactions/new", response_class=HTMLResponse,
+            dependencies=[Depends(require_session)])
+async def txn_new_form(request: Request):
+    ref = load_reference_data()
+    ctx = {
+        "errors": {},
+        "values": {},
+        "categories": ref["categories"],
+        "persons": ref["persons"],
+        "txn_types": ref["txn_types"],
+    }
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_form.html", ctx)
+
+
+# ── POST /transactions/new ─────────────────────────────────────────────────────
+
+@router.post("/transactions/new", response_class=HTMLResponse,
+             dependencies=[Depends(require_session)])
+async def txn_new_submit(
+    request: Request,
+    date: str = Form(""),
+    amount: str = Form(""),
+    type: str = Form(""),
+    category: str = Form(""),
+    person: str = Form(""),
+    description: str = Form(""),
+    currency: str = Form(""),
+):
+    data = {
+        "date": date, "amount": amount, "type": type,
+        "category": category, "person": person,
+        "description": description, "currency": currency or None,
+    }
+    cleaned, errors = validate_web_transaction_form(data)
+    if errors:
+        ref = load_reference_data()
+        ctx = {
+            "errors": errors,
+            "values": data,
+            "categories": ref["categories"],
+            "persons": ref["persons"],
+            "txn_types": ref["txn_types"],
+        }
+        return request.app.state.templates.TemplateResponse(
+            request, "_txn_form.html", ctx, status_code=422)
+    await add_web_transaction(cleaned)
+    from fastapi.responses import Response
+    resp = Response(status_code=200)
+    resp.headers["HX-Trigger"] = '{"txnSaved":true}'
+    return resp
+
+
+# ── GET /transactions/{id}/edit ────────────────────────────────────────────────
+
+@router.get("/transactions/{id}/edit", response_class=HTMLResponse,
+            dependencies=[Depends(require_session)])
+async def txn_edit_form(request: Request, id: int):
+    row = await load_transaction_by_id(id)
+    if row is None:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+    ref = load_reference_data()
+    ctx = {
+        "row": row,
+        "errors": {},
+        "categories": ref["categories"],
+        "persons": ref["persons"],
+        "txn_types": ref["txn_types"],
+    }
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_edit_form.html", ctx)
+
+
+# ── POST /transactions/{id}/edit ───────────────────────────────────────────────
+
+@router.post("/transactions/{id}/edit", response_class=HTMLResponse,
+             dependencies=[Depends(require_session)])
+async def txn_edit_submit(
+    request: Request,
+    id: int,
+    lock_token: str = Form(""),
+    date: str = Form(""),
+    amount: str = Form(""),
+    type: str = Form(""),
+    category: str = Form(""),
+    person: str = Form(""),
+    description: str = Form(""),
+    currency: str = Form(""),
+):
+    row = await load_transaction_by_id(id)
+    if row is None:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+
+    data = {
+        "date": date, "amount": amount, "type": type,
+        "category": category, "person": person,
+        "description": description, "currency": currency or None,
+    }
+    cleaned, errors = validate_web_transaction_form(data)
+    if errors:
+        ref = load_reference_data()
+        ctx = {
+            "row": {**row, **{"id": id}},
+            "errors": errors,
+            "categories": ref["categories"],
+            "persons": ref["persons"],
+            "txn_types": ref["txn_types"],
+        }
+        return request.app.state.templates.TemplateResponse(
+            request, "_txn_edit_form.html", ctx, status_code=422)
+
+    try:
+        await update_web_transaction(id, lock_token, cleaned)
+    except KeyError:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+    except ConflictError as exc:
+        ctx = {"id": id, "message": str(exc), "row": row}
+        return request.app.state.templates.TemplateResponse(
+            request, "_txn_conflict.html", ctx, status_code=409)
+
+    updated_row = await load_transaction_by_id(id)
+    display_currency = str(get_session_currency(request)).strip().upper()
+    ctx = {"row": updated_row, "id": id, "display_currency": display_currency}
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_row.html", ctx)
+
+
+# ── GET /transactions/{id}/row ─────────────────────────────────────────────────
+
+@router.get("/transactions/{id}/row", response_class=HTMLResponse,
+            dependencies=[Depends(require_session)])
+async def txn_row_fragment(request: Request, id: int):
+    row = await load_transaction_by_id(id)
+    if row is None:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+    display_currency = str(get_session_currency(request)).strip().upper()
+    ctx = {"row": row, "id": id, "display_currency": display_currency}
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_row.html", ctx)
+
+
+# ── GET /transactions/{id}/delete-confirm ─────────────────────────────────────
+
+@router.get("/transactions/{id}/delete-confirm", response_class=HTMLResponse,
+            dependencies=[Depends(require_session)])
+async def txn_delete_confirm(request: Request, id: int):
+    row = await load_transaction_by_id(id)
+    if row is None:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+    ctx = {"row": row, "id": id}
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_delete_confirm.html", ctx)
+
+
+# ── POST /transactions/{id}/delete ────────────────────────────────────────────
+
+@router.post("/transactions/{id}/delete", response_class=HTMLResponse,
+             dependencies=[Depends(require_session)])
+async def txn_delete_submit(
+    request: Request,
+    id: int,
+    lock_token: str = Form(""),
+):
+    try:
+        await delete_web_transaction(id, lock_token)
+    except KeyError:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+    except ConflictError as exc:
+        row = await load_transaction_by_id(id)
+        ctx = {"id": id, "message": str(exc), "row": row}
+        return request.app.state.templates.TemplateResponse(
+            request, "_txn_conflict.html", ctx, status_code=409)
+    return HTMLResponse(
+        f'<div id="txn-{id}" style="display:none" aria-hidden="true"></div>')

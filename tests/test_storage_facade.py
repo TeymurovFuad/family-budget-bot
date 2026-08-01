@@ -58,7 +58,8 @@ def test_dataframe_shape_matches_load_data(sqlite_db):
     expected = ["Date", "Year", "Month", "Value", "Type", "Category", "Person",
                 "Description", "IsRecurring", "IsDone", "Currency",
                 "Value (base)", "Date Modified (UTC)", "_base"]
-    assert list(df.columns) == expected
+    # "_id" is a private write-path column added for edit/delete; exclude from parity check.
+    assert list(df.drop(columns=["_id"], errors="ignore").columns) == expected
     assert str(df["Year"].dtype) == "Int64"
     assert df["IsDone"].dtype == bool
 

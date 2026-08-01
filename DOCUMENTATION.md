@@ -615,6 +615,23 @@ Example: moving to Azerbaijan.
 
 ---
 
+## Web UI
+
+Access requires a WireGuard VPN connection. Log in with the same password as the bot.
+
+### What you can do
+
+- Browse and filter transactions by date, person, category, or keyword
+- Add new transactions via the "+" button
+- Edit an existing transaction by clicking **Edit** on any row
+- Delete a transaction by clicking **Delete** and confirming
+
+### Conflict banner
+
+If you see "Transaction was modified by another writer. Reload and retry.", it means the transaction was changed between when you loaded the page and when you submitted. Click **Reload latest version** to fetch the current state, then re-apply your edit.
+
+---
+
 ## Hosting the Bot
 
 ### Railway (recommended)

@@ -1,0 +1,85 @@
+{# _txn_form.html — Add transaction modal form fragment (HTMX target). #}
+<dialog class="modal" id="txn-add-modal" aria-labelledby="txn-modal-title" aria-describedby="txn-modal-desc">
+  <div class="modal-header">
+    <h2 id="txn-modal-title">Add transaction</h2>
+    <p id="txn-modal-desc" class="visually-hidden">Fill in the fields and press Save to add a new transaction.</p>
+    <button type="button" class="modal-close-btn"
+            onclick="this.closest('dialog').close()"
+            aria-label="Close">&#10005;</button>
+  </div>
+  <form method="post" action="/transactions/new"
+        hx-post="/transactions/new"
+        hx-target="#txn-add-modal"
+        hx-swap="outerHTML">
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-field">
+          <label for="txn-date">Date</label>
+          <input id="txn-date" type="date" name="date"
+                 value="{{ values.date or '' }}"
+                 class="{{ 'is-invalid' if errors.date else '' }}"
+                 required>
+          {% if errors.date %}<span class="field-error">{{ errors.date }}</span>{% endif %}
+        </div>
+        <div class="form-field form-field--amount">
+          <label for="txn-amount">Amount</label>
+          <input id="txn-amount" type="text" name="amount"
+                 value="{{ values.amount or '' }}"
+                 class="{{ 'is-invalid' if errors.amount else '' }}"
+                 inputmode="decimal" required>
+          {% if errors.amount %}<span class="field-error">{{ errors.amount }}</span>{% endif %}
+        </div>
+        <div class="form-field">
+          <label for="txn-type">Type</label>
+          <select id="txn-type" name="type"
+                  class="{{ 'is-invalid' if errors.type else '' }}">
+            <option value="">— select —</option>
+            {% for t in txn_types %}
+            <option value="{{ t }}" {% if values.type == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+          {% if errors.type %}<span class="field-error">{{ errors.type }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-field form-field--desc">
+          <label for="txn-desc">Description</label>
+          <input id="txn-desc" type="text" name="description"
+                 value="{{ values.description or '' }}">
+        </div>
+        <div class="form-field">
+          <label for="txn-category">Category</label>
+          <select id="txn-category" name="category">
+            <option value="">— none —</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {% if values.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="txn-person">Person</label>
+          <select id="txn-person" name="person">
+            <option value="">— none —</option>
+            {% for p in persons %}
+            <option value="{{ p }}" {% if values.person == p %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn--ghost"
+              onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn--primary">
+        Save
+        <span class="htmx-indicator" aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+  <script>
+    (function() {
+      var dlg = document.getElementById('txn-add-modal');
+      if (dlg && typeof dlg.showModal === 'function') { dlg.showModal(); }
+    })();
+  </script>
+</dialog>
