@@ -302,3 +302,42 @@ def test_context_still_matches_cycle_totals(web_env):
         totals = cycle_totals(df, start, end)
         assert card["income"] == pytest.approx(totals["income"])
         assert card["expense"] == pytest.approx(totals["expense"])
+
+
+# ── Summary period controls: htmx enhancement + progressive fallback ────────
+
+def test_summary_period_forms_are_htmx_enhanced(client):
+    """Period-select and date-jump forms swap #summary-body via htmx
+    (hx-select lets the route keep returning the full page)."""
+    html = client.get("/").text
+    # The target/select/swap/push-url quartet sits once on the wrapper and
+    # is inherited by every descendant hx-get (htmx attribute inheritance).
+    wrapper = re.search(r'<div id="summary-body"[^>]*>', html)
+    assert wrapper
+    assert 'hx-target="#summary-body"' in wrapper.group(0)
+    assert 'hx-select="#summary-body"' in wrapper.group(0)
+    assert 'hx-swap="outerHTML"' in wrapper.group(0)
+    assert 'hx-push-url="true"' in wrapper.group(0)
+    forms = re.findall(r'<form method="get" action="/"[^>]*>', html)
+    assert len(forms) == 2
+    for form in forms:
+        assert 'hx-get="/"' in form
+    # Older/Newer + history links get hx-get too.
+    assert re.search(r'class="btn period-(prev|next)"[^>]*hx-get=', html)
+    assert re.search(r'class="history-row"[^>]*hx-get=', html)
+
+
+def test_summary_plain_get_period_and_jump_still_work(client):
+    """Progressive enhancement: plain non-htmx GETs still select periods."""
+    by_period = client.get("/?period=2025-05-28")
+    assert by_period.status_code == 200
+    assert "28 May" in by_period.text or "2025-05-28" in by_period.text
+    by_jump = client.get("/?date_from=2025-06-01")
+    assert by_jump.status_code == 200
+    assert "2025-05-28" in by_jump.text  # period containing the jump date
+
+
+def test_summary_period_label_is_disclosure_toggle(client):
+    html = client.get("/").text
+    assert 'class="period-picker-toggle"' in html
+    assert 'disclosure-chevron' in html

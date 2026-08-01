@@ -19,6 +19,11 @@
 </div>
 {%- endmacro %}
 
+{# Visible confirmation INSIDE the swapped fragment that the filter
+   applied — the page-head count is outside #txn-list and never updates
+   on an htmx swap. #}
+<p class="txn-count muted">Showing {{ rows|length }} of {{ total }} &middot; {{ range_label }}</p>
+
 {% if rows %}
   {% if grouped %}
     {% for g in groups %}

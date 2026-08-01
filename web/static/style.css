@@ -47,6 +47,9 @@ nav .nav-actions {
 nav form { margin: 0; }
 
 main { padding: var(--space-4); max-width: 40rem; margin: 0 auto; }
+@media (min-width: 48rem) {
+  main { max-width: 64rem; padding: var(--space-5); }
+}
 
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 th, td {
@@ -80,8 +83,8 @@ select, input, button {
   background: Canvas; border: 1px solid var(--border);
   border-radius: var(--radius-sm); min-height: 2.25rem;
 }
-input[type="date"] { -webkit-appearance: none; appearance: none; }
-select:focus-visible, input:focus-visible, button:focus-visible {
+select:focus-visible, input:focus-visible, button:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
 
@@ -179,10 +182,34 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
 .toolbar input[type="search"] { width: 100%; margin-bottom: var(--space-2); }
 .toolbar-row {
   display: flex; gap: var(--space-2); align-items: center;
-  overflow-x: auto; -webkit-overflow-scrolling: touch;
-  padding-bottom: var(--space-1); /* room for the scrollbar */
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
 }
-.toolbar-row > * { flex: 0 0 auto; }
+.toolbar-row > * { flex: 1 1 auto; min-width: 0; }
+.toolbar-row--dates input[type="date"] { flex: 1 1 8.5rem; }
+.toolbar-row--dates .range-sep { flex: 0 0 auto; color: var(--ink-soft); }
+.toolbar-row--dates .toolbar-apply { flex: 0 1 auto; }
+.toolbar-row--more .btn--ghost { flex: 0 0 auto; }
+
+/* Preset date-range chips — layout comes from the shared .chips row. */
+.chips.range-presets { margin-bottom: var(--space-2); }
+a.chip--preset { text-decoration: none; color: inherit; }
+a.chip--preset:hover { background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
+.chip--preset.is-active {
+  background: var(--accent); color: var(--accent-contrast);
+}
+
+/* Secondary filters: collapsed behind a disclosure on mobile,
+   always expanded (summary hidden) on desktop — pure CSS, no JS. */
+.more-filters > summary {
+  cursor: pointer; font-weight: 600; padding: var(--space-2) 0;
+}
+@media (min-width: 48rem) {
+  .more-filters > summary { display: none; }
+  .more-filters { display: contents; }
+}
+
+.txn-count { margin: 0 0 var(--space-2); }
 
 .chips {
   display: flex; gap: var(--space-2); flex-wrap: wrap;
@@ -210,6 +237,10 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
 }
 .txn-amt { text-align: right; white-space: nowrap; }
 .txn-ccy { font-size: var(--fs-xs); color: var(--ink-soft); }
+@media (min-width: 48rem) {
+  .txn { padding: var(--space-2); }
+  .txn-sub { font-size: var(--fs-sm); }
+}
 
 .empty { text-align: center; padding: var(--space-6) var(--space-4); }
 .empty-title { font-size: var(--fs-lg); font-weight: 600; margin: 0 0 var(--space-2); }
@@ -235,10 +266,16 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
 .period-nav .btn.disabled { opacity: .4; pointer-events: none; }
 .period-picker { flex: 1; text-align: center; position: relative; }
 .period-picker summary {
-  cursor: pointer; font-weight: 600; padding: .4rem .6rem;
-  border-radius: var(--radius-sm); display: inline-block;
+  cursor: pointer; font-weight: 600; padding: .4rem .8rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); display: inline-flex; align-items: center;
+  gap: var(--space-1); list-style: none;
 }
-.period-picker summary:hover { background: var(--surface-2); }
+.period-picker summary::-webkit-details-marker { display: none; }
+.period-picker summary:hover { background: var(--surface-2); border-color: var(--accent); }
+/* Shared by every <details> disclosure (period picker, more-filters). */
+.disclosure-chevron { font-size: var(--fs-xs); transition: transform .15s; }
+details[open] > summary .disclosure-chevron { transform: rotate(180deg); }
 .period-picker-panel {
   position: absolute; left: 50%; transform: translateX(-50%); z-index: 10;
   margin-top: var(--space-1); padding: var(--space-3);

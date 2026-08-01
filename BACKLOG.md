@@ -520,6 +520,20 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       converted parts so displayed numbers reconcile (tests in
       `tests/test_web_summary_cycles_v2.py`); golden-master parity kept — default route
       path still calls `build_summary_context()` with no kwargs.
+- [x] **Web UI v2 — real-usage bug fixes (Transactions + Summary):** fixes for
+      breakage reported by a household member using the shipped v2 pages —
+      (1) date filter silently not applying on mobile: date inputs no longer
+      rely on the native picker's `change` event; always-visible Apply button
+      (`hx-trigger="submit, change target:select"`), server-rendered preset
+      range chips (This cycle/This month/Last 30 days/This year/All time),
+      and a "Showing X of Y · range" confirmation line inside the swapped
+      `#txn-list` fragment; (2) desktop no longer capped at phone width
+      (`main` widens to 64rem at a 48rem breakpoint); (3) mobile filters wrap
+      + secondary filters behind a CSS-only `<details>` disclosure instead of
+      horizontal scroll; (4) Summary period label styled as a real button
+      with chevron; (5) Summary period-select/date-jump/nav links htmx-swap
+      `#summary-body` via `hx-select` (no backend change, plain-GET fallback
+      kept). Golden-master untouched.
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict

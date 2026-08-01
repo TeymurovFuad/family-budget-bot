@@ -248,6 +248,85 @@ def test_person_category_filters_still_work(client):
     assert 'chip--filter' in resp.text
 
 
+# ── Apply button + preset range chips (date-filter reliability fixes) ────────
+
+def test_apply_button_always_visible_and_dates_not_auto_applied(client):
+    html = client.get("/transactions").text
+    # Apply is a real, always-visible submit button (not inside <noscript>).
+    assert 'class="btn--primary toolbar-apply"' in html
+    assert "<noscript><button type=\"submit\">Filter" not in html
+    # Date inputs no longer auto-apply via htmx change events (the silent
+    # mobile failure); only submit + select changes trigger.
+    m = re.search(r'<form class="toolbar"[^>]*hx-trigger="([^"]*)"', html)
+    assert m and m.group(1) == "submit, change target:select"
+    assert "input[type='date']" not in (m.group(1) or "")
+
+
+def test_bug_scenario_plain_get_with_dates_filters(client):
+    """The exact reported bug: widening/narrowing the date range must apply
+    on a plain (non-JS, non-htmx) GET — the Apply button path."""
+    default = client.get("/transactions").text
+    filtered = client.get("/transactions", params={
+        "q": "", "date_from": "2024-06-10", "date_to": "2024-06-12",
+        "person": "", "category": "", "sort": "date_desc"}).text
+    assert _descriptions(filtered) == ["item 2", "item 1", "item 0"]
+    assert _descriptions(filtered) != _descriptions(default)
+    # Visible confirmation inside the swapped fragment.
+    assert "Showing 3 of 3" in filtered
+
+
+class _FrozenDatetime(__import__("datetime").datetime):
+    @classmethod
+    def now(cls, tz=None):
+        from datetime import datetime, time
+        return datetime.combine(date(2024, 6, 15), time(12, 0), tzinfo=tz)
+
+
+@pytest.fixture()
+def frozen_client(client, monkeypatch):
+    import web.routes.transactions as t
+    monkeypatch.setattr(t, "datetime", _FrozenDatetime)
+    return client
+
+
+def test_preset_chip_this_month_bounds(frozen_client):
+    html = frozen_client.get("/transactions").text
+    assert re.search(r'class="chip chip--preset[^"]*"\s+href="/transactions\?'
+                     r'[^"]*date_from=2024-06-01&amp;date_to=2024-06-30', html)
+
+
+def test_preset_chip_last_30_days_bounds(frozen_client):
+    html = frozen_client.get("/transactions").text
+    assert "date_from=2024-05-17&amp;date_to=2024-06-15" in html
+
+
+def test_preset_chip_this_year_and_all_time(frozen_client):
+    html = frozen_client.get("/transactions").text
+    assert "date_from=2024-01-01&amp;date_to=2024-12-31" in html
+    # All time = present-but-empty date params.
+    assert 'href="/transactions?date_from=&amp;date_to="' in html
+
+
+def test_active_preset_highlighted(frozen_client):
+    html = frozen_client.get(
+        "/transactions?date_from=2024-06-01&date_to=2024-06-30").text
+    assert 'chip--preset is-active' in html
+    assert ">This month</a>" in html.split("is-active", 1)[1][:500]
+    # A custom range highlights nothing.
+    custom = frozen_client.get(
+        "/transactions?date_from=2024-06-02&date_to=2024-06-30").text
+    assert "is-active" not in custom
+
+
+def test_preset_chips_preserve_other_filters(frozen_client):
+    html = frozen_client.get(
+        "/transactions?date_from=&date_to=&person=Alice&sort=value_desc").text
+    m = re.search(r'class="chip chip--preset[^"]*"\s+href="([^"]*)"', html)
+    assert m
+    assert "person=Alice" in m.group(1)
+    assert "sort=value_desc" in m.group(1)
+
+
 def test_unknown_person_category_ignored(client):
     resp = client.get("/transactions?date_from=&date_to=&person=Mallory&category=%27--")
     assert resp.status_code == 200

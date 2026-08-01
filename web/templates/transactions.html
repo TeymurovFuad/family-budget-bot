@@ -7,41 +7,62 @@
   <span class="muted">{{ total }} transaction{{ '' if total == 1 else 's' }} &middot; {{ range_label }}</span>
 </div>
 
-{# One GET form: htmx-enhanced (change on selects/dates via the target:
-   filter so the search input's own debounced trigger doesn't double-fire),
-   degrades to a plain GET submit without JS. Offset is deliberately not a
-   form field — any filter/search/sort change resets to page 1; only the
+{# One GET form: htmx-enhanced (submit + change on selects only — date
+   inputs deliberately do NOT auto-apply: unreliable native change events
+   on mobile date pickers meant filters silently never applied, so dates
+   go through the always-visible Apply button / Enter instead), degrades
+   to a plain GET submit without JS. Offset is deliberately not a form
+   field — any filter/search/sort change resets to page 1; only the
    pagination links carry offset. #}
 <form class="toolbar" method="get" action="/transactions"
       hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
-      hx-trigger="change target:select, change target:input[type='date']">
+      hx-trigger="submit, change target:select">
   <input type="search" name="q" value="{{ q }}" placeholder="Search description&hellip;"
          aria-label="Search description"
          hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
          hx-trigger="input changed delay:400ms, search" hx-include="closest form">
-  <div class="toolbar-row">
-    <input type="date" name="date_from" value="{{ date_from }}" aria-label="From date">
-    <input type="date" name="date_to" value="{{ date_to }}" aria-label="To date">
-    <select name="person" aria-label="Person">
-      <option value="">All persons</option>
-      {% for p in persons %}
-      <option value="{{ p }}" {% if p == person %}selected{% endif %}>{{ p }}</option>
-      {% endfor %}
-    </select>
-    <select name="category" aria-label="Category">
-      <option value="">All categories</option>
-      {% for c in categories %}
-      <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    <select name="sort" aria-label="Sort order">
-      {% for key, opt in sort_options.items() %}
-      <option value="{{ key }}" {% if key == sort %}selected{% endif %}>{{ opt[2] }}</option>
-      {% endfor %}
-    </select>
-    <a class="btn btn--ghost" href="/transactions">Reset</a>
+  {# Preset range chips: plain server-rendered links, the primary path for
+     common ranges — no dependence on the native date picker at all. #}
+  {# hx-target/hx-push-url once here, inherited by every chip's hx-get. #}
+  <div class="chips range-presets" role="group" aria-label="Date range"
+       hx-target="#txn-list" hx-push-url="true">
+    {% for p in presets %}
+    <a class="chip chip--preset{{ ' is-active' if p.key == active_preset }}"
+       href="{{ p.url }}" hx-get="{{ p.url }}">{{ p.label }}</a>
+    {% endfor %}
   </div>
-  <noscript><button type="submit">Filter</button></noscript>
+  <div class="toolbar-row toolbar-row--dates">
+    <input type="date" name="date_from" value="{{ date_from }}" aria-label="From date">
+    <span class="range-sep" aria-hidden="true">&ndash;</span>
+    <input type="date" name="date_to" value="{{ date_to }}" aria-label="To date">
+    <button type="submit" class="btn--primary toolbar-apply">Apply</button>
+  </div>
+  {# Secondary filters collapse behind a disclosure on mobile; CSS makes
+     them always visible on desktop. Inputs inside <details> remain part
+     of the enclosing form whether open or closed. #}
+  <details class="more-filters">
+    <summary>More filters <span class="disclosure-chevron" aria-hidden="true">&#9662;</span></summary>
+    <div class="toolbar-row toolbar-row--more">
+      <select name="person" aria-label="Person">
+        <option value="">All persons</option>
+        {% for p in persons %}
+        <option value="{{ p }}" {% if p == person %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+      <select name="category" aria-label="Category">
+        <option value="">All categories</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      <select name="sort" aria-label="Sort order">
+        {% for key, opt in sort_options.items() %}
+        <option value="{{ key }}" {% if key == sort %}selected{% endif %}>{{ opt[2] }}</option>
+        {% endfor %}
+      </select>
+      <a class="btn btn--ghost" href="/transactions">Reset</a>
+    </div>
+  </details>
 </form>
 
 {% if chips %}
