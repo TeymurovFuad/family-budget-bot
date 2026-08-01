@@ -308,6 +308,53 @@ def test_page_size_form_preserves_active_filters(client):
     assert re.search(r'value="25"\s+selected', form)
 
 
+def test_page_size_select_submits_without_htmx(big_client):
+    # The page-size form deliberately has no submit button, so without htmx
+    # the ONLY way it can ever submit is the select's own onchange fallback.
+    # Before this fix the form was unsubmittable when htmx wasn't vendored:
+    # changing "rows per page" silently did nothing. The window.htmx guard
+    # keeps the fallback inert when htmx IS loaded (no double request).
+    html = big_client.get("/transactions?date_from=&date_to=").text
+    form = re.search(r'<form method="get"[^>]*class="page-size-form".*?</form>',
+                     html, re.S).group(0)
+    assert 'onchange="if(!window.htmx)this.form.submit()"' in form
+    assert "<button" not in form  # auto-apply only — no manual Apply button
+
+
+def test_no_nested_forms_and_no_duplicate_ids(big_client):
+    # Nested <form> elements are invalid HTML and silently break form
+    # association in browsers; duplicate ids would make hx-target="#txn-list"
+    # ambiguous. Guard the real rendered DOM structure, not just attributes.
+    from html.parser import HTMLParser
+
+    class Checker(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.form_depth = 0
+            self.nested_forms = 0
+            self.ids = {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.ids[attrs["id"]] = self.ids.get(attrs["id"], 0) + 1
+            if tag == "form":
+                if self.form_depth > 0:
+                    self.nested_forms += 1
+                self.form_depth += 1
+
+        def handle_endtag(self, tag):
+            if tag == "form":
+                self.form_depth -= 1
+
+    for url in ("/transactions?date_from=&date_to=",
+                "/transactions?date_from=&date_to=&per_page=25&offset=25"):
+        checker = Checker()
+        checker.feed(big_client.get(url).text)
+        assert checker.nested_forms == 0
+        assert not {k: v for k, v in checker.ids.items() if v > 1}
+
+
 # ── currency conversion (the "dead control" regression test) ─────────────────
 
 def test_session_currency_converts_displayed_amounts(client):
