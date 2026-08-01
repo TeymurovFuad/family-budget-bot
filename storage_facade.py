@@ -261,16 +261,27 @@ _DF_COLUMNS = [
 ]
 
 
-def load_transactions(filters: dict | None = None) -> pd.DataFrame:
+def load_transactions(filters: dict | None = None, *,
+                      date_from=None, date_to=None,
+                      description_contains: str | None = None,
+                      sort_by: str | None = None, sort_dir: str = "asc",
+                      limit: int | None = None,
+                      offset: int | None = None) -> pd.DataFrame:
     """
     Return transactions as a DataFrame shape-compatible with data.load_data():
     same column names, plus the '_base' aggregation column, Year as Int64,
     IsDone as bool, rows without _base/Type/Year/Month dropped.
+
+    Keyword-only params pass straight through to sqlite_ops.list_transactions
+    (date range, description search, whitelisted sorting, pagination).
     """
     _require_db()
     conn = _conn()
     try:
-        rows = sqlite_ops.list_transactions(conn, filters)
+        rows = sqlite_ops.list_transactions(
+            conn, filters, date_from=date_from, date_to=date_to,
+            description_contains=description_contains,
+            sort_by=sort_by, sort_dir=sort_dir, limit=limit, offset=offset)
     finally:
         conn.close()
 
@@ -299,6 +310,21 @@ def load_transactions(filters: dict | None = None) -> pd.DataFrame:
     df = df.dropna(subset=["_base", "Type", "Year", "Month"])
     df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
     return df
+
+
+def count_transactions(filters: dict | None = None, *,
+                       date_from=None, date_to=None,
+                       description_contains: str | None = None) -> int:
+    """Total matching row count for pagination — same filter surface as
+    load_transactions minus sort/pagination."""
+    _require_db()
+    conn = _conn()
+    try:
+        return sqlite_ops.count_transactions(
+            conn, filters, date_from=date_from, date_to=date_to,
+            description_contains=description_contains)
+    finally:
+        conn.close()
 
 
 def load_dedup_evidence(start=None, end=None) -> dict:

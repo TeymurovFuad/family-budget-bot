@@ -4,29 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Budget — {% block title %}{% endblock %}</title>
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; font-size: 16px;
-         background: Canvas; color: CanvasText; }
-  nav { display: flex; gap: 1rem; padding: .75rem 1rem;
-        border-bottom: 1px solid color-mix(in srgb, CanvasText 20%, Canvas); }
-  nav a { text-decoration: none; color: inherit; font-weight: 600; }
-  nav form { margin-left: auto; }
-  main { padding: 1rem; max-width: 40rem; margin: 0 auto; }
-  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-  th, td { text-align: left; padding: .4rem .3rem;
-           border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, Canvas); }
-  td.num, th.num { text-align: right; white-space: nowrap; }
-  .card { border: 1px solid color-mix(in srgb, CanvasText 20%, Canvas);
-          border-radius: .5rem; padding: 1rem; margin-bottom: 1rem; }
-  .card h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
-  .card dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: 0; }
-  .card dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-  .filters { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-  select, input, button { font: inherit; padding: .4rem .6rem; }
-  .muted { opacity: .7; font-size: .85rem; }
-</style>
+<link rel="stylesheet" href="/static/style.css">
 {# htmx is vendored locally (VPN-only deployment, no CDN dependency).
    Place htmx.min.js into web/static/ at deploy time — see
    web/static/htmx.min.js placeholder. The filter form degrades gracefully
@@ -38,7 +16,19 @@
   <a href="/">Summary</a>
   <a href="/transactions">Transactions</a>
   <a href="/cycles">Cycles</a>
-  <form method="post" action="/logout"><button type="submit">Log out</button></form>
+  <div class="nav-actions">
+    {% set active_currency = session_currency(request) %}
+    <form method="post" action="/currency" class="currency-switcher">
+      <select name="currency" onchange="this.form.submit()"
+              aria-label="Display currency">
+        {% for ccy in available_currencies() %}
+        <option value="{{ ccy }}" {% if ccy == active_currency %}selected{% endif %}>{{ ccy }}</option>
+        {% endfor %}
+      </select>
+      <noscript><button type="submit">Set</button></noscript>
+    </form>
+    <form method="post" action="/logout"><button type="submit">Log out</button></form>
+  </div>
 </nav>
 <main>{% block content %}{% endblock %}</main>
 </body>

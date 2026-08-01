@@ -52,6 +52,35 @@ def require_session(request: Request) -> None:
         raise AuthRedirect()
 
 
+def _session_payload(request: Request) -> dict | None:
+    """Verified cookie payload as a dict, or None when absent/invalid.
+
+    Pre-currency cookies carry the plain string "ok"; treat them as an
+    empty dict so old sessions keep working with default preferences.
+    """
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    try:
+        data = _serializer().loads(token, max_age=SESSION_MAX_AGE)
+    except (BadSignature, SignatureExpired):
+        return None
+    return data if isinstance(data, dict) else {}
+
+
+def get_session_currency(request: Request) -> str:
+    """Display currency stored in the signed session cookie, or the default."""
+    payload = _session_payload(request) or {}
+    return payload.get("currency") or settings.DISPLAY_CURRENCY
+
+
+def set_session_cookie(resp, payload: dict) -> None:
+    """Sign and set the session cookie with the given payload dict."""
+    resp.set_cookie(
+        SESSION_COOKIE, _serializer().dumps(payload),
+        max_age=SESSION_MAX_AGE, httponly=True, samesite="lax")
+
+
 def _templates(request: Request):
     return request.app.state.templates
 
@@ -69,9 +98,7 @@ async def login(request: Request, password: str = Form("")):
         return _templates(request).TemplateResponse(
             request, "login.html", {"error": "Wrong password."}, status_code=401)
     resp = RedirectResponse("/", status_code=303)
-    resp.set_cookie(
-        SESSION_COOKIE, _serializer().dumps("ok"),
-        max_age=SESSION_MAX_AGE, httponly=True, samesite="lax")
+    set_session_cookie(resp, {"ok": True, "currency": settings.DISPLAY_CURRENCY})
     return resp
 
 

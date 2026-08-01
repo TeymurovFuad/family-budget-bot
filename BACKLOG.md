@@ -497,6 +497,13 @@ Cycles must be done in order — each depends on the previous.
 - [ ] Auth: single shared password (env var `WEB_PASSWORD`) — no multi-user, no OAuth.
 - [ ] Transactions list matches Excel exactly: same columns, same sort order, paginated.
 - [ ] Deploy: systemd unit `budget-web.service`, documented in `deploy/` alongside the bot service.
+- [x] Redesign foundation (backend only): `sqlite_ops.list_transactions` / `storage_facade.load_transactions`
+      extended with date-range filtering, description search (parameterized `LIKE`), whitelisted
+      sort column + direction, and `limit`/`offset` pagination; matching `count_transactions` for
+      page counts; session-cookie display-currency preference (`web/currency.py`, signed cookie,
+      display-only conversion — nothing persisted); shared design system extracted to
+      `web/static/style.css`. Page-level wiring (Transactions/Summary/Cycles redesigns) is a
+      separate follow-up — the three pages do not use these params yet.
 - Done when: the household can browse transactions in a browser and numbers match the bot's /summary.
 
 ### Cycle W3 — Web UI write path (add / edit / delete)
