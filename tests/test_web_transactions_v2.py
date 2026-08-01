@@ -175,7 +175,8 @@ def test_unknown_sort_falls_back_to_default(client):
 @pytest.fixture()
 def paged_client(client, monkeypatch):
     import web.routes.transactions as t
-    monkeypatch.setattr(t, "PER_PAGE", 5)
+    monkeypatch.setattr(t, "PER_PAGE_OPTIONS", (5,))
+    monkeypatch.setattr(t, "PER_PAGE_DEFAULT", 5)
     return client
 
 
@@ -202,6 +203,101 @@ def test_offset_beyond_total_is_clamped(paged_client):
 def test_negative_offset_clamped_to_first_page(paged_client):
     resp = paged_client.get("/transactions?date_from=&date_to=&offset=-50")
     assert "Page 1 of 3" in resp.text
+
+
+# ── rows-per-page selector ────────────────────────────────────────────────────
+
+@pytest.fixture()
+def big_client(monkeypatch, tmp_path):
+    """Client over 120 expense rows — enough to exercise all real page
+    sizes (25/50/100) without monkeypatching the whitelist."""
+    monkeypatch.setattr(settings, "WEB_PASSWORD", PASSWORD)
+    monkeypatch.setattr(settings, "WEB_SESSION_SECRET", "s3cret")
+    monkeypatch.setattr(settings, "SQLITE_DB_PATH", tmp_path / "big.db")
+    conn = sqlite_ops.init_db(settings.SQLITE_DB_PATH)
+    sqlite_ops.upsert_person(conn, "Alice")
+    sqlite_ops.upsert_category(conn, "Groceries")
+    for i in range(120):
+        sqlite_ops.insert_transaction(conn, _txn(
+            date=f"2024-06-{1 + i % 30:02d}", value=100.0 + i,
+            value_base=100.0 + i, description=f"row {i:03d}"))
+    conn.close()
+
+    from fastapi.testclient import TestClient
+    from web.app import create_app
+    c = TestClient(create_app())
+    c.post("/login", data={"password": PASSWORD}, follow_redirects=False)
+    return c
+
+
+@pytest.mark.parametrize("size,pages", [(25, 5), (50, 3), (100, 2)])
+def test_per_page_options_slice_and_page_count(big_client, size, pages):
+    html = big_client.get(
+        f"/transactions?date_from=&date_to=&per_page={size}").text
+    assert len(_descriptions(html)) == size
+    assert f"Page 1 of {pages}" in html
+
+
+def test_per_page_out_of_whitelist_falls_back_to_default(big_client):
+    for bad in (9999, 0, -25, 33):
+        html = big_client.get(
+            f"/transactions?date_from=&date_to=&per_page={bad}").text
+        assert len(_descriptions(html)) == 50
+        assert "Page 1 of 3" in html
+        # The fallback value is the default, so no link re-emits it.
+        assert "per_page=" not in html
+
+
+def test_per_page_default_omitted_from_urls_like_sort(big_client):
+    html = big_client.get("/transactions?date_from=&date_to=").text
+    # Mirrors sort: the default (50) never appears in generated URLs; the
+    # only 'per_page' occurrences are the select's name attribute.
+    assert "per_page=" not in html
+    assert 'name="per_page"' in html
+
+
+def test_per_page_non_default_propagates_to_links(big_client):
+    html = big_client.get(
+        "/transactions?date_from=&date_to=&per_page=25&sort=value_asc").text
+    # Next link keeps both the page size and the sort.
+    m = re.search(r'href="([^"]*offset=25[^"]*)"', html)
+    assert m and "per_page=25" in m.group(1) and "sort=value_asc" in m.group(1)
+    # Preset range chips keep it too.
+    p = re.search(r'class="chip chip--preset[^"]*"\s+href="([^"]*)"', html)
+    assert p and "per_page=25" in p.group(1)
+    # The selected option is marked.
+    assert re.search(r'value="25"\s+selected', html)
+
+
+def test_changing_per_page_resets_to_page_1(big_client):
+    # Deep on page 3 of 25s...
+    deep = big_client.get(
+        "/transactions?date_from=&date_to=&per_page=25&offset=50").text
+    assert "Page 3 of 5" in deep
+    # ...the page-size form carries no offset field, so submitting it (htmx
+    # or plain GET) lands on page 1 of the new size.
+    form = re.search(r'<form method="get"[^>]*class="page-size-form".*?</form>',
+                     deep, re.S).group(0)
+    assert 'name="offset"' not in form
+    resized = big_client.get(
+        "/transactions?date_from=&date_to=&per_page=100").text
+    assert "Page 1 of 2" in resized
+
+
+def test_page_size_form_preserves_active_filters(client):
+    html = client.get("/transactions?date_from=&date_to=&q=item"
+                      "&person=Alice&sort=value_desc&per_page=25").text
+    form = re.search(r'<form method="get"[^>]*class="page-size-form".*?</form>',
+                     html, re.S).group(0)
+    # Hidden inputs mirror the canonical query-string rules: dates always,
+    # q/person when set, sort when non-default — so a no-JS submit keeps
+    # every active filter.
+    for field in ('name="q" value="item"', 'name="date_from" value=""',
+                  'name="date_to" value=""', 'name="person" value="Alice"',
+                  'name="sort" value="value_desc"'):
+        assert field in form
+    assert 'name="category"' not in form  # unset filters not emitted
+    assert re.search(r'value="25"\s+selected', form)
 
 
 # ── currency conversion (the "dead control" regression test) ─────────────────

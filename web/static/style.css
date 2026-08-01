@@ -143,6 +143,17 @@ button:disabled { cursor: default; opacity: .5; }
   opacity: .4; pointer-events: none; background: var(--bg);
 }
 .pagination .page-indicator { font-size: .9rem; opacity: .8; }
+.pagination .page-size-form { margin: 0; }
+.pagination .page-size select {
+  padding: .35rem .5rem; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface); font: inherit;
+}
+
+/* Screen-reader-only text (visible to assistive tech, hidden visually). */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* ── Sortable table headers ────────────────────────────────────────────── */
 /* Reusable by any table: <th class="sortable [sorted-asc|sorted-desc]">
@@ -295,6 +306,13 @@ a.chip--preset:hover { background: var(--surface); box-shadow: inset 0 0 0 1px v
 }
 .theme-toggle button:hover { color: var(--ink); }
 [data-theme="dark"] .theme-toggle svg { transform: scaleX(-1); }
+/* No explicit choice + OS in dark mode: the page already renders dark via
+   `color-scheme: light dark`, so flip the coin to match. An explicit
+   data-theme always wins — this rule only applies when the attribute is
+   absent, so it can never override the user's own toggle choice. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .theme-toggle svg { transform: scaleX(-1); }
+}
 
 /* ── Period navigation (Summary) ───────────────────────────────────────── */
 

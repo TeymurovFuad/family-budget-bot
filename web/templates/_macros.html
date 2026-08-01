@@ -15,8 +15,15 @@
 {# Prev / "Page X of Y" / Next. base_url must already carry the page's
    current query params (minus offset); offset is appended here.
    per_page converts page numbers to offsets. Links are htmx-enhanced
-   (hx-get + hx-target + hx-push-url) with a plain href fallback. #}
-{% macro pagination(page, total_pages, base_url, htmx_target='#txn-list', per_page=50) -%}
+   (hx-get + hx-target + hx-push-url) with a plain href fallback.
+   per_page_options (a sequence of ints) additionally renders a rows-per-page
+   select; when falsy/absent the select is omitted entirely, so existing
+   callers are unaffected. The select needs base_url_path (the bare route
+   path) and current_filters (dict of the page's active filter params) so
+   its form submit — htmx or plain GET — preserves the other filters and,
+   carrying no offset, naturally resets to page 1. #}
+{% macro pagination(page, total_pages, base_url, htmx_target='#txn-list', per_page=50,
+                    per_page_options=none, base_url_path=none, current_filters=none) -%}
 {%- set sep = '&' if '?' in base_url else '?' -%}
 <nav class="pagination" aria-label="Pagination">
   {%- if page > 1 -%}
@@ -33,6 +40,28 @@
      hx-get="{{ next_url }}" hx-target="{{ htmx_target }}" hx-push-url="true">Next &raquo;</a>
   {%- else %}
   <span class="page-link disabled" aria-disabled="true">Next &raquo;</span>
+  {%- endif %}
+  {%- if per_page_options %}
+  {# Auto-apply on change is deliberate and consistent with the sort/person/
+     category selects: <select> change events are reliable, unlike the
+     native DATE-input change events that the earlier fix stopped relying
+     on. Hidden inputs mirror the page's current filters so a plain no-JS
+     GET submit loses nothing; htmx path includes the same form. #}
+  <form method="get" action="{{ base_url_path }}" class="page-size-form">
+    {%- for k, v in (current_filters or {}).items() %}
+    <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {%- endfor %}
+    <label class="page-size">
+      <span class="visually-hidden">Rows per page</span>
+      <select name="per_page" aria-label="Rows per page"
+              hx-get="{{ base_url_path }}" hx-target="{{ htmx_target }}"
+              hx-push-url="true" hx-include="closest form">
+        {%- for n in per_page_options %}
+        <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }} / page</option>
+        {%- endfor %}
+      </select>
+    </label>
+  </form>
   {%- endif %}
 </nav>
 {%- endmacro %}

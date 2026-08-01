@@ -6,15 +6,11 @@ so the preference lives in the signed session cookie. When unset, the
 UI omits the data-theme attribute and follows the OS color scheme.
 """
 
-import logging
-
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from web import auth
 from web.currency import _safe_referer
-
-log = logging.getLogger(__name__)
 
 router = APIRouter()
 
