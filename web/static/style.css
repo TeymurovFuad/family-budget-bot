@@ -172,6 +172,48 @@ th.sortable.sorted-desc a::after { content: "\2193"; opacity: 1; color: var(--ac
 
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
+/* ── Transactions v2 "Ledger" ──────────────────────────────────────────── */
+
+.toolbar { margin-bottom: var(--space-3); }
+.toolbar input[type="search"] { width: 100%; margin-bottom: var(--space-2); }
+.toolbar-row {
+  display: flex; gap: var(--space-2); align-items: center;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  padding-bottom: var(--space-1); /* room for the scrollbar */
+}
+.toolbar-row > * { flex: 0 0 auto; }
+
+.chips {
+  display: flex; gap: var(--space-2); flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+
+.txn-group { margin-bottom: var(--space-3); }
+.txn-date {
+  position: sticky; top: 0; z-index: 1; background: Canvas;
+  margin: 0; padding: var(--space-2) 0 var(--space-1);
+  font-size: var(--fs-xs); font-weight: 700; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: .04em;
+  border-bottom: 1px solid var(--border);
+}
+.txn {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-3); padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.txn-main { min-width: 0; }
+.txn-desc { overflow-wrap: anywhere; }
+.txn-sub {
+  display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;
+  margin-top: var(--space-1); font-size: var(--fs-xs); color: var(--ink-soft);
+}
+.txn-amt { text-align: right; white-space: nowrap; }
+.txn-ccy { font-size: var(--fs-xs); color: var(--ink-soft); }
+
+.empty { text-align: center; padding: var(--space-6) var(--space-4); }
+.empty-title { font-size: var(--fs-lg); font-weight: 600; margin: 0 0 var(--space-2); }
+.empty-hint { color: var(--ink-soft); margin: 0 0 var(--space-4); }
+
 /* ── Currency switcher (nav) ───────────────────────────────────────────── */
 /* Compact chip-like select. Functionality unchanged: still a plain
    POST /currency with full-page reload (deliberately not HTMX-ified). */

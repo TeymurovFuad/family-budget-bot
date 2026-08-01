@@ -501,10 +501,16 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       pagination; matching `count_transactions` for page counts; session-cookie
       display-currency preference (`web/currency.py`, signed cookie, display-only conversion —
       nothing persisted); shared design system extracted to `web/static/style.css`.
-- [ ] **Web UI redesign — page wiring:** Transactions (date-range picker, description search,
-      sortable columns, pagination), Summary (month/cycle navigation instead of always
-      "today"), Cycles (apply design system) — the three pages do not consume the foundation's
-      new params yet.
+- [x] **Web UI redesign — page wiring, Transactions:** v2 "Ledger" page — date-grouped
+      list (sticky day headers; flat variant for non-date sorts), date-range picker
+      (defaults to current cycle when `BUDGET_CYCLE=1`, else calendar month; cleared
+      dates = all time), debounced description search, combined sort select, bottom
+      pagination (50/page), removable filter chips, and session-currency conversion of
+      displayed amounts (fixes the previously dead nav currency switcher on this page).
+      Plain-GET fallback throughout when JS/htmx is absent.
+- [ ] **Web UI redesign — page wiring, Summary + Cycles:** Summary (month/cycle
+      navigation instead of always "today"), Cycles (apply design system) — these two
+      pages do not consume the foundation's new params yet.
 - [ ] **S3a — add transaction via web UI**: same fields as /add, same
       validation (reuse `validators.py`), writes through `storage_facade`.
 - [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict
