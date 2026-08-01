@@ -1,0 +1,45 @@
+{# Shared Jinja macros — v2 redesign foundation.
+   Import with: {% from "_macros.html" import amount, pagination, chip %}
+   Keep these generic: no page-specific URLs or business logic here. #}
+
+{# Render a money value. kind: 'pos' | 'neg' | 'save' | 'neutral'.
+   The caller decides the kind (sign/semantics); this macro only renders.
+   pos/neg get an explicit +/- sign; save/neutral render unsigned. #}
+{% macro amount(value, kind='neutral') -%}
+<span class="amount amount--{{ kind }}">{{ '%+.2f'|format(value) if kind in ('pos', 'neg') else '%.2f'|format(value) }}</span>
+{%- endmacro %}
+
+{# Prev / "Page X of Y" / Next. base_url must already carry the page's
+   current query params (minus offset); offset is appended here.
+   per_page converts page numbers to offsets. Links are htmx-enhanced
+   (hx-get + hx-target + hx-push-url) with a plain href fallback. #}
+{% macro pagination(page, total_pages, base_url, htmx_target='#txn-list', per_page=50) -%}
+{%- set sep = '&' if '?' in base_url else '?' -%}
+<nav class="pagination" aria-label="Pagination">
+  {%- if page > 1 -%}
+  {%- set prev_url = base_url ~ sep ~ 'offset=' ~ ((page - 2) * per_page) %}
+  <a class="page-link" href="{{ prev_url }}"
+     hx-get="{{ prev_url }}" hx-target="{{ htmx_target }}" hx-push-url="true">&laquo; Prev</a>
+  {%- else %}
+  <span class="page-link disabled" aria-disabled="true">&laquo; Prev</span>
+  {%- endif %}
+  <span class="page-indicator">Page {{ page }} of {{ total_pages }}</span>
+  {%- if page < total_pages -%}
+  {%- set next_url = base_url ~ sep ~ 'offset=' ~ (page * per_page) %}
+  <a class="page-link" href="{{ next_url }}"
+     hx-get="{{ next_url }}" hx-target="{{ htmx_target }}" hx-push-url="true">Next &raquo;</a>
+  {%- else %}
+  <span class="page-link disabled" aria-disabled="true">Next &raquo;</span>
+  {%- endif %}
+</nav>
+{%- endmacro %}
+
+{# Small pill. With clear_url it becomes a removable filter chip with a
+   trailing "×" link that clears the filter. #}
+{% macro chip(text, clear_url=none) -%}
+{%- if clear_url -%}
+<span class="chip chip--filter">{{ text }}<a class="chip-clear" href="{{ clear_url }}" aria-label="Clear filter: {{ text }}">&times;</a></span>
+{%- else -%}
+<span class="chip">{{ text }}</span>
+{%- endif -%}
+{%- endmacro %}
