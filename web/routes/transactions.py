@@ -26,7 +26,7 @@ fragment; plain requests get the full page.
 """
 
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from math import ceil
 from urllib.parse import urlencode
 
@@ -68,15 +68,45 @@ def _parse_iso_date(raw: str) -> date | None:
         return None
 
 
-def _default_range(today: date) -> tuple[date, date]:
+def _current_cycle_start(today: date) -> date | None:
+    """Current cycle boundary, resolved ONCE per request (loading the cycle
+    ledger is an Excel read — callers pass the result around, they don't
+    re-derive it)."""
+    if not settings.BUDGET_CYCLE:
+        return None
+    current = cycles.current_cycle_start(today)
+    return current[0] if current is not None else None
+
+
+def _default_range(today: date, cycle_start: date | None) -> tuple[date, date]:
     """Current budget cycle when enabled and recorded, else calendar month."""
-    if settings.BUDGET_CYCLE:
-        current = cycles.current_cycle_start(today)
-        if current is not None:
-            return current[0], today
+    if cycle_start is not None:
+        return cycle_start, today
     first = today.replace(day=1)
     last = today.replace(day=calendar.monthrange(today.year, today.month)[1])
     return first, last
+
+
+def _preset_ranges(today: date, cycle_start: date | None,
+                   ) -> list[tuple[str, str, date | None, date | None]]:
+    """(key, label, date_from, date_to) for the preset range chips.
+    'This cycle' only appears when a current cycle boundary exists; None
+    dates mean an open bound ('All time' is both-None → empty params, the
+    existing 'present-but-empty means all time' semantics)."""
+    presets: list[tuple[str, str, date | None, date | None]] = []
+    if cycle_start is not None:
+        presets.append(("cycle", "This cycle", cycle_start, today))
+    month_first = today.replace(day=1)
+    month_last = today.replace(
+        day=calendar.monthrange(today.year, today.month)[1])
+    presets.extend([
+        ("month", "This month", month_first, month_last),
+        ("last30", "Last 30 days", today - timedelta(days=29), today),
+        ("year", "This year",
+         today.replace(month=1, day=1), today.replace(month=12, day=31)),
+        ("all", "All time", None, None),
+    ])
+    return presets
 
 
 def _fmt_day(d: date, today: date) -> str:
@@ -113,6 +143,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
                        date_to: str = "", person: str = "", category: str = "",
                        sort: str = DEFAULT_SORT, offset: int = 0):
     today = datetime.now(settings.TIMEZONE).date()
+    cycle_start = _current_cycle_start(today)
     ref = load_reference_data()
 
     # Whitelist filter values against reference data (defense in depth on
@@ -128,7 +159,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     if "date_from" in request.query_params or "date_to" in request.query_params:
         d_from, d_to = _parse_iso_date(date_from), _parse_iso_date(date_to)
     else:
-        d_from, d_to = _default_range(today)
+        d_from, d_to = _default_range(today, cycle_start)
 
     filters = {}
     if person:
@@ -205,8 +236,22 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     if category:
         chips.append({"text": category, "clear_url": _clear_url(category="")})
 
+    # Preset range chips: server-rendered links, each carrying the current
+    # non-date filters with its own date bounds. active_preset highlights an
+    # exact match (best-effort — custom ranges highlight nothing).
+    presets = [{
+        "key": key, "label": label,
+        "dates": (p_from.isoformat() if p_from else "",
+                  p_to.isoformat() if p_to else ""),
+    } for key, label, p_from, p_to in _preset_ranges(today, cycle_start)]
+    for p in presets:
+        p["url"] = "/transactions?" + _query_string(
+            q, p["dates"][0], p["dates"][1], person, category, sort_key)
+    active_preset = next((p["key"] for p in presets
+                          if p["dates"] == (date_from_str, date_to_str)), "")
+
     any_filter = bool(q or person or category
-                      or (d_from, d_to) != _default_range(today))
+                      or (d_from, d_to) != _default_range(today, cycle_start))
 
     ctx = {
         "rows": rows, "groups": groups, "grouped": grouped,
@@ -218,6 +263,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
         "per_page": PER_PAGE, "base_url": base_url,
         "range_label": _range_label(d_from, d_to, today),
         "chips": chips, "any_filter": any_filter,
+        "presets": presets, "active_preset": active_preset,
         "display_currency": display_currency,
     }
     template = ("_txn_list.html" if request.headers.get("HX-Request")

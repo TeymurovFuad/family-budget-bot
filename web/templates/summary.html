@@ -8,17 +8,26 @@
 </div>
 {% if cards %}
 {% set sel = cards[sel_i] %}
+{# #summary-body wraps everything that changes with the period. The forms
+   and nav links below use hx-select="#summary-body": the route keeps
+   returning the FULL page, htmx extracts just this fragment client-side —
+   no backend change, and every control still works as a plain GET.
+   hx-target/hx-select/hx-swap/hx-push-url sit ONCE here and are inherited
+   by every descendant hx-get (htmx attribute inheritance). #}
+<div id="summary-body" hx-target="#summary-body" hx-select="#summary-body"
+     hx-swap="outerHTML" hx-push-url="true">
 <nav class="period-nav" aria-label="Period navigation">
   {# cards are newest-first: "older" = index + 1, "newer" = index - 1 #}
   {% if sel_i + 1 < cards|length %}
-  <a class="btn period-prev" href="/?period={{ cards[sel_i + 1].start.isoformat() }}">&larr; Older</a>
+  {% set older_url = "/?period=" ~ cards[sel_i + 1].start.isoformat() %}
+  <a class="btn period-prev" href="{{ older_url }}" hx-get="{{ older_url }}">&larr; Older</a>
   {% else %}
   <span class="btn period-prev disabled" aria-disabled="true">&larr; Older</span>
   {% endif %}
   <details class="period-picker">
-    <summary>{{ sel.label }}</summary>
+    <summary class="period-picker-toggle">{{ sel.label }} <span class="disclosure-chevron" aria-hidden="true">&#9662;</span></summary>
     <div class="period-picker-panel">
-      <form method="get" action="/">
+      <form method="get" action="/" hx-get="/">
         <select name="period" aria-label="Choose period">
           {% for c in cards %}
           <option value="{{ c.start.isoformat() }}" {% if loop.index0 == sel_i %}selected{% endif %}>{{ c.label }}</option>
@@ -26,7 +35,7 @@
         </select>
         <button type="submit">Go</button>
       </form>
-      <form method="get" action="/">
+      <form method="get" action="/" hx-get="/">
         <input type="date" name="date_from" aria-label="Jump to period containing date">
         <input type="date" name="date_to" aria-label="Range end (optional)">
         <button type="submit">Jump</button>
@@ -34,7 +43,8 @@
     </div>
   </details>
   {% if sel_i > 0 %}
-  <a class="btn period-next" href="/?period={{ cards[sel_i - 1].start.isoformat() }}">Newer &rarr;</a>
+  {% set newer_url = "/?period=" ~ cards[sel_i - 1].start.isoformat() %}
+  <a class="btn period-next" href="{{ newer_url }}" hx-get="{{ newer_url }}">Newer &rarr;</a>
   {% else %}
   <span class="btn period-next disabled" aria-disabled="true">Newer &rarr;</span>
   {% endif %}
@@ -91,7 +101,8 @@
 <section class="summary-history" aria-label="Previous periods">
   <h2 class="history-title muted">Previous periods</h2>
   {% for c in history %}
-  <a class="history-row" href="/?period={{ c.start.isoformat() }}">
+  {% set row_url = "/?period=" ~ c.start.isoformat() %}
+  <a class="history-row" href="{{ row_url }}" hx-get="{{ row_url }}">
     <span class="history-label">{{ c.label }}</span>
     <span class="history-range muted">{{ c.start.isoformat() }} → {{ c.end.isoformat() }}</span>
     {# Deliberate deviation from the "label + net" spec: income/expense at a
@@ -106,6 +117,7 @@
   {% endfor %}
 </section>
 {% endif %}
+</div>
 {% else %}
 <p>No data yet.</p>
 {% endif %}
