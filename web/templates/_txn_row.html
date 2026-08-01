@@ -8,7 +8,7 @@
       <span class="txn-inline-date">{{ (row.date or '')[:10] }}</span>
     </div>
   </div>
-  <div class="txn-amt">{{ row.value_base or row.value or 0 }} <span class="txn-ccy">{{ display_currency }}</span></div>
+  <div class="txn-amt">{{ "%.2f"|format((row.value_base or row.value or 0)|float) }} <span class="txn-ccy">{{ display_currency }}</span></div>
   <div class="txn-row-actions">
     <button type="button" class="btn-row-action"
             hx-get="/transactions/{{ id }}/edit"

@@ -1,7 +1,8 @@
 {# _txn_form.html — Add transaction modal form fragment (HTMX target). #}
-<dialog class="modal" id="txn-add-modal" open>
+<dialog class="modal" id="txn-add-modal" aria-labelledby="txn-modal-title" aria-describedby="txn-modal-desc">
   <div class="modal-header">
-    <h2>Add transaction</h2>
+    <h2 id="txn-modal-title">Add transaction</h2>
+    <p id="txn-modal-desc" class="visually-hidden">Fill in the fields and press Save to add a new transaction.</p>
     <button type="button" class="modal-close-btn"
             onclick="this.closest('dialog').close()"
             aria-label="Close">&#10005;</button>
@@ -75,4 +76,10 @@
       </button>
     </div>
   </form>
+  <script>
+    (function() {
+      var dlg = document.getElementById('txn-add-modal');
+      if (dlg && typeof dlg.showModal === 'function') { dlg.showModal(); }
+    })();
+  </script>
 </dialog>

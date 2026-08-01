@@ -36,13 +36,13 @@ from fastapi.responses import HTMLResponse
 
 import cycles
 import settings
-import sqlite_ops
 from storage_facade import (
     ConflictError,
     add_web_transaction,
     count_transactions,
     delete_web_transaction,
     load_reference_data,
+    load_transaction_by_id,
     load_transactions,
     update_web_transaction,
 )
@@ -310,28 +310,6 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     return request.app.state.templates.TemplateResponse(request, template, ctx)
 
 
-# ── Write-path helpers ─────────────────────────────────────────────────────────
-
-def _conn():
-    import sqlite_ops as _so
-    import settings as _s
-    return _so.init_db(_s.SQLITE_DB_PATH)
-
-
-def _load_row_for_display(id: int) -> dict | None:
-    """Return a single transaction row keyed for template use, or None."""
-    conn = _conn()
-    try:
-        row = conn.execute(
-            f"SELECT * FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?", (id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        return None
-    return dict(row)
-
-
 # ── GET /transactions/new ──────────────────────────────────────────────────────
 
 @router.get("/transactions/new", response_class=HTMLResponse,
@@ -392,7 +370,7 @@ async def txn_new_submit(
 @router.get("/transactions/{id}/edit", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def txn_edit_form(request: Request, id: int):
-    row = _load_row_for_display(id)
+    row = await load_transaction_by_id(id)
     if row is None:
         from fastapi.responses import Response
         return Response(status_code=404)
@@ -424,7 +402,7 @@ async def txn_edit_submit(
     description: str = Form(""),
     currency: str = Form(""),
 ):
-    row = _load_row_for_display(id)
+    row = await load_transaction_by_id(id)
     if row is None:
         from fastapi.responses import Response
         return Response(status_code=404)
@@ -457,7 +435,7 @@ async def txn_edit_submit(
         return request.app.state.templates.TemplateResponse(
             request, "_txn_conflict.html", ctx, status_code=409)
 
-    updated_row = _load_row_for_display(id)
+    updated_row = await load_transaction_by_id(id)
     display_currency = str(get_session_currency(request)).strip().upper()
     ctx = {"row": updated_row, "id": id, "display_currency": display_currency}
     return request.app.state.templates.TemplateResponse(
@@ -469,7 +447,7 @@ async def txn_edit_submit(
 @router.get("/transactions/{id}/row", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def txn_row_fragment(request: Request, id: int):
-    row = _load_row_for_display(id)
+    row = await load_transaction_by_id(id)
     if row is None:
         from fastapi.responses import Response
         return Response(status_code=404)
@@ -484,7 +462,7 @@ async def txn_row_fragment(request: Request, id: int):
 @router.get("/transactions/{id}/delete-confirm", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def txn_delete_confirm(request: Request, id: int):
-    row = _load_row_for_display(id)
+    row = await load_transaction_by_id(id)
     if row is None:
         from fastapi.responses import Response
         return Response(status_code=404)
@@ -508,7 +486,7 @@ async def txn_delete_submit(
         from fastapi.responses import Response
         return Response(status_code=404)
     except ConflictError as exc:
-        row = _load_row_for_display(id)
+        row = await load_transaction_by_id(id)
         ctx = {"id": id, "message": str(exc), "row": row}
         return request.app.state.templates.TemplateResponse(
             request, "_txn_conflict.html", ctx, status_code=409)

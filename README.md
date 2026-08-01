@@ -1,7 +1,7 @@
 # Budget Bot
 
 Personal finance assistant. Tracks expenses in a SQLite database, sends
-weekly/monthly reports to Telegram, and serves a read-only web UI. Excel
+weekly/monthly reports to Telegram, and serves a web UI for browsing and managing transactions. Excel
 remains supported as an import source and export target, with local, Google
 Cloud Storage, and Amazon S3-compatible backends for the workbook file.
 
@@ -82,10 +82,10 @@ read from the Excel workbook — that migration is pending.
   budget targets are still read live from the workbook (see the Lists
   section below).
 
-## Web UI (read-only)
+## Web UI
 
-A read-only web UI lives in the `web/` package — FastAPI + HTMX + Jinja2,
-reading from the same SQLite database, with a plain-GET fallback everywhere
+A web UI lives in the `web/` package — FastAPI + HTMX + Jinja2,
+reading from and writing to the same SQLite database, with a plain-GET fallback everywhere
 so it works without JavaScript. Pages: transactions, summary, cycles
 (`web/app.py`, `web/routes/`). It runs as a separate systemd service,
 `deploy/budget-web.service`, alongside the bot on the same VM; the
@@ -113,9 +113,7 @@ IP via `WEB_BIND_HOST` (never `0.0.0.0`) and connect over the VPN — the
 `deploy/setup-wireguard-server.sh` and `deploy/add-wireguard-peer.sh`
 scripts set up the server and add phone/laptop peers (QR code for mobile).
 The app refuses to start unless both `WEB_PASSWORD` (shared login password)
-and `WEB_SESSION_SECRET` (session-cookie signing key) are set. Adding and
-editing transactions from the web UI is planned but not built yet — writes
-still go through the bot.
+and `WEB_SESSION_SECRET` (session-cookie signing key) are set.
 
 ---
 
@@ -645,7 +643,7 @@ places (e.g. Oracle VM + GitHub Actions), remember:
 |---|---|---|
 | **SQLite database** (`data/budget.db`) | Local disk (Oracle VM) | Primary storage for the bot and web UI. Never committed to GitHub. |
 | **Excel file** | Local disk (Oracle VM) or cloud storage (GCS/S3-compatible) | Import source / export target. Never committed to GitHub. |
-| **Web UI** (optional) | Oracle VM, `budget-web.service`, WireGuard-only | Read-only browser view of transactions, summary, cycles. |
+| **Web UI** (optional) | Oracle VM, `budget-web.service`, WireGuard-only | Browser UI — browse, add, edit, and delete transactions; summary; cycles. |
 | **Scheduled reports** (optional) | GitHub Actions (free) | Reads the shared storage on a schedule. Sends weekly/monthly reports to Telegram. |
 | **Interactive bot** | Oracle VM (recommended), or Docker/Termux (alternatives) | Always-on. Handles `/add`, `/summary`, `/budget` etc. |
 

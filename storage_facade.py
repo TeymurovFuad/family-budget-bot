@@ -435,7 +435,7 @@ def _add_web_transaction_sync(fields: dict) -> int:
 
 async def add_web_transaction(fields: dict) -> int:
     """Insert a web-sourced transaction. Returns the new row id."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _add_web_transaction_sync, fields)
 
 
@@ -477,7 +477,7 @@ def _update_web_transaction_sync(id: int, lock_token: str, fields: dict) -> None
 
 async def update_web_transaction(id: int, lock_token: str, fields: dict) -> None:
     """Update a transaction with optimistic-lock check. Raises ConflictError on mismatch."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _update_web_transaction_sync, id, lock_token, fields)
 
 
@@ -511,8 +511,24 @@ def _delete_web_transaction_sync(id: int, lock_token: str) -> None:
 
 async def delete_web_transaction(id: int, lock_token: str) -> None:
     """Delete a transaction with optimistic-lock check. Raises ConflictError on mismatch."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _delete_web_transaction_sync, id, lock_token)
+
+
+def _load_transaction_by_id_sync(txn_id: int) -> dict | None:
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(settings.SQLITE_DB_PATH)
+    conn.row_factory = _sqlite3.Row
+    row = conn.execute(
+        f"SELECT * FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?", (txn_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+async def load_transaction_by_id(txn_id: int) -> dict | None:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _load_transaction_by_id_sync, txn_id)
 
 
 def load_reference_data() -> dict:

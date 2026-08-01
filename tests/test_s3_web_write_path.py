@@ -300,3 +300,33 @@ def test_post_delete_success_returns_empty_div(monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert f'id="txn-{row_id}"' in resp.text
     assert 'display:none' in resp.text
+
+
+def test_post_delete_conflict_returns_409(monkeypatch, tmp_path):
+    client, db = _make_client(monkeypatch, tmp_path)
+    import sqlite3
+    conn = sqlite_ops.init_db(db)
+    from sqlite_types import TransactionRow
+    row = TransactionRow(
+        date="2024-06-15", year=2024, month="Jun", value=100.0,
+        currency="PLN", value_base=100.0, rate_used=1.0,
+        type="Expense", category="Groceries", person="Alice",
+        description="orig", is_recurring=False, is_done=True,
+        source="web", date_modified_utc="2024-06-15T10:00:00+00:00",
+    )
+    row_id = sqlite_ops.insert_transaction(conn, row)
+    token = conn.execute(
+        "SELECT date_modified_utc FROM transactions WHERE id=?",
+        (row_id,)).fetchone()["date_modified_utc"]
+    conn.close()
+
+    conn2 = sqlite3.connect(str(db))
+    conn2.execute(
+        "UPDATE transactions SET date_modified_utc = ? WHERE id = ?",
+        ("2000-01-01T00:00:00Z", row_id)
+    )
+    conn2.commit()
+    conn2.close()
+
+    resp = client.post(f"/transactions/{row_id}/delete", data={"lock_token": token})
+    assert resp.status_code == 409
