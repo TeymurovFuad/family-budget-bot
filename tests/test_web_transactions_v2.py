@@ -284,6 +284,14 @@ def test_changing_per_page_resets_to_page_1(big_client):
     assert "Page 1 of 2" in resized
 
 
+def test_toolbar_keeps_non_default_per_page_across_filter_changes(big_client):
+    html = big_client.get("/transactions?date_from=&date_to=&per_page=25").text
+    assert re.search(r'<form class="toolbar".*?type="hidden" name="per_page" value="25"',
+                     html, re.S)
+    default = big_client.get("/transactions?date_from=&date_to=").text
+    assert 'type="hidden" name="per_page"' not in default
+
+
 def test_page_size_form_preserves_active_filters(client):
     html = client.get("/transactions?date_from=&date_to=&q=item"
                       "&person=Alice&sort=value_desc&per_page=25").text
