@@ -45,8 +45,12 @@
   {# Auto-apply on change is deliberate and consistent with the sort/person/
      category selects: <select> change events are reliable, unlike the
      native DATE-input change events that the earlier fix stopped relying
-     on. Hidden inputs mirror the page's current filters so a plain no-JS
-     GET submit loses nothing; htmx path includes the same form. #}
+     on. Hidden inputs mirror the page's current filters so the fallback
+     GET submit loses nothing; htmx path includes the same form.
+     The form has no submit button by design, so without htmx the ONLY
+     way it can ever submit is the onchange fallback below — the guard
+     keeps it inert when htmx is loaded (htmx then owns the change event
+     and does an in-place fragment swap instead of a full page load). #}
   <form method="get" action="{{ base_url_path }}" class="page-size-form">
     {%- for k, v in (current_filters or {}).items() %}
     <input type="hidden" name="{{ k }}" value="{{ v }}">
@@ -54,6 +58,7 @@
     <label class="page-size">
       <span class="visually-hidden">Rows per page</span>
       <select name="per_page" aria-label="Rows per page"
+              onchange="if(!window.htmx)this.form.submit()"
               hx-get="{{ base_url_path }}" hx-target="{{ htmx_target }}"
               hx-push-url="true" hx-include="closest form">
         {%- for n in per_page_options %}
