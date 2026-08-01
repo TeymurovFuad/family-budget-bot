@@ -11,6 +11,7 @@ settings.WEB_BIND_HOST). Fails closed: create_app() raises when
 WEB_PASSWORD / WEB_SESSION_SECRET are unset.
 """
 
+import zlib
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -20,12 +21,22 @@ from fastapi.templating import Jinja2Templates
 
 from web import auth
 from web import currency as currency_routes
+from web import theme as theme_routes
 from web.auth import AuthRedirect, validate_web_settings
 from web.routes import cycles as cycles_routes
 from web.routes import summary as summary_routes
 from web.routes import transactions as transactions_routes
 
 _WEB_DIR = Path(__file__).resolve().parent
+
+
+def cat_color_idx(name: str) -> int:
+    """Stable 0-7 palette index for a category name (drives --cat-N).
+
+    crc32, not built-in hash(): hash() is randomized per process
+    (PYTHONHASHSEED) and would recolor every category on each restart.
+    """
+    return zlib.crc32(str(name).strip().lower().encode()) % 8
 
 
 def create_app() -> FastAPI:
@@ -38,11 +49,14 @@ def create_app() -> FastAPI:
     app.state.templates.env.globals.update(
         session_currency=auth.get_session_currency,
         available_currencies=currency_routes.available_currencies,
+        session_theme=auth.get_session_theme,
     )
+    app.state.templates.env.filters["cat_color_idx"] = cat_color_idx
     app.mount("/static", StaticFiles(directory=str(_WEB_DIR / "static")), name="static")
 
     app.include_router(auth.router)
     app.include_router(currency_routes.router)
+    app.include_router(theme_routes.router)
     app.include_router(summary_routes.router)
     app.include_router(transactions_routes.router)
     app.include_router(cycles_routes.router)

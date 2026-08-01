@@ -10,7 +10,7 @@
   <div class="txn-main">
     <div class="txn-desc">{{ r.description or r.category or 'Uncategorised' }}</div>
     <div class="txn-sub">
-      {%- if r.category %}{{ chip(r.category) }}{% endif %}
+      {%- if r.category %}{{ chip(r.category, cat_idx=r.category | cat_color_idx) }}{% endif %}
       <span>{{ r.person }}</span>
       {%- if show_date %}<span class="txn-inline-date">{{ r.date_label }}</span>{% endif %}
     </div>

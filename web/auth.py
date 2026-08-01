@@ -74,6 +74,17 @@ def get_session_currency(request: Request) -> str:
     return payload.get("currency") or settings.DISPLAY_CURRENCY
 
 
+def get_session_theme(request: Request) -> str | None:
+    """Theme stored in the signed session cookie ("light"/"dark"), or None.
+
+    None means "no explicit preference" — the UI omits data-theme and
+    follows the OS via `color-scheme: light dark`.
+    """
+    payload = _session_payload(request) or {}
+    theme = payload.get("theme")
+    return theme if theme in ("light", "dark") else None
+
+
 def set_session_cookie(resp, payload: dict) -> None:
     """Sign and set the session cookie with the given payload dict."""
     resp.set_cookie(
