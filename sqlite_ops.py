@@ -26,6 +26,8 @@ TABLE_PERSONS = "persons"
 TABLE_RATES = "rates"
 TABLE_GOALS = "goals"
 TABLE_SYNC_LOG = "sync_log"
+TABLE_CYCLES = "cycles"
+TABLE_SALARY_KEYWORDS = "salary_keywords"
 
 PRAGMA_WAL = "PRAGMA journal_mode=WAL"
 # Wait up to 5s for a competing writer's lock instead of failing immediately
@@ -77,6 +79,13 @@ CREATE TABLE IF NOT EXISTS {TABLE_SYNC_LOG} (
     status    TEXT,
     detail    TEXT
 );
+CREATE TABLE IF NOT EXISTS cycles (
+    start_date TEXT PRIMARY KEY,
+    label      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS salary_keywords (
+    keyword TEXT PRIMARY KEY
+);
 """
 
 
@@ -98,6 +107,9 @@ def init_db(db_path) -> sqlite3.Connection:
     conn.execute(PRAGMA_WAL)
     conn.execute(PRAGMA_BUSY_TIMEOUT)
     conn.executescript(_SCHEMA)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(categories)")}
+    if "category_type" not in cols:
+        conn.execute("ALTER TABLE categories ADD COLUMN category_type TEXT")
     conn.commit()
     return conn
 
@@ -329,12 +341,14 @@ def count_transactions(conn: sqlite3.Connection, filters: dict | None = None,
 # ── Reference upserts ────────────────────────────────────────────────────────
 
 def upsert_category(conn: sqlite3.Connection, name: str,
-                    budget_base: float | None = None, active: bool = True) -> None:
+                    budget_base: float | None = None, active: bool = True,
+                    category_type: str | None = None) -> None:
     conn.execute(
-        f"INSERT INTO {TABLE_CATEGORIES} (name, budget_base, active) VALUES (?, ?, ?) "
+        f"INSERT INTO {TABLE_CATEGORIES} (name, budget_base, active, category_type) VALUES (?, ?, ?, ?) "
         "ON CONFLICT(name) DO UPDATE SET budget_base = excluded.budget_base, "
-        "active = excluded.active",
-        (name, budget_base, int(active)),
+        "active = excluded.active, "
+        "category_type = COALESCE(excluded.category_type, category_type)",
+        (name, budget_base, int(active), category_type),
     )
     conn.commit()
 
@@ -383,3 +397,80 @@ def load_rates_dict(conn: sqlite3.Connection) -> dict[str, float]:
     rates = {r["currency"]: r["rate_to_base"]
              for r in conn.execute(f"SELECT * FROM {TABLE_RATES}")}
     return rates or {settings.DISPLAY_CURRENCY: 1.0}
+
+
+# ── Cycles ───────────────────────────────────────────────────────────────────
+
+def upsert_cycle(conn: sqlite3.Connection, start_date: str, label: str) -> bool:
+    cur = conn.execute(
+        f"INSERT INTO {TABLE_CYCLES} (start_date, label) VALUES (?, ?) "
+        "ON CONFLICT(start_date) DO NOTHING",
+        (start_date, label),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def delete_cycle(conn: sqlite3.Connection, start_date: str) -> bool:
+    cur = conn.execute(f"DELETE FROM {TABLE_CYCLES} WHERE start_date = ?", (start_date,))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def list_cycles(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        f"SELECT start_date, label FROM {TABLE_CYCLES} ORDER BY start_date"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Salary keywords ───────────────────────────────────────────────────────────
+
+def insert_salary_keyword(conn: sqlite3.Connection, keyword: str) -> bool:
+    kw = str(keyword or "").strip().lower()
+    if not kw:
+        return False
+    cur = conn.execute(
+        f"INSERT INTO {TABLE_SALARY_KEYWORDS} (keyword) VALUES (?) ON CONFLICT(keyword) DO NOTHING",
+        (kw,),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def delete_salary_keyword_row(conn: sqlite3.Connection, keyword: str) -> bool:
+    kw = str(keyword or "").strip().lower()
+    cur = conn.execute(f"DELETE FROM {TABLE_SALARY_KEYWORDS} WHERE keyword = ?", (kw,))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def list_salary_keywords(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        f"SELECT keyword FROM {TABLE_SALARY_KEYWORDS} ORDER BY rowid"
+    ).fetchall()
+    return [r["keyword"] for r in rows]
+
+
+# ── Category bulk replace ─────────────────────────────────────────────────────
+
+def replace_categories(conn: sqlite3.Connection,
+                       cats: list[tuple[str, str]], budgets: dict) -> None:
+    """Replace all categories. cats: list of (name, category_type)."""
+    conn.execute(f"DELETE FROM {TABLE_CATEGORIES}")
+    for name, cat_type in cats:
+        conn.execute(
+            f"INSERT INTO {TABLE_CATEGORIES} (name, budget_base, active, category_type) "
+            f"VALUES (?, ?, 1, ?)",
+            (name, budgets.get(name, 0.0), cat_type),
+        )
+    conn.commit()
+
+
+def rename_category(conn: sqlite3.Connection, old_name: str, new_name: str) -> None:
+    """Rename a category entry; no-op if old_name does not exist."""
+    conn.execute(
+        f"UPDATE {TABLE_CATEGORIES} SET name = ? WHERE name = ?",
+        (new_name, old_name),
+    )
+    conn.commit()

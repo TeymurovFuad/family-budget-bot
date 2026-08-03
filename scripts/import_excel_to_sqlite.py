@@ -131,6 +131,72 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
         for person in lists.get("persons", []):
             sqlite_ops.upsert_person(conn, str(person))
 
+        # ── Cycles ────────────────────────────────────────────────────────────
+        try:
+            import openpyxl as _openpyxl
+            wb = _openpyxl.load_workbook(excel_path, data_only=True)
+            if "Cycles" in wb.sheetnames:
+                ws_cycles = wb["Cycles"]
+                for row in ws_cycles.iter_rows(min_row=2, values_only=True):
+                    if not row or row[0] is None:
+                        continue
+                    cell_date, cell_label = row[0], row[1] if len(row) > 1 else None
+                    if cell_label is None:
+                        continue
+                    if hasattr(cell_date, "date"):
+                        date_str = cell_date.date().isoformat()
+                    elif hasattr(cell_date, "isoformat"):
+                        date_str = cell_date.isoformat()[:10]
+                    else:
+                        try:
+                            from datetime import date as _dt
+                            date_str = str(cell_date)[:10]
+                            _dt.fromisoformat(date_str)
+                        except (ValueError, TypeError):
+                            continue
+                    sqlite_ops.upsert_cycle(conn, date_str, str(cell_label))
+        except Exception as _e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Could not import Cycles sheet: %s", _e)
+
+        # ── Salary keywords ────────────────────────────────────────────────────
+        try:
+            if "Lists" in wb.sheetnames:
+                ws_lists = wb["Lists"]
+                headers = [str(c.value).strip() if c.value is not None else "" for c in ws_lists[1]]
+                try:
+                    kw_col = headers.index("Salary Keywords")
+                    for row in ws_lists.iter_rows(min_row=2, values_only=True):
+                        if len(row) <= kw_col or row[kw_col] is None:
+                            continue
+                        kw = str(row[kw_col]).strip()
+                        if kw:
+                            sqlite_ops.insert_salary_keyword(conn, kw)
+                except ValueError:
+                    pass  # column not found — skip
+        except Exception as _e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Could not import salary keywords: %s", _e)
+
+        # ── Category types ─────────────────────────────────────────────────────
+        try:
+            if "Lists" in wb.sheetnames:
+                ws_lists = wb["Lists"]
+                headers = [str(c.value).strip() if c.value is not None else "" for c in ws_lists[1]]
+                try:
+                    cat_col = headers.index("Category")
+                    type_col = headers.index("Type")
+                    for row in ws_lists.iter_rows(min_row=2, values_only=True):
+                        cat_val = row[cat_col] if len(row) > cat_col else None
+                        type_val = row[type_col] if len(row) > type_col else None
+                        if cat_val and type_val:
+                            sqlite_ops.upsert_category(conn, str(cat_val), category_type=str(type_val))
+                except ValueError:
+                    pass  # columns not found — skip
+        except Exception as _e:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Could not import category types: %s", _e)
+
         sqlite_ops.log_sync(conn, SyncDirection.IMPORT, SyncStatus.OK,
                             f"inserted={stats['inserted']} skipped={stats['skipped']}")
     finally:

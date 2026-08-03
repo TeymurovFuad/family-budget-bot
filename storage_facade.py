@@ -563,3 +563,162 @@ def load_reference_data() -> dict:
                        if r["budget_base"] and r["budget_base"] > 0},
         "currencies": list(rates.keys()),
     }
+
+
+# ── Context-manager connection helper ─────────────────────────────────────────
+
+from contextlib import contextmanager as _contextmanager
+
+
+@_contextmanager
+def _get_conn():
+    """Open a connection and ensure it is closed on exit."""
+    conn = _conn()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+# ── Excel export hook ─────────────────────────────────────────────────────────
+
+def _schedule_excel_export() -> None:
+    """Hook for triggering an async Excel re-export after writes.
+
+    Calls excel_export.schedule_export() if that function exists; otherwise
+    a no-op placeholder until the export job is wired up.
+    """
+    try:
+        import excel_export as _excel_export
+        if hasattr(_excel_export, "schedule_export"):
+            _excel_export.schedule_export()
+    except Exception:
+        pass
+
+
+# ── Aliases ───────────────────────────────────────────────────────────────────
+
+RowMovedError = RowMismatchError
+
+
+# ── Sync reads ────────────────────────────────────────────────────────────────
+
+def load_rates() -> dict[str, float]:
+    with _get_conn() as conn:
+        return sqlite_ops.load_rates_dict(conn)
+
+
+def load_budgets() -> dict[str, float]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT name, budget_base FROM categories WHERE active=1 AND budget_base > 0"
+        ).fetchall()
+        return {r["name"]: r["budget_base"] for r in rows}
+
+
+def load_cycles() -> list[tuple]:
+    from datetime import date as _date2
+    with _get_conn() as conn:
+        return [(_date2.fromisoformat(r["start_date"]), r["label"])
+                for r in sqlite_ops.list_cycles(conn)]
+
+
+def load_salary_keywords() -> list[str]:
+    with _get_conn() as conn:
+        return sqlite_ops.list_salary_keywords(conn)
+
+
+def load_category_types() -> dict[str, str]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT name, category_type FROM categories WHERE active=1"
+        ).fetchall()
+        return {r["name"]: r["category_type"] or "Expense" for r in rows}
+
+
+def get_recent_transactions_raw(n: int = 5) -> list[dict]:
+    """Return the N most-recent transactions as plain dicts (SQLite column names)."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM {sqlite_ops.TABLE_TRANSACTIONS} ORDER BY id DESC LIMIT ?", (n,)
+        ).fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+
+# ── Async writes ──────────────────────────────────────────────────────────────
+
+async def async_update_currency_rates(new_rates: dict, user=None) -> None:
+    def _sync():
+        with _get_conn() as conn:
+            for currency, rate in new_rates.items():
+                sqlite_ops.upsert_rate(conn, currency, float(rate))
+        _schedule_excel_export()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync)
+
+
+async def async_update_category_budget(category: str, new_budget_base: float) -> None:
+    def _sync():
+        with _get_conn() as conn:
+            sqlite_ops.upsert_category(conn, category, budget_base=new_budget_base)
+        _schedule_excel_export()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync)
+
+
+async def async_record_cycle_start(start) -> "str | None":
+    from cycles import _dedup_cycle_label
+    def _sync():
+        with _get_conn() as conn:
+            existing_rows = sqlite_ops.list_cycles(conn)
+            existing_dates_iso = [r["start_date"] for r in existing_rows]
+            if start.isoformat() in existing_dates_iso:
+                return None
+            from datetime import date as _date3
+            existing_dates = [_date3.fromisoformat(d) for d in existing_dates_iso]
+            label = _dedup_cycle_label(start, existing_dates)
+            sqlite_ops.upsert_cycle(conn, start.isoformat(), label)
+            _schedule_excel_export()
+            return label
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _sync)
+
+
+async def async_remove_cycle_start(start) -> bool:
+    def _sync():
+        with _get_conn() as conn:
+            result = sqlite_ops.delete_cycle(conn, start.isoformat())
+        _schedule_excel_export()
+        return result
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _sync)
+
+
+async def async_save_salary_keyword(keyword: str) -> bool:
+    def _sync():
+        with _get_conn() as conn:
+            return sqlite_ops.insert_salary_keyword(conn, keyword)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _sync)
+
+
+async def async_delete_salary_keyword(keyword: str) -> bool:
+    def _sync():
+        with _get_conn() as conn:
+            return sqlite_ops.delete_salary_keyword_row(conn, keyword)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _sync)
+
+
+async def async_apply_category_setup(
+    categories: list[tuple[str, str]], renames: list[tuple[str, str]]
+) -> None:
+    def _sync():
+        with _get_conn() as conn:
+            for old, new in renames:
+                sqlite_ops.rename_category(conn, old, new)
+            existing_budgets = load_budgets()
+            sqlite_ops.replace_categories(conn, categories, existing_budgets)
+        _schedule_excel_export()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _sync)
