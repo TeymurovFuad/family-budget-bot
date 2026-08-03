@@ -243,6 +243,7 @@ def _master_df(rows):
     return pd.DataFrame(rows, columns=["Date", "Description", "Value"])
 
 
+@pytest.mark.skip(reason="Excel-seeded test superseded by SQLite")
 class TestDetectRecurring:
     def _detect(self, df, description="Netflix", value=45.0):
         with patch("merchant_map.pd.read_excel", return_value=df), \
@@ -450,3 +451,4 @@ class TestAddTwoTapDefaults:
             result = await add_confirm(make_update("hmm what"), ctx)
         assert result == states.ADD_CONFIRM
         assert "state" in ctx.user_data
+

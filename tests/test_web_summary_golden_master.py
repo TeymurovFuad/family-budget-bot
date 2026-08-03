@@ -17,11 +17,24 @@ import pytest
 
 import settings
 import storage_facade
-from cycles import (
-    BEFORE_CYCLES_LABEL, cycle_periods, cycle_totals,
-    record_cycle_starts_batch,
-)
+from cycles import BEFORE_CYCLES_LABEL, cycle_periods, cycle_totals
 from file_storage import append_transactions_batch
+import sqlite_ops as _sqlite_ops
+from cycles import _dedup_cycle_label as _dedup_label
+
+
+def _seed_cycles_to_sqlite(db_path, starts):
+    """Insert cycle boundaries directly into a SQLite DB (bypasses async facade)."""
+    conn = _sqlite_ops.connect(db_path)
+    try:
+        for d in sorted(starts):
+            existing = _sqlite_ops.list_cycles(conn)
+            existing_dates = [date.fromisoformat(r["start_date"]) for r in existing]
+            label = _dedup_label(d, existing_dates)
+            _sqlite_ops.upsert_cycle(conn, d.isoformat(), label)
+        conn.commit()
+    finally:
+        conn.close()
 from models import Transaction
 from scripts.import_excel_to_sqlite import run_import
 from web.routes.summary import build_summary_context
@@ -55,11 +68,11 @@ FIXTURE_TXNS = [
 def web_env(excel_path, tmp_path, monkeypatch):
     """Excel workbook + cycle ledger + SQLite seeded from that workbook."""
     append_transactions_batch(FIXTURE_TXNS)
-    record_cycle_starts_batch(CYCLE_STARTS)
     db_path = tmp_path / "web_golden.db"
     monkeypatch.setattr(settings, "SQLITE_DB_PATH", db_path)
     stats = run_import(db_path=db_path)
     assert stats["inserted"] == len(FIXTURE_TXNS)
+    _seed_cycles_to_sqlite(db_path, CYCLE_STARTS)
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
     monkeypatch.setattr(settings, "WEB_PASSWORD", "test-pass")
     monkeypatch.setattr(settings, "WEB_SESSION_SECRET", "test-secret")

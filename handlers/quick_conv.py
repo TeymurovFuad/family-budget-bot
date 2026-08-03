@@ -9,8 +9,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from ai_parser import parse_quick
 from config import auth, auth_write, get_display_currency, log
-from data import load_rates
-from storage_facade import append_transaction, load_reference_data
+from storage_facade import append_transaction, load_rates, load_reference_data
 from formatters import format_base_as_currency, sanitize_description
 import merchant_map
 import settings

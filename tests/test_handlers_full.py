@@ -70,7 +70,7 @@ from handlers.edit_conv import (
 from handlers.bulk_conv import cmd_bulk, bulk_receive, bulk_confirm, _format_bulk_preview
 from handlers.quick_conv import handle_quick_add, quick_confirm
 from handlers.delete_conv import cmd_delete, delete_pick
-from file_storage import RowMovedError
+from storage_facade import RowMovedError
 from telegram.ext import ConversationHandler
 
 

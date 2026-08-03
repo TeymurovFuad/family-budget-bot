@@ -7,7 +7,6 @@ Everything here is inert unless settings.BUDGET_CYCLE is on — callers gate on
 the flag; these helpers just read/write the ledger.
 """
 
-import asyncio
 import re
 from datetime import date, timedelta
 
@@ -15,18 +14,8 @@ import pandas as pd
 
 import settings
 from logger import get_logger
-from excel_schema import CyclesSchema, ListsSchema, col_indices, header_of, to_date
-from file_storage import (
-    ExcelFileContext,
-    _excel_write_lock,
-    atomic_save,
-    get_excel_path_for_reading,
-)
 
 log = get_logger(__name__)
-
-CYCLES_SHEET_NAME = "Cycles"
-LISTS_SHEET_NAME = "Lists"
 
 # Implicit bucket for transactions older than the first recorded boundary.
 # It has no salary anchor, so unaccounted math never applies to it.
@@ -52,126 +41,11 @@ def _dedup_cycle_label(start: date, existing_dates) -> str:
     return base if same_month == 0 else f"{base} #{same_month + 1}"
 
 
-def ensure_cycles_sheet(wb):
-    """Return the Cycles worksheet, creating it with headers if missing."""
-    if CYCLES_SHEET_NAME in wb.sheetnames:
-        return wb[CYCLES_SHEET_NAME]
-    ws = wb.create_sheet(CYCLES_SHEET_NAME)
-    ws.cell(1, 1, header_of(CyclesSchema, "start_date"))
-    ws.cell(1, 2, header_of(CyclesSchema, "label"))
-    log.info("Created %s sheet in workbook", CYCLES_SHEET_NAME)
-    return ws
-
-
-def load_cycles() -> list[tuple[date, str]]:
-    """
-    Read the cycle ledger, sorted by start date ascending.
-    Returns [] when the sheet is missing or unreadable — callers fall back to
-    calendar behaviour.
-    """
-    from openpyxl import load_workbook
-
-    try:
-        wb = load_workbook(get_excel_path_for_reading(), data_only=True)
-        if CYCLES_SHEET_NAME not in wb.sheetnames:
-            return []
-        ws = wb[CYCLES_SHEET_NAME]
-        idx = col_indices(ws, CyclesSchema)
-        start_col = idx.get("start_date")
-        label_col = idx.get("label")
-        if not start_col:
-            return []
-        cycles: list[tuple[date, str]] = []
-        for row in range(2, ws.max_row + 1):
-            start = to_date(ws.cell(row, start_col).value)
-            if start is None:
-                continue
-            raw_label = ws.cell(row, label_col).value if label_col else None
-            label = str(raw_label).strip() if raw_label else cycle_label(start)
-            cycles.append((start, label))
-        cycles.sort(key=lambda c: c[0])
-        return cycles
-    except Exception as e:
-        log.warning("Could not load cycle ledger: %s", e)
-        return []
-
-
-def record_cycle_start(start: date) -> str | None:
-    """
-    Append one boundary row to the Cycles sheet.
-    Returns the recorded cycle label, or None (no write) if that start date
-    is already recorded — boundaries are written once, never recomputed.
-    """
-    from openpyxl import load_workbook
-
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = ensure_cycles_sheet(wb)
-        from cycle_dashboard import ensure_cycle_dashboard
-        ensure_cycle_dashboard(wb)
-        idx = col_indices(ws, CyclesSchema)
-        start_col = idx["start_date"]
-        label_col = idx["label"]
-        next_row = 2
-        existing_dates: set[date] = set()
-        for row in range(2, ws.max_row + 1):
-            existing = to_date(ws.cell(row, start_col).value)
-            if existing is None:
-                continue
-            if existing == start:
-                return None
-            existing_dates.add(existing)
-            next_row = row + 1
-        label = _dedup_cycle_label(start, existing_dates)
-        ws.cell(next_row, start_col, start)
-        ws.cell(next_row, label_col, label)
-        atomic_save(wb, excel_path)
-        log.info("Recorded cycle boundary %s (%s)", start, label)
-        return label
-
-
-async def async_record_cycle_start(start: date) -> str | None:
-    """Async wrapper — returns the recorded label, or None if already recorded."""
-    loop = asyncio.get_running_loop()
-    async with _excel_write_lock:
-        return await loop.run_in_executor(None, record_cycle_start, start)
-
-
-def remove_cycle_start(start: date) -> bool:
-    """
-    Delete one boundary row from the Cycles sheet.
-    Returns False when that start date is not in the ledger.
-    """
-    from openpyxl import load_workbook
-
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        if CYCLES_SHEET_NAME not in wb.sheetnames:
-            return False
-        ws = wb[CYCLES_SHEET_NAME]
-        idx = col_indices(ws, CyclesSchema)
-        start_col = idx.get("start_date")
-        if not start_col:
-            return False
-        for row in range(2, ws.max_row + 1):
-            if to_date(ws.cell(row, start_col).value) == start:
-                ws.delete_rows(row)
-                atomic_save(wb, excel_path)
-                log.info("Removed cycle boundary %s", start)
-                return True
-        return False
-
-
-async def async_remove_cycle_start(start: date) -> bool:
-    loop = asyncio.get_running_loop()
-    async with _excel_write_lock:
-        return await loop.run_in_executor(None, remove_cycle_start, start)
-
-
 def current_cycle_start(today: date, cycles: list[tuple[date, str]] | None = None) -> tuple[date, str] | None:
     """Latest recorded boundary on or before today, or None (→ calendar fallback)."""
     if cycles is None:
-        cycles = load_cycles()
+        from storage_facade import load_cycles as _load_cycles
+        cycles = _load_cycles()
     past = [c for c in cycles if c[0] <= today]
     return past[-1] if past else None
 
@@ -189,135 +63,17 @@ def should_prompt_new_cycle(today: date) -> bool:
     return (today - current[0]).days >= settings.CYCLE_REPROMPT_MIN_AGE_DAYS
 
 
-def load_salary_keywords(excel_path=None) -> list[str]:
-    """
-    Salary keywords stored in the Lists sheet "Salary Keywords" column —
-    stripped, lowercased, deduplicated, blanks skipped. Returns [] when the
-    column is missing/empty or the workbook is unreadable.
-    """
-    from openpyxl import load_workbook
-
-    try:
-        path = excel_path if excel_path is not None else get_excel_path_for_reading()
-        wb = load_workbook(path, data_only=True)
-        if LISTS_SHEET_NAME not in wb.sheetnames:
-            return []
-        ws = wb[LISTS_SHEET_NAME]
-        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
-        if not kw_col:
-            return []
-        return _keyword_column_words(ws, kw_col)
-    except Exception as e:
-        log.warning("Could not load salary keywords from Lists sheet: %s", e)
-        return []
-
-
-def _keyword_column_words(ws, kw_col) -> list[str]:
-    words: list[str] = []
-    for row in range(2, ws.max_row + 1):
-        w = str(ws.cell(row, kw_col).value or "").strip().lower()
-        if w and w not in words:
-            words.append(w)
-    return words
-
-
-def _rewrite_keyword_column(ws, kw_col, words: list[str]) -> None:
-    for i, w in enumerate(words, start=2):
-        ws.cell(i, kw_col, w)
-    for row in range(2 + len(words), ws.max_row + 1):
-        ws.cell(row, kw_col).value = None
-
-
 MAX_SALARY_KEYWORD_BYTES = 57  # Telegram callback_data limit is 64 bytes; "kw:del:" takes 7
 
 
-def save_salary_keyword(keyword: str) -> bool:
-    """
-    Append one keyword to the Lists sheet "Salary Keywords" column. The very
-    first write ever (column header not yet present) creates the column and
-    seeds it with the current .env keywords so they are not silently dropped;
-    a list the user has emptied via /keywords stays empty.
-    Returns False (no write) when the keyword is already stored or invalid.
-    """
-    from openpyxl import load_workbook
-
-    keyword = str(keyword or "").strip().lower()
-    if not keyword or len(keyword.encode("utf-8")) > MAX_SALARY_KEYWORD_BYTES:
-        return False
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = wb[LISTS_SHEET_NAME]
-        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
-        first_write = kw_col is None
-        if first_write:
-            kw_col = ws.max_column + 1
-            ws.cell(1, kw_col, header_of(ListsSchema, "salary_keyword"))
-        words = _keyword_column_words(ws, kw_col)
-        seeded = False
-        if first_write:
-            for w in settings.CYCLE_DETECT_KEYWORDS:
-                w = str(w or "").strip().lower()
-                if w and w not in words:
-                    words.append(w)
-            seeded = bool(words)
-        added = keyword not in words
-        if added:
-            words.append(keyword)
-        if not added and not seeded:
-            return False
-        _rewrite_keyword_column(ws, kw_col, words)
-        atomic_save(wb, excel_path)
-        log.info("Saved salary keyword %r (%d stored)", keyword, len(words))
-        return added
-
-
-async def async_save_salary_keyword(keyword: str) -> bool:
-    loop = asyncio.get_running_loop()
-    async with _excel_write_lock:
-        return await loop.run_in_executor(None, save_salary_keyword, keyword)
-
-
-def delete_salary_keyword(keyword: str) -> bool:
-    """
-    Remove one keyword from the Lists sheet "Salary Keywords" column.
-    Only that column's cells are shifted — Lists rows are shared with other
-    reference columns, so whole-row deletion is never used here.
-    Returns False when the keyword is not stored.
-    """
-    from openpyxl import load_workbook
-
-    keyword = str(keyword or "").strip().lower()
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        if LISTS_SHEET_NAME not in wb.sheetnames:
-            return False
-        ws = wb[LISTS_SHEET_NAME]
-        kw_col = col_indices(ws, ListsSchema).get("salary_keyword")
-        if not kw_col:
-            return False
-        words = _keyword_column_words(ws, kw_col)
-        if keyword not in words:
-            return False
-        words = [w for w in words if w != keyword]
-        _rewrite_keyword_column(ws, kw_col, words)
-        atomic_save(wb, excel_path)
-        log.info("Deleted salary keyword %r (%d remain)", keyword, len(words))
-        return True
-
-
-async def async_delete_salary_keyword(keyword: str) -> bool:
-    loop = asyncio.get_running_loop()
-    async with _excel_write_lock:
-        return await loop.run_in_executor(None, delete_salary_keyword, keyword)
-
-
 def cycle_detect_keywords(extra: list[str] | None = None) -> list[str]:
-    """SALARY_CATEGORY plus the stored salary keywords (Excel, falling back to
+    """SALARY_CATEGORY plus the stored salary keywords (SQLite, falling back to
     .env CYCLE_DETECT_KEYWORDS) plus any ad-hoc extras, lowercased,
     deduplicated, blanks dropped."""
-    stored = load_salary_keywords()
+    from storage_facade import load_salary_keywords as _load_salary_keywords
+    stored = _load_salary_keywords()
     if not stored:
-        log.debug("No salary keywords in Excel — falling back to .env CYCLE_DETECT_KEYWORDS")
+        log.debug("No salary keywords in DB — falling back to .env CYCLE_DETECT_KEYWORDS")
         stored = settings.CYCLE_DETECT_KEYWORDS
     words = [settings.SALARY_CATEGORY, *stored, *(extra or [])]
     seen: list[str] = []
@@ -367,7 +123,8 @@ def detect_cycle_candidates(
       - unambiguous: True when exactly one salary row on that date
     """
     if existing_cycles is None:
-        existing_cycles = load_cycles()
+        from storage_facade import load_cycles as _load_cycles
+        existing_cycles = _load_cycles()
     existing_starts = {c[0] for c in existing_cycles}
 
     df = df.copy()
@@ -401,47 +158,6 @@ def detect_cycle_candidates(
 
     return results
 
-
-def record_cycle_starts_batch(starts: list[date]) -> int:
-    """
-    Open the workbook ONCE and write all boundary rows. Returns the count
-    actually written (skips dates that are already present).
-    """
-    from openpyxl import load_workbook
-
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = ensure_cycles_sheet(wb)
-        from cycle_dashboard import ensure_cycle_dashboard
-        ensure_cycle_dashboard(wb)
-        idx = col_indices(ws, CyclesSchema)
-        start_col = idx["start_date"]
-        label_col = idx["label"]
-
-        existing: set[date] = set()
-        next_row = 2
-        for row in range(2, ws.max_row + 1):
-            existing_date = to_date(ws.cell(row, start_col).value)
-            if existing_date is None:
-                continue
-            existing.add(existing_date)
-            next_row = row + 1
-
-        count = 0
-        for start in starts:
-            if start in existing:
-                continue
-            label = _dedup_cycle_label(start, existing)
-            ws.cell(next_row, start_col, start)
-            ws.cell(next_row, label_col, label)
-            existing.add(start)
-            next_row += 1
-            count += 1
-            log.info("Batch-recorded cycle boundary %s (%s)", start, label)
-
-        if count:
-            atomic_save(wb, excel_path)
-        return count
 
 
 def cycle_totals(
@@ -495,7 +211,8 @@ def cycle_periods(
     Returns [] when the ledger is empty.
     """
     if cycles is None:
-        cycles = load_cycles()
+        from storage_facade import load_cycles as _load_cycles
+        cycles = _load_cycles()
     if today is None:
         today = date.today()
     if not cycles:
@@ -523,7 +240,8 @@ def detect_missing_boundaries(
     before rendering a period with gaps.
     """
     if cycles is None:
-        cycles = load_cycles()
+        from storage_facade import load_cycles as _load_cycles
+        cycles = _load_cycles()
     if not cycles:
         # No ledger at all → no boundaries to compare against, hence no gaps
         # to backfill (an empty ledger means cycles are effectively unused).
@@ -555,7 +273,8 @@ def fallback_income_candidates(
     detect_cycle_candidates() entries.
     """
     if existing_cycles is None:
-        existing_cycles = load_cycles()
+        from storage_facade import load_cycles as _load_cycles
+        existing_cycles = _load_cycles()
     existing_starts = {c[0] for c in existing_cycles}
 
     df = df.copy()

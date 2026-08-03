@@ -47,7 +47,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import settings
 import states
 from data import current_year_and_month
-from file_storage import RowMovedError
+from storage_facade import RowMovedError
 from telegram.ext import ConversationHandler
 
 import handlers.add_conv as add_conv

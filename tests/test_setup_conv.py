@@ -143,13 +143,15 @@ class TestSharedCategoryBlock:
 
 class TestSetupEntry:
     def test_fresh_setup_creates_file_and_shows_review(self, tmp_path, monkeypatch):
+        import settings
         monkeypatch.setattr(file_storage, "TEMPLATE_PATH", tmp_path / "no_t.xlsx")
         path = tmp_path / "new.xlsx"
         monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", path)
+        # Simulate no SQLite DB yet (new equivalent of no Excel file)
+        monkeypatch.setattr(settings, "SQLITE_DB_PATH", tmp_path / "nonexistent.db")
         upd, ctx = make_update(), make_ctx()
         state = run(cmd_setup(upd, ctx))
         assert state == SETUP_REVIEW
-        assert path.exists()
         out = replies(upd)
         assert "Setup started" in out and "Your categories" in out
         assert len(ctx.user_data["setup"]["categories"]) == len(DEFAULT_CATEGORIES)
@@ -161,10 +163,12 @@ class TestSetupEntry:
         assert "Setup already ran" in replies(upd)
 
     def test_setup_create_failure_message(self, tmp_path, monkeypatch):
+        import settings
+        import sqlite_ops
         monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", tmp_path / "x.xlsx")
-        monkeypatch.setattr(
-            file_storage, "create_workbook_from_template",
-            MagicMock(side_effect=OSError("nope")))
+        # Simulate no SQLite DB and make init_db fail
+        monkeypatch.setattr(settings, "SQLITE_DB_PATH", tmp_path / "nonexistent.db")
+        monkeypatch.setattr(sqlite_ops, "init_db", MagicMock(side_effect=OSError("nope")))
         upd, ctx = make_update(), make_ctx()
         state = run(cmd_setup(upd, ctx))
         assert state == ConversationHandler.END
@@ -210,8 +214,11 @@ class TestSetupEntry:
         menu.assert_awaited_once()
 
     def test_start_without_file_enters_setup(self, tmp_path, monkeypatch):
+        import settings
         monkeypatch.setattr(file_storage, "TEMPLATE_PATH", tmp_path / "no_t.xlsx")
         monkeypatch.setattr(file_storage, "LOCAL_XLSX_PATH", tmp_path / "n.xlsx")
+        # Simulate no SQLite DB yet
+        monkeypatch.setattr(settings, "SQLITE_DB_PATH", tmp_path / "nonexistent.db")
         upd, ctx = make_update(), make_ctx()
         state = run(cmd_start_or_setup(upd, ctx))
         assert state == SETUP_REVIEW
@@ -286,25 +293,16 @@ class TestCategorySteps:
         assert "✅ Added *Pets* (Expense)." in replies(upd2)
 
     def test_done_commits_categories_and_starts_budgets(self, excel_path):
+        import storage_facade
         session = fresh_session()
         upd, ctx = make_update(callback_data="setup:done"), make_ctx(session)
         state = run(setup_review_cb(upd, ctx))
         assert state == SETUP_BUDGET
         assert session["budget_queue"][0] == "Housing"  # first Expense category
-        # Lists!C now holds the session categories
-        wb = load_workbook(excel_path)
-        from excel_schema import ListsSchema, col_indices, read_category_block
-        ws = wb["Lists"]
-        cat_col = col_indices(ws, ListsSchema)["categories"]
-        written = []
-        for r in range(2, ws.max_row + 1):
-            v = ws.cell(r, cat_col).value
-            if v is None:
-                break
-            written.append(v)
-        assert written == [n for n, _t in DEFAULT_CATEGORIES]
-        # Dashboard synced
-        assert read_category_block(wb["Dashboard"]) == written
+        # Categories are now committed to SQLite via storage_facade
+        cats = storage_facade.load_reference_data()["categories"]
+        expected = [n for n, _t in DEFAULT_CATEGORIES]
+        assert cats == expected
 
     def test_done_with_no_expense_categories_skips_budget(self, excel_path):
         session = fresh_session()
@@ -368,12 +366,10 @@ class TestCurrencyAndSummary:
         out = replies(upd)
         assert "Setup complete" in out and "*Currency:* USD" in out
         assert "Housing — 2500" in out and "no limit" in out
-        # budgets + currency persisted
-        wb = load_workbook(excel_path)
-        lists = file_storage.load_lists(excel_path)
-        assert lists["budgets"]["Housing"] == 2500.0
-        from excel_schema import load_currency_rates_from_path
-        assert "USD" in load_currency_rates_from_path(excel_path)
+        # budgets + currency now persisted in SQLite via storage_facade
+        import storage_facade
+        assert storage_facade.load_budgets().get("Housing") == 2500.0
+        assert "USD" in storage_facade.load_rates()
 
     def test_other_currency_valid_code(self, excel_path):
         session = fresh_session()

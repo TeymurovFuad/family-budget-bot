@@ -17,17 +17,17 @@ import settings
 from settings import TIMEZONE
 from config import auth, get_display_currency, SAVINGS_TARGET, log
 from cycles import (
-    BEFORE_CYCLES_LABEL, load_cycles, current_cycle_start, cycle_totals,
+    BEFORE_CYCLES_LABEL, current_cycle_start, cycle_totals,
     cycle_periods, detect_missing_boundaries,
 )
 from log_decorators import log_call
 from data import (
-    load_rates, load_budgets,
     now_utc, current_year_and_month, month_name, get_rate,
 )
-from storage_facade import load_reference_data, load_transactions
-from excel_ops import async_update_currency_rates
-from file_storage import get_excel_path_for_reading, load_budgets_from_excel
+from storage_facade import (
+    async_update_currency_rates, load_budgets, load_cycles, load_rates,
+    load_reference_data, load_transactions,
+)
 from formatters import (
     format_amount, format_base_as_currency, budget_progress_bar, savings_emoji,
 )
@@ -1243,7 +1243,7 @@ async def check_budget_alert(update, category: str, ccy: str, rates: dict) -> No
         return
     try:
         df      = load_transactions()
-        budgets = load_budgets_from_excel(get_excel_path_for_reading())
+        budgets = load_budgets()
         budget  = budgets.get(category)
         if not budget:
             return

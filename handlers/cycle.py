@@ -10,15 +10,14 @@ from telegram.helpers import escape_markdown
 
 import settings
 from config import ALLOWED_USERS, auth, auth_write, get_display_currency, log
-from data import load_rates, now_utc
+from data import now_utc
 from formatters import format_base_as_currency
-from storage_facade import load_transactions
+from storage_facade import load_rates, load_transactions, load_cycles, async_record_cycle_start, async_remove_cycle_start
 from log_decorators import log_call
 from cycles import (
-    async_record_cycle_start, async_remove_cycle_start, current_cycle_start,
-    cycle_label, cycle_detect_keywords, detect_cycle_candidates,
-    fallback_income_candidates, load_cycles,
-    record_cycle_starts_batch, should_prompt_new_cycle,
+    current_cycle_start,
+    cycle_label, _dedup_cycle_label, cycle_detect_keywords, detect_cycle_candidates,
+    fallback_income_candidates, should_prompt_new_cycle,
 )
 
 _CYCLES_DISABLED_MSG = (
@@ -205,8 +204,11 @@ async def cmd_cycle(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         start = today
 
-    label = await async_record_cycle_start(start)
-    if label:
+    existing = load_cycles()
+    existing_dates = [d for d, _ in existing]
+    label = _dedup_cycle_label(start, existing_dates)
+    recorded = await async_record_cycle_start(start, label)
+    if recorded:
         await update.message.reply_text(
             f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
             parse_mode="Markdown",
@@ -433,13 +435,14 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
 
     if data == "detect:confirm_all":
         candidates = ctx.user_data.get("detect_candidates") or []
-        loop = asyncio.get_running_loop()
-        n = await loop.run_in_executor(
-            None,
-            lambda: record_cycle_starts_batch(
-                [date.fromisoformat(c["date_str"]) for c in candidates]
-            ),
-        )
+        starts = [date.fromisoformat(c["date_str"]) for c in candidates]
+        n = 0
+        for s in starts:
+            _existing = load_cycles()
+            _existing_dates = [d for d, _ in _existing]
+            _lbl = _dedup_cycle_label(s, _existing_dates)
+            if await async_record_cycle_start(s, _lbl):
+                n += 1
         ctx.user_data.pop("detect_candidates", None)
         await query.edit_message_text(
             _esc(f"✅ Confirmed {n} {'boundary' if n == 1 else 'boundaries'}."),
@@ -474,7 +477,10 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
             return
         date_str = data[len("detect:pick:"):]
         start = date.fromisoformat(date_str)
-        if await async_record_cycle_start(start):
+        _ex = load_cycles()
+        _ex_dates = [d for d, _ in _ex]
+        _lbl2 = _dedup_cycle_label(start, _ex_dates)
+        if await async_record_cycle_start(start, _lbl2):
             ctx.user_data["detect_recorded"] = ctx.user_data.get("detect_recorded", 0) + 1
         await query.edit_message_text(
             f"✅ Recorded — cycle started {_esc(date_str)}\\.",
@@ -589,8 +595,11 @@ async def handle_cycle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "from today or a past date."
             )
             return
-        label = await async_record_cycle_start(start)
-        if label:
+        existing = load_cycles()
+        existing_dates = [d for d, _ in existing]
+        label = _dedup_cycle_label(start, existing_dates)
+        recorded = await async_record_cycle_start(start, label)
+        if recorded:
             await query.message.reply_text(
                 f"✅ New budget cycle *{escape_markdown(label)}* started from {start.isoformat()}.",
                 parse_mode="Markdown",

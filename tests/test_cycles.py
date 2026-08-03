@@ -24,12 +24,46 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import settings
 import cycles
+import sqlite_ops as _sqlite_ops
 from cycles import (
-    CYCLES_SHEET_NAME, cycle_label, cycle_totals, current_cycle_start,
-    ensure_cycles_sheet, load_cycles, record_cycle_start, should_prompt_new_cycle,
+    cycle_label, cycle_totals, current_cycle_start,
+    should_prompt_new_cycle,
 )
-from excel_schema import CyclesSchema, header_of
+from cycles import _dedup_cycle_label as _dedup_label
+from storage_facade import async_record_cycle_start, async_remove_cycle_start, load_cycles
 from handlers.cycle import cmd_cycle, handle_cycle_callback, maybe_prompt_cycle_start
+
+
+# ── Sync test helpers (direct sqlite_ops, no async overhead) ──────────────────
+
+def record_cycle_start(d):
+    """Seed a cycle boundary synchronously — for use in non-async test bodies."""
+    import settings as _s
+    conn = _sqlite_ops.connect(_s.SQLITE_DB_PATH)
+    try:
+        existing = _sqlite_ops.list_cycles(conn)
+        dates_iso = [r["start_date"] for r in existing]
+        if d.isoformat() in dates_iso:
+            return None
+        existing_dates = [date.fromisoformat(x) for x in dates_iso]
+        label = _dedup_label(d, existing_dates)
+        _sqlite_ops.upsert_cycle(conn, d.isoformat(), label)
+        conn.commit()
+        return label
+    finally:
+        conn.close()
+
+
+def remove_cycle_start(d):
+    """Remove a cycle boundary synchronously — for use in non-async test bodies."""
+    import settings as _s
+    conn = _sqlite_ops.connect(_s.SQLITE_DB_PATH)
+    try:
+        result = _sqlite_ops.delete_cycle(conn, d.isoformat())
+        conn.commit()
+        return result
+    finally:
+        conn.close()
 
 
 def make_update(text="", user_id=123):
@@ -80,16 +114,6 @@ def test_budget_cycle_flag_off_by_default():
 def test_cycle_label_always_carries_year():
     assert cycle_label(date(2026, 8, 25)) == "Aug 2026"
     assert cycle_label(date(2025, 1, 2)) == "Jan 2025"
-
-
-def test_ensure_cycles_sheet_creates_headers():
-    from openpyxl import Workbook
-    wb = Workbook()
-    ws = ensure_cycles_sheet(wb)
-    assert CYCLES_SHEET_NAME in wb.sheetnames
-    assert ws.cell(1, 1).value == header_of(CyclesSchema, "start_date")
-    assert ws.cell(1, 2).value == header_of(CyclesSchema, "label")
-    assert ensure_cycles_sheet(wb) is ws
 
 
 def test_record_and_load_cycles(excel_path):
@@ -160,7 +184,8 @@ def test_cycle_totals_negative_unaccounted_means_over_reported():
 
 def test_cycle_totals_extra_keywords_counts_ad_hoc_salary(monkeypatch):
     """extra_keywords=["wages"] treats a Description-matched row as salary."""
-    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: [])
+    import storage_facade as _sf
+    monkeypatch.setattr(_sf, "load_salary_keywords", lambda: [])
     monkeypatch.setattr("settings.CYCLE_DETECT_KEYWORDS", [])
     df = pd.DataFrame({
         "Date":        ["2026-06-25"],
@@ -228,8 +253,8 @@ async def test_cmd_cycle_remove_bad_args(excel_path, monkeypatch):
 
 def test_remove_cycle_start_roundtrip(excel_path):
     record_cycle_start(date(2026, 6, 25))
-    assert cycles.remove_cycle_start(date(2026, 6, 25)) is True
-    assert cycles.remove_cycle_start(date(2026, 6, 25)) is False
+    assert remove_cycle_start(date(2026, 6, 25)) is True
+    assert remove_cycle_start(date(2026, 6, 25)) is False
     assert load_cycles() == []
     assert record_cycle_start(date(2026, 6, 26)) == "Jun 2026"
 
@@ -306,7 +331,8 @@ def test_salary_mask_empty_category_with_stored_keyword(monkeypatch):
     No empty-alternation regex explosion occurs."""
     monkeypatch.setattr(settings, "SALARY_CATEGORY", "")
     monkeypatch.setattr(settings, "CYCLE_DETECT_KEYWORDS", ["payroll"])
-    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: [])
+    import storage_facade as _sf
+    monkeypatch.setattr(_sf, "load_salary_keywords", lambda: [])
     df = pd.DataFrame({
         "Date":        ["2026-01-10", "2026-01-15", "2026-01-20"],
         "Type":        ["Income",     "Income",     "Income"],
@@ -492,7 +518,8 @@ async def test_maybe_prompt_description_match_no_category(excel_path, monkeypatc
 async def test_maybe_prompt_nonword_edge_keyword_matches(excel_path, monkeypatch):
     """(?<!\\w)...(?!\\w) lookaround matches keywords with non-word-char edges."""
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: ["c++bonus"])
+    import storage_facade as _sf
+    monkeypatch.setattr(_sf, "load_salary_keywords", lambda: ["c++bonus"])
     upd = make_update()
     txn = make_transaction(category="c++bonus")
     await maybe_prompt_cycle_start(upd, txn)
@@ -502,7 +529,8 @@ async def test_maybe_prompt_nonword_edge_keyword_matches(excel_path, monkeypatch
 async def test_maybe_prompt_nonword_edge_no_substring_match(excel_path, monkeypatch):
     """lookaround does not fire when keyword appears as a substring."""
     monkeypatch.setattr(settings, "BUDGET_CYCLE", True)
-    monkeypatch.setattr(cycles, "load_salary_keywords", lambda excel_path=None: ["salary"])
+    import storage_facade as _sf
+    monkeypatch.setattr(_sf, "load_salary_keywords", lambda: ["salary"])
     upd = make_update()
     txn = make_transaction(category="salaryman")
     await maybe_prompt_cycle_start(upd, txn)

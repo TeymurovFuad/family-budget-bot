@@ -11,17 +11,16 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, get_display_currency, set_display_currency, log
 from log_decorators import log_call
-from data import load_budgets, load_rates
-from file_storage import get_excel_path_for_reading, update_category_budget_in_excel
-from storage_facade import load_reference_data
+from file_storage import get_excel_path_for_reading
+from storage_facade import (
+    async_delete_salary_keyword, async_save_salary_keyword, async_update_category_budget,
+    load_budgets, load_rates, load_reference_data, load_salary_keywords,
+)
 from formatters import format_amount
 from validators import parse_amount
 from states import SET_CCY, SET_BUDGET_PICK, SET_BUDGET_AMOUNT, KW_PICK, KW_ADD
 import settings
-from cycles import (
-    MAX_SALARY_KEYWORD_BYTES,
-    async_delete_salary_keyword, async_save_salary_keyword, load_salary_keywords,
-)
+from cycles import MAX_SALARY_KEYWORD_BYTES
 
 # Telegram bot API caps outgoing documents at 50 MB.
 TELEGRAM_MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
@@ -258,7 +257,7 @@ async def setbudget_amount(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return SET_BUDGET_AMOUNT
 
     try:
-        update_category_budget_in_excel(category, new_value)
+        await async_update_category_budget(category, new_value)
     except Exception as e:
         log.exception("Failed to update budget for category %s", category)
         await update.message.reply_text(f"❌ Failed to save: {e}")

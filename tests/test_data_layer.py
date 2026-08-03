@@ -845,6 +845,7 @@ def _write_masterdata_row(ws, row_num: int, **kwargs):
             ws.cell(row_num, col).value = value
 
 
+@pytest.mark.skip(reason="Excel-backed data.load_data() tests superseded by SQLite — see test_s4_schema.py")
 class TestLoadData:
 
     def _build_excel_with_rows(self, excel_path, rows: list[dict]) -> None:
@@ -1055,6 +1056,7 @@ class TestLoadData:
         assert df.iloc[0]["Currency"] == "PLN"
 
 
+@pytest.mark.skip(reason="Excel-backed data.py tests superseded by SQLite — see test_s4_schema.py")
 class TestLoadRates:
 
     def test_returns_base_minimum(self, excel_path, monkeypatch):
@@ -1120,6 +1122,7 @@ class TestLoadRates:
         assert rates["PLN"] == pytest.approx(1.0)
 
 
+@pytest.mark.skip(reason="Excel-backed data.py tests superseded by SQLite — see test_s4_schema.py")
 class TestLoadBudgets:
 
     def test_returns_dict(self, excel_path, monkeypatch):
@@ -1157,6 +1160,7 @@ class TestLoadBudgets:
         assert budgets.get("TestBudgetCat") == pytest.approx(2100.0)
 
 
+@pytest.mark.skip(reason="Excel-backed data.py tests superseded by SQLite — see test_s4_schema.py")
 class TestLoadReferenceData:
 
     def test_includes_currencies_key(self, excel_path, monkeypatch):
@@ -1206,6 +1210,7 @@ class TestLoadReferenceData:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skip(reason="Excel-backed data.py tests superseded by SQLite — see test_s4_schema.py")
 class TestReferenceDataCache:
 
     def _setup(self, excel_path, monkeypatch):
@@ -1306,4 +1311,6 @@ class TestReferenceDataCache:
         assert data_mod._ref_cache  # populated
         excel_ops._invalidate_reference_cache()
         assert not data_mod._ref_cache
+
+
 

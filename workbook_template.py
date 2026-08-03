@@ -62,9 +62,11 @@ def _repair_template_workbook(path: Path) -> None:
                     ws.cell(row, persons_col).value = None
                     changed = True
 
-    from cycles import CYCLES_SHEET_NAME, ensure_cycles_sheet
-    if CYCLES_SHEET_NAME not in wb.sheetnames:
-        ensure_cycles_sheet(wb)
+    _CYCLES_SHEET = "Cycles"
+    if _CYCLES_SHEET not in wb.sheetnames:
+        _ws_cy = wb.create_sheet(_CYCLES_SHEET)
+        _ws_cy.cell(1, 1, "StartDate")
+        _ws_cy.cell(1, 2, "Label")
         changed = True
 
     from excel_schema import repair_dashboard_bounds
@@ -164,8 +166,9 @@ def create_blank_excel(path: Path) -> None:
     ):
         ws_ms.cell(1, c_idx, hdr)
 
-    from cycles import ensure_cycles_sheet
-    ensure_cycles_sheet(wb)
+    _ws_cy = wb.create_sheet("Cycles")
+    _ws_cy.cell(1, 1, "StartDate")
+    _ws_cy.cell(1, 2, "Label")
 
     try:
         from openpyxl.worksheet.datavalidation import DataValidation as _DV

@@ -12,7 +12,7 @@ quick-add messages like "biedronka 45" skip the AI entirely, and bulk rows
 get their category from memory instead of trusting the model.
 
 The map learns from preview edits (`2 category=Transport` in /bulk writes the
-mapping back) and is seeded once from MasterData history on first use.
+mapping back) and is seeded once from transaction history on first use.
 """
 
 import json
@@ -23,8 +23,7 @@ from collections import Counter
 import pandas as pd
 
 import settings
-from excel_schema import MasterDataSchema, header_of
-from file_storage import get_excel_path_for_reading
+import storage_facade
 from validators import clean_merchant_description, coerce_bool
 
 log = logging.getLogger(__name__)
@@ -34,8 +33,8 @@ MERCHANT_MAP_PATH = settings.MERCHANT_MAP_PATH
 # Fields a map entry may carry; everything else is dropped on save.
 _ENTRY_FIELDS = ("label", "category", "type", "is_recurring")
 
-# A merchant must appear this many times in MasterData (with a dominant
-# category) before seeding trusts it.
+# A merchant must appear this many times in the transactions table (with a
+# dominant category) before seeding trusts it.
 _SEED_MIN_OCCURRENCES = 2
 
 
@@ -59,7 +58,7 @@ def _read_map_file() -> dict | None:
 
 
 def save_merchant_map(mapping: dict) -> None:
-    """Persist the merchant map to JSON alongside the Excel file."""
+    """Persist the merchant map to JSON."""
     try:
         MERCHANT_MAP_PATH.parent.mkdir(parents=True, exist_ok=True)
         MERCHANT_MAP_PATH.write_text(
@@ -72,7 +71,7 @@ def save_merchant_map(mapping: dict) -> None:
 def load_merchant_map() -> dict:
     """
     Load the merchant map. On very first use (no file yet) seed it from
-    MasterData history and persist the result, so past imports immediately
+    transaction history and persist the result, so past imports immediately
     make future categorization deterministic.
     """
     existing = _read_map_file()
@@ -81,7 +80,7 @@ def load_merchant_map() -> dict:
     seeded = seed_from_master()
     save_merchant_map(seeded)
     if seeded:
-        log.info("Merchant map seeded from MasterData: %d merchants", len(seeded))
+        log.info("Merchant map seeded from transactions: %d merchants", len(seeded))
     return seeded
 
 
@@ -140,41 +139,38 @@ def rename_category(old_name: str, new_name: str) -> int:
     return updated
 
 
-# ── Seeding from MasterData history ───────────────────────────────────────────
+# ── Seeding from transaction history ──────────────────────────────────────────
 
 def seed_from_master() -> dict:
     """
-    Build an initial map from MasterData: merchants seen >= 2 times whose most
-    common category covers more than half of their rows. Column positions come
-    from excel_schema — never hardcoded.
+    Build an initial map from the transactions table: merchants seen >= 2 times
+    whose most common category covers more than half of their rows.
     """
     try:
-        df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
+        df = storage_facade.load_transactions()
     except Exception as e:
-        log.warning("Merchant-map seeding skipped — could not read MasterData: %s", e)
+        log.warning("Merchant-map seeding skipped — could not read transactions: %s", e)
         return {}
 
-    desc_h = header_of(MasterDataSchema, "description")
-    cat_h = header_of(MasterDataSchema, "category")
-    type_h = header_of(MasterDataSchema, "type")
-    rec_h = header_of(MasterDataSchema, "is_recurring")
-    if desc_h not in df.columns or cat_h not in df.columns:
+    if "Description" not in df.columns or "Category" not in df.columns:
         return {}
 
     groups: dict[str, list[dict]] = {}
     for i in df.index:
-        desc = df.at[i, desc_h]
-        cat = df.at[i, cat_h]
+        desc = df.at[i, "Description"]
+        cat = df.at[i, "Category"]
         if pd.isna(desc) or pd.isna(cat) or not str(desc).strip() or not str(cat).strip():
             continue
         key = merchant_key(desc)
         if not key:
             continue
+        type_val = df.at[i, "Type"] if "Type" in df.columns and pd.notna(df.at[i, "Type"]) else "Expense"
+        rec_val = df.at[i, "IsRecurring"] if "IsRecurring" in df.columns and pd.notna(df.at[i, "IsRecurring"]) else False
         groups.setdefault(key, []).append({
             "label": clean_merchant_description(str(desc).lstrip("'")),
             "category": str(cat).strip(),
-            "type": str(df.at[i, type_h]).strip() if type_h in df.columns and pd.notna(df.at[i, type_h]) else "Expense",
-            "is_recurring": bool(df.at[i, rec_h]) if rec_h in df.columns and pd.notna(df.at[i, rec_h]) else False,
+            "type": str(type_val).strip(),
+            "is_recurring": bool(rec_val),
         })
 
     result: dict[str, dict] = {}
@@ -204,9 +200,9 @@ _RECURRING_MIN_MONTHS = 2
 
 def detect_recurring(description, value) -> bool:
     """
-    True when this merchant appears in MasterData in >= 2 distinct months
-    with a similar amount (±10%). Used to PROPOSE is_recurring on confirm
-    cards — never to set it silently. Returns False on any read problem.
+    True when this merchant appears in the transactions table in >= 2 distinct
+    months with a similar amount (±10%). Used to PROPOSE is_recurring on
+    confirm cards — never to set it silently. Returns False on any read problem.
     """
     key = merchant_key(description)
     try:
@@ -217,28 +213,25 @@ def detect_recurring(description, value) -> bool:
         return False
 
     try:
-        df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
+        df = storage_facade.load_transactions()
     except Exception as e:
-        log.debug("Recurring detection skipped — could not read MasterData: %s", e)
+        log.debug("Recurring detection skipped — could not read transactions: %s", e)
         return False
 
-    desc_h = header_of(MasterDataSchema, "description")
-    val_h = header_of(MasterDataSchema, "value")
-    date_h = header_of(MasterDataSchema, "date")
-    if not all(h in df.columns for h in (desc_h, val_h, date_h)):
+    if not all(h in df.columns for h in ("Description", "Value", "Date")):
         return False
 
     months: set[tuple[int, int]] = set()
     for i in df.index:
-        if merchant_key(df.at[i, desc_h]) != key:
+        if merchant_key(df.at[i, "Description"]) != key:
             continue
         try:
-            row_val = abs(float(df.at[i, val_h]))
+            row_val = abs(float(df.at[i, "Value"]))
         except (TypeError, ValueError):
             continue
         if abs(row_val - target) > target * _RECURRING_AMOUNT_TOLERANCE:
             continue
-        d = pd.to_datetime(df.at[i, date_h], errors="coerce")
+        d = pd.to_datetime(df.at[i, "Date"], errors="coerce")
         if pd.isna(d):
             continue
         months.add((d.year, d.month))
