@@ -50,15 +50,6 @@ def client(monkeypatch, tmp_path):
     return c
 
 
-def _lock_token(client, txn_id: int) -> str:
-    """Fetch the current lock token for a transaction via the row endpoint."""
-    resp = client.get(f"/transactions/{txn_id}/row")
-    assert resp.status_code == 200
-    # date_modified_utc is embedded in the delete-confirm hidden input elsewhere;
-    # here we retrieve it directly from the DB via the test's own connection.
-    return ""  # filled in per-test where needed
-
-
 def _get_lock(tmp_path, txn_id: int) -> str:
     import sqlite3
     conn = sqlite3.connect(str(tmp_path / "bulk.db"))

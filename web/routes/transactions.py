@@ -527,7 +527,10 @@ async def txn_delete_submit(
 @router.get("/transactions/bulk-confirm", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def txn_bulk_confirm(request: Request):
-    ids = [int(i) for i in request.query_params.getlist("ids[]")]
+    try:
+        ids = [int(i) for i in request.query_params.getlist("ids[]")]
+    except (ValueError, TypeError):
+        return HTMLResponse(status_code=400)
     lock_tokens = request.query_params.getlist("lock_tokens[]")
     pairs = list(zip(ids, lock_tokens))
     ctx = {"pairs": pairs, "count": len(ids)}
@@ -541,7 +544,10 @@ async def txn_bulk_confirm(request: Request):
              dependencies=[Depends(require_session)])
 async def txn_bulk_delete(request: Request):
     form = await request.form()
-    ids = [int(i) for i in form.getlist("ids[]")]
+    try:
+        ids = [int(i) for i in form.getlist("ids[]")]
+    except (ValueError, TypeError):
+        return HTMLResponse(status_code=400)
     lock_tokens = list(form.getlist("lock_tokens[]"))
     pairs = list(zip(ids, lock_tokens))
     results = await bulk_delete_web_transactions(pairs)
@@ -568,7 +574,10 @@ _BULK_EDIT_FIELDS = ("category", "person", "type")
              dependencies=[Depends(require_session)])
 async def txn_bulk_edit(request: Request):
     form = await request.form()
-    ids = [int(i) for i in form.getlist("ids[]")]
+    try:
+        ids = [int(i) for i in form.getlist("ids[]")]
+    except (ValueError, TypeError):
+        return HTMLResponse(status_code=400)
     lock_tokens = list(form.getlist("lock_tokens[]"))
     bulk_field = str(form.get("bulk_field", "")).strip()
     bulk_value = str(form.get("bulk_value", "")).strip()

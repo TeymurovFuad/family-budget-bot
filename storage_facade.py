@@ -556,8 +556,14 @@ async def bulk_delete_web_transactions(pairs: list[tuple[int, str]]) -> list[dic
     return await loop.run_in_executor(None, _bulk_delete_sync, pairs)
 
 
+_ALLOWED_BULK_COLUMNS = {"category", "person", "type", "date_modified_utc"}
+
+
 def _bulk_edit_sync(pairs: list[tuple[int, str]], fields: dict) -> list[dict]:
     """Blocking bulk edit with BEGIN IMMEDIATE and per-row optimistic-lock checks."""
+    bad = [k for k in fields if k not in _ALLOWED_BULK_COLUMNS]
+    if bad:
+        raise ValueError(f"Disallowed column(s) in bulk edit: {bad}")
     results: list[dict] = []
     conn = _conn()
     try:
