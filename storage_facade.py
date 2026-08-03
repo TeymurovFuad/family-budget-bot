@@ -630,11 +630,12 @@ def add_category(name: str) -> bool:
     conn = _conn()
     try:
         row = conn.execute(
-            f"SELECT active FROM {sqlite_ops.TABLE_CATEGORIES} WHERE name = ?",
+            f"SELECT active, budget_base FROM {sqlite_ops.TABLE_CATEGORIES} WHERE name = ?",
             (name,)).fetchone()
         if row and row["active"]:
             return False
-        sqlite_ops.upsert_category(conn, name, budget_base=None, active=True)
+        existing_budget = row["budget_base"] if row else None
+        sqlite_ops.upsert_category(conn, name, budget_base=existing_budget, active=True)
         conn.commit()
     finally:
         conn.close()
@@ -764,13 +765,14 @@ def set_owner_display_currency(ccy: str) -> None:
     ccy = ccy.strip().upper()
     if not ccy:
         raise ValueError("Currency code cannot be empty.")
+    if not settings.ALLOWED_TELEGRAM_IDS:
+        raise RuntimeError("No owner UID configured in ALLOWED_TELEGRAM_IDS.")
     from file_storage import load_user_prefs, save_user_prefs
     prefs = load_user_prefs()
     if "currency" not in prefs:
         prefs["currency"] = {}
-    if settings.ALLOWED_TELEGRAM_IDS:
-        uid = str(settings.ALLOWED_TELEGRAM_IDS[0])
-        prefs["currency"][uid] = ccy
+    uid = str(settings.ALLOWED_TELEGRAM_IDS[0])
+    prefs["currency"][uid] = ccy
     save_user_prefs(prefs)
     log.info("Set owner display currency to '%s'", ccy)
 
@@ -783,7 +785,7 @@ async def refresh_currency_rates() -> dict[str, float]:
     """
     import httpx
 
-    base = str(settings.DISPLAY_CURRENCY).strip().upper()
+    base = get_owner_display_currency()
     urls = [
         f"https://api.frankfurter.dev/v1/latest?from={base}",
         f"https://api.frankfurter.app/latest?from={base}",
