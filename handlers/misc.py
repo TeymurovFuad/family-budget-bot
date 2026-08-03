@@ -343,6 +343,27 @@ async def keywords_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     return KW_PICK
 
 
+@auth_write
+@log_call()
+async def cmd_sync(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = await update.message.reply_text("⏳ Syncing SQLite → Excel…")
+    try:
+        from storage_facade import trigger_excel_export, get_last_export_time
+        await trigger_excel_export()
+        ts = get_last_export_time()
+        ts_label = ts[:19].replace("T", " ") + " UTC" if ts else "unknown"
+        await msg.edit_text(
+            f"✅ Export complete\\.\nSaved: `{ts_label}`",
+            parse_mode="MarkdownV2",
+        )
+    except Exception:
+        log.exception("Excel sync failed")
+        await msg.edit_text(
+            "❌ Sync failed\\. Error logged on server\\.",
+            parse_mode="MarkdownV2",
+        )
+
+
 @log_call()
 async def keywords_add_word(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     word = (update.message.text or "").strip().lower()

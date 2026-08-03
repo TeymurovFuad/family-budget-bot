@@ -794,6 +794,37 @@ async def async_delete_salary_keyword(keyword: str) -> bool:
     return await loop.run_in_executor(None, _sync)
 
 
+# ── On-demand Excel export ────────────────────────────────────────────────────
+
+def get_last_export_time() -> str | None:
+    """Return the ts of the most recent successful EXPORT from sync_log, or None."""
+    try:
+        with _get_conn() as conn:
+            row = conn.execute(
+                f"SELECT ts FROM {sqlite_ops.TABLE_SYNC_LOG} "
+                f"WHERE direction = ? AND status = ? ORDER BY id DESC LIMIT 1",
+                (SyncDirection.EXPORT, SyncStatus.OK),
+            ).fetchone()
+            return row["ts"] if row else None
+    except Exception:
+        return None
+
+
+def _trigger_excel_export_sync() -> None:
+    from excel_export import generate_excel_from_sqlite
+    generate_excel_from_sqlite(
+        str(settings.SQLITE_DB_PATH),
+        str(settings.DEFAULT_TEMPLATE_PATH),
+        str(settings.EXCEL_EXPORT_PATH),
+    )
+
+
+async def trigger_excel_export() -> None:
+    """Run a full SQLite → Excel export in a thread. Exceptions propagate."""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _trigger_excel_export_sync)
+
+
 async def async_apply_category_setup(
     categories: list[tuple[str, str]], renames: list[tuple[str, str]]
 ) -> None:

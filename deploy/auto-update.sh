@@ -31,6 +31,9 @@ echo "Deployed $(git rev-parse --short HEAD) and restarted $SERVICE"
 # failure here must never abort the script or block notify_update() below —
 # git pull already succeeded, and the next timer run would short-circuit at
 # the LOCAL=REMOTE check above, so a hard failure here would be permanent.
+# budget-excel-sync.timer runs independently of the bot and web service — it
+# persists across restarts and does NOT need to be restarted here on update.
+
 if systemctl is-enabled --quiet "${WEB_SERVICE}.service" 2>/dev/null; then
     if sudo systemctl restart "$WEB_SERVICE"; then
         echo "Also restarted $WEB_SERVICE"

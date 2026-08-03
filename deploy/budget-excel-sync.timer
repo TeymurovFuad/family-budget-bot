@@ -1,0 +1,11 @@
+[Unit]
+Description=Budget Bot — SQLite to Excel export (every 6 hours)
+Requires=budget-excel-sync.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+Unit=budget-excel-sync.service
+
+[Install]
+WantedBy=timers.target

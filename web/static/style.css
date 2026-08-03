@@ -96,6 +96,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
   flex-wrap: wrap;
 }
 .muted { opacity: .7; font-size: .85rem; }
+.error-msg { color: var(--money-neg); font-size: var(--fs-sm, 0.85rem); margin: var(--space-2, 8px) 0 0; }
 
 /* ── Form controls ─────────────────────────────────────────────────────── */
 

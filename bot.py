@@ -60,6 +60,7 @@ from handlers.misc import (
     cmd_help, cmd_setcurrency, cmd_export, setcurrency_pick,
     cmd_setbudget, setbudget_pick, setbudget_amount,
     cmd_keywords, keywords_callback, keywords_add_word,
+    cmd_sync,
 )
 from handlers.quick_conv import handle_quick_add, quick_confirm
 from handlers.setup_conv import setup_conversation_handler
@@ -131,6 +132,7 @@ BOT_COMMANDS = [
     BotCommand("menu",        "Show the button menu"),
     BotCommand("help",        "List all commands with what they do"),
     BotCommand("start",       "Welcome message and main menu"),
+    BotCommand("sync",        "Export SQLite data to Excel (owner only)"),
 ]
 
 
@@ -205,6 +207,7 @@ def build_application() -> Application:
     app.add_handler(CommandHandler("range",   cmd_range))
     app.add_handler(CommandHandler("export",  cmd_export))
     app.add_handler(CommandHandler("cycle",   cmd_cycle))
+    app.add_handler(CommandHandler("sync",    cmd_sync))
 
     # ── profile list / delete inline callbacks (global — outside any conversation) ──
     app.add_handler(CallbackQueryHandler(bulk_profile_list_callback, pattern="^profile_del[_:]"))
