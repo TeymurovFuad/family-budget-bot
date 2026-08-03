@@ -172,6 +172,18 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     person = person if person in ref["persons"] else ""
     category = category if category in ref["categories"] else ""
     q = str(q).strip()
+
+    # Detect numeric search term for value_base matching (Feature B).
+    # Negative values are not searched (expenses stored positive in value_base).
+    value_search: float | None = None
+    if q:
+        try:
+            parsed = float(q)
+            if parsed >= 0:
+                value_search = parsed
+        except ValueError:
+            pass
+
     sort_key = sort if sort in SORT_OPTIONS else DEFAULT_SORT
     per_page = per_page if per_page in PER_PAGE_OPTIONS else PER_PAGE_DEFAULT
     sort_by, sort_dir, _ = SORT_OPTIONS[sort_key]
@@ -191,7 +203,8 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
 
     total = count_transactions(filters or None,
                                date_from=d_from, date_to=d_to,
-                               description_contains=q or None)
+                               description_contains=q or None,
+                               value_search=value_search)
     total_pages = max(1, ceil(total / per_page))
     offset = max(0, int(offset))
     offset = min(offset, (total_pages - 1) * per_page)
@@ -200,6 +213,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     df = load_transactions(filters or None,
                            date_from=d_from, date_to=d_to,
                            description_contains=q or None,
+                           value_search=value_search,
                            sort_by=sort_by, sort_dir=sort_dir,
                            limit=per_page, offset=offset)
 

@@ -28,8 +28,8 @@
   {# Keep a non-default page size across filter changes (default is
      deliberately never emitted, mirroring sort/per_page URL rules). #}
   {% if per_page != per_page_default %}<input type="hidden" name="per_page" value="{{ per_page }}">{% endif %}
-  <input type="search" name="q" value="{{ q }}" placeholder="Search description&hellip;"
-         aria-label="Search description"
+  <input type="search" name="q" value="{{ q }}" placeholder="Search description or amount&hellip;"
+         aria-label="Search description or amount"
          hx-get="/transactions" hx-target="#txn-list" hx-push-url="true"
          hx-trigger="input changed delay:400ms, search" hx-include="closest form">
   {# Preset range chips: plain server-rendered links, the primary path for
