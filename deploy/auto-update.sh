@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-/home/ubuntu/budget-bot}"
 SERVICE="${SERVICE:-budget-bot}"
 WEB_SERVICE="${WEB_SERVICE:-budget-web}"
+SYNC_SERVICE="${SYNC_SERVICE:-budget-excel-sync}"
 
 cd "$REPO_DIR"
 
@@ -45,8 +46,8 @@ fi
 # systemctl start on a oneshot runs it once and exits — the scheduled timer continues
 # independently. Failure here is non-fatal: the next timer run will cover it.
 sudo systemctl daemon-reload
-if sudo systemctl start budget-excel-sync.service; then
-    echo "Excel export triggered (budget-excel-sync.service)"
+if sudo systemctl start "${SYNC_SERVICE}.service"; then
+    echo "Excel export triggered (${SYNC_SERVICE}.service)"
 else
     echo "auto-update: Excel export failed, continuing (timer will retry)"
 fi
