@@ -31,8 +31,6 @@ echo "Deployed $(git rev-parse --short HEAD) and restarted $SERVICE"
 # failure here must never abort the script or block notify_update() below —
 # git pull already succeeded, and the next timer run would short-circuit at
 # the LOCAL=REMOTE check above, so a hard failure here would be permanent.
-# budget-excel-sync.timer runs independently of the bot and web service — it
-# persists across restarts and does NOT need to be restarted here on update.
 
 if systemctl is-enabled --quiet "${WEB_SERVICE}.service" 2>/dev/null; then
     if sudo systemctl restart "$WEB_SERVICE"; then
@@ -40,6 +38,17 @@ if systemctl is-enabled --quiet "${WEB_SERVICE}.service" 2>/dev/null; then
     else
         echo "auto-update: failed to restart $WEB_SERVICE, continuing"
     fi
+fi
+
+# Re-export SQLite → Excel immediately after every pull so the file stays fresh.
+# daemon-reload picks up any changes to the .service/.timer unit files from the pull.
+# systemctl start on a oneshot runs it once and exits — the scheduled timer continues
+# independently. Failure here is non-fatal: the next timer run will cover it.
+sudo systemctl daemon-reload
+if sudo systemctl start budget-excel-sync.service; then
+    echo "Excel export triggered (budget-excel-sync.service)"
+else
+    echo "auto-update: Excel export failed, continuing (timer will retry)"
 fi
 
 notify_update() {
