@@ -1,0 +1,33 @@
+{# _txn_bulk_confirm.html — Bulk delete confirmation modal fragment. #}
+<dialog class="modal" id="bulk-confirm-modal" aria-labelledby="bconf-title">
+  <div class="modal-header">
+    <h2 id="bconf-title">Delete {{ count }} transaction{{ '' if count == 1 else 's' }}?</h2>
+    <button type="button" class="modal-close-btn"
+            onclick="this.closest('dialog').close()"
+            aria-label="Close">&#10005;</button>
+  </div>
+  <form id="bulk-delete-form"
+        hx-post="/transactions/bulk-delete"
+        hx-swap="none">
+    <div class="modal-body">
+      <p>This action cannot be undone.</p>
+      {% for id, token in pairs %}
+      <input type="hidden" name="ids[]" value="{{ id }}">
+      <input type="hidden" name="lock_tokens[]" value="{{ token }}">
+      {% endfor %}
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn--ghost"
+              onclick="this.closest('dialog').close()">Cancel</button>
+      <button type="submit" class="btn btn--danger" autofocus>
+        Delete {{ count }}
+      </button>
+    </div>
+  </form>
+  <script>
+    (function() {
+      var dlg = document.getElementById('bulk-confirm-modal');
+      if (dlg && typeof dlg.showModal === 'function') { dlg.showModal(); }
+    })();
+  </script>
+</dialog>

@@ -39,6 +39,8 @@ import settings
 from storage_facade import (
     ConflictError,
     add_web_transaction,
+    bulk_delete_web_transactions,
+    bulk_edit_web_transactions,
     count_transactions,
     delete_web_transaction,
     load_reference_data,
@@ -239,6 +241,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
             "category": r["Category"],
             "person": r["Person"],
             "description": r["Description"] or "",
+            "lock_token": str(r.get("Date Modified (UTC)", "") or ""),
         })
 
     # Grouped (date sorts) vs flat (all other sorts) rendering.
@@ -307,6 +310,7 @@ async def transactions(request: Request, q: str = "", date_from: str = "",
     ctx = {
         "rows": rows, "groups": groups, "grouped": grouped,
         "persons": ref["persons"], "categories": ref["categories"],
+        "txn_types": ref["txn_types"],
         "q": q, "person": person, "category": category,
         "date_from": date_from_str, "date_to": date_to_str,
         "sort": sort_key, "sort_options": SORT_OPTIONS,
@@ -449,6 +453,16 @@ async def txn_edit_submit(
         return request.app.state.templates.TemplateResponse(
             request, "_txn_conflict.html", ctx, status_code=409)
 
+    # Learn the corrected category so future imports apply it automatically.
+    _desc = cleaned.get("description") or ""
+    _cat = cleaned.get("category") or ""
+    if _desc and _cat:
+        try:
+            import merchant_map as _mm
+            _mm.learn_from_row(cleaned)
+        except Exception:
+            pass  # merchant map is best-effort; never block the edit response
+
     updated_row = await load_transaction_by_id(id)
     display_currency = str(get_session_currency(request)).strip().upper()
     ctx = {"row": updated_row, "id": id, "display_currency": display_currency}
@@ -506,3 +520,106 @@ async def txn_delete_submit(
             request, "_txn_conflict.html", ctx, status_code=409)
     return HTMLResponse(
         f'<div id="txn-{id}" style="display:none" aria-hidden="true"></div>')
+
+
+# ── GET /transactions/bulk-confirm ────────────────────────────────────────────
+
+@router.get("/transactions/bulk-confirm", response_class=HTMLResponse,
+            dependencies=[Depends(require_session)])
+async def txn_bulk_confirm(request: Request):
+    ids = [int(i) for i in request.query_params.getlist("ids[]")]
+    lock_tokens = request.query_params.getlist("lock_tokens[]")
+    pairs = list(zip(ids, lock_tokens))
+    ctx = {"pairs": pairs, "count": len(ids)}
+    return request.app.state.templates.TemplateResponse(
+        request, "_txn_bulk_confirm.html", ctx)
+
+
+# ── POST /transactions/bulk-delete ────────────────────────────────────────────
+
+@router.post("/transactions/bulk-delete", response_class=HTMLResponse,
+             dependencies=[Depends(require_session)])
+async def txn_bulk_delete(request: Request):
+    form = await request.form()
+    ids = [int(i) for i in form.getlist("ids[]")]
+    lock_tokens = list(form.getlist("lock_tokens[]"))
+    pairs = list(zip(ids, lock_tokens))
+    results = await bulk_delete_web_transactions(pairs)
+    parts = []
+    for r in results:
+        id_ = r["id"]
+        if r["status"] == "deleted":
+            parts.append(
+                f'<div id="txn-{id_}" hx-swap-oob="outerHTML:#txn-{id_}" '
+                f'style="display:none" aria-hidden="true"></div>')
+        else:
+            msg = r["message"]
+            parts.append(
+                f'<div id="txn-{id_}" hx-swap-oob="outerHTML:#txn-{id_}" '
+                f'class="txn txn--error"><p class="error">{msg}</p></div>')
+    return HTMLResponse("".join(parts))
+
+
+# ── POST /transactions/bulk-edit ──────────────────────────────────────────────
+
+_BULK_EDIT_FIELDS = ("category", "person", "type")
+
+@router.post("/transactions/bulk-edit", response_class=HTMLResponse,
+             dependencies=[Depends(require_session)])
+async def txn_bulk_edit(request: Request):
+    form = await request.form()
+    ids = [int(i) for i in form.getlist("ids[]")]
+    lock_tokens = list(form.getlist("lock_tokens[]"))
+    bulk_field = str(form.get("bulk_field", "")).strip()
+    bulk_value = str(form.get("bulk_value", "")).strip()
+
+    if bulk_field not in _BULK_EDIT_FIELDS:
+        from fastapi.responses import Response
+        return Response(status_code=400,
+                        content=f"Invalid field: {bulk_field!r}. Must be one of {_BULK_EDIT_FIELDS}.")
+
+    ref = load_reference_data()
+    valid_values = {
+        "category": ref["categories"],
+        "person": ref["persons"],
+        "type": ref["txn_types"],
+    }[bulk_field]
+    if bulk_value not in valid_values:
+        from fastapi.responses import Response
+        return Response(status_code=422,
+                        content=f"Invalid value {bulk_value!r} for field {bulk_field!r}.")
+
+    pairs = list(zip(ids, lock_tokens))
+    results = await bulk_edit_web_transactions(pairs, {bulk_field: bulk_value})
+
+    display_currency = str(get_session_currency(request)).strip().upper()
+    tpl = request.app.state.templates.get_template("_txn_row.html")
+    parts = []
+    _mm = None
+    if bulk_field == "category":
+        try:
+            import merchant_map as _merchant_map
+            _mm = _merchant_map
+        except Exception:
+            pass
+
+    for r in results:
+        id_ = r["id"]
+        if r["status"] == "updated":
+            row = await load_transaction_by_id(id_)
+            if _mm is not None and row:
+                try:
+                    _mm.learn_from_row(row)
+                except Exception:
+                    pass
+            html = tpl.render({"row": row, "id": id_, "display_currency": display_currency})
+            html = html.replace(
+                '<div class="txn"',
+                f'<div hx-swap-oob="outerHTML:#txn-{id_}" class="txn"', 1)
+            parts.append(html)
+        else:
+            msg = r["message"]
+            parts.append(
+                f'<div id="txn-{id_}" hx-swap-oob="outerHTML:#txn-{id_}" '
+                f'class="txn txn--error"><p class="error">{msg}</p></div>')
+    return HTMLResponse("".join(parts))

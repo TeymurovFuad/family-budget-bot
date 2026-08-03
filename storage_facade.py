@@ -519,6 +519,84 @@ async def delete_web_transaction(id: int, lock_token: str) -> None:
     await loop.run_in_executor(None, _delete_web_transaction_sync, id, lock_token)
 
 
+def _bulk_delete_sync(pairs: list[tuple[int, str]]) -> list[dict]:
+    """Blocking bulk delete with BEGIN IMMEDIATE and per-row optimistic-lock checks."""
+    results: list[dict] = []
+    conn = _conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for id_, lock_token in pairs:
+            row = conn.execute(
+                f"SELECT date_modified_utc FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?",
+                (id_,)).fetchone()
+            if row is None:
+                results.append({"id": id_, "status": "not_found",
+                                 "message": f"Transaction {id_} not found."})
+                continue
+            stored_token = row["date_modified_utc"] or ""
+            if stored_token != lock_token:
+                results.append({"id": id_, "status": "conflict",
+                                 "message": f"Transaction {id_} was modified by another writer."})
+                continue
+            conn.execute(
+                f"DELETE FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?", (id_,))
+            results.append({"id": id_, "status": "deleted", "message": ""})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return results
+
+
+async def bulk_delete_web_transactions(pairs: list[tuple[int, str]]) -> list[dict]:
+    """Bulk-delete transactions with optimistic-lock checks. Returns per-row status dicts."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _bulk_delete_sync, pairs)
+
+
+def _bulk_edit_sync(pairs: list[tuple[int, str]], fields: dict) -> list[dict]:
+    """Blocking bulk edit with BEGIN IMMEDIATE and per-row optimistic-lock checks."""
+    results: list[dict] = []
+    conn = _conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for id_, lock_token in pairs:
+            row = conn.execute(
+                f"SELECT date_modified_utc FROM {sqlite_ops.TABLE_TRANSACTIONS} WHERE id = ?",
+                (id_,)).fetchone()
+            if row is None:
+                results.append({"id": id_, "status": "not_found",
+                                 "message": f"Transaction {id_} not found."})
+                continue
+            stored_token = row["date_modified_utc"] or ""
+            if stored_token != lock_token:
+                results.append({"id": id_, "status": "conflict",
+                                 "message": f"Transaction {id_} was modified by another writer."})
+                continue
+            updates = dict(fields)
+            updates["date_modified_utc"] = datetime.now(timezone.utc).isoformat()
+            assignments = ", ".join(f"{k} = ?" for k in updates)
+            conn.execute(
+                f"UPDATE {sqlite_ops.TABLE_TRANSACTIONS} SET {assignments} WHERE id = ?",
+                [*updates.values(), id_])
+            results.append({"id": id_, "status": "updated", "message": ""})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return results
+
+
+async def bulk_edit_web_transactions(pairs: list[tuple[int, str]], fields: dict) -> list[dict]:
+    """Bulk-edit one field on multiple transactions with optimistic-lock checks."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _bulk_edit_sync, pairs, fields)
+
+
 def _load_transaction_by_id_sync(txn_id: int) -> dict | None:
     import sqlite3 as _sqlite3
     conn = _sqlite3.connect(settings.SQLITE_DB_PATH)

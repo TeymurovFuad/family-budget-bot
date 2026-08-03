@@ -5,8 +5,25 @@
    (all other sorts). #}
 {% from "_macros.html" import amount, chip, pagination %}
 
+<script type="application/json" id="txn-ref-data">{"categories": {{ categories | tojson }}, "persons": {{ persons | tojson }}, "txn_types": {{ txn_types | tojson }}}</script>
+
+<div class="bulk-bar" id="bulk-bar" hidden aria-live="polite">
+  <label class="bulk-select-all">
+    <input type="checkbox" id="select-all-cb" aria-label="Select all on this page">
+    <span>Select all</span>
+  </label>
+  <span class="bulk-count" id="bulk-count">0 selected</span>
+  <button type="button" class="btn btn--ghost" id="bulk-edit-btn" disabled>Edit field</button>
+  <button type="button" class="btn btn--danger" id="bulk-delete-btn" disabled>Delete</button>
+</div>
+
 {%- macro txn_row(r, show_date=false) %}
 <div class="txn" id="txn-{{ r.id }}">
+  {%- if r.id %}
+  <label class="txn-select" aria-label="Select transaction">
+    <input type="checkbox" class="txn-checkbox" data-id="{{ r.id }}" data-lock="{{ r.lock_token }}" value="{{ r.id }}">
+  </label>
+  {%- endif %}
   <div class="txn-main">
     <div class="txn-desc">{{ r.description or r.category or 'Uncategorised' }}</div>
     <div class="txn-sub">
