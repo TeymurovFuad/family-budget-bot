@@ -1723,6 +1723,33 @@ Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
 - [ ] **`docs/architecture.md` has no route catalogue for the 6 new write routes** — add when next touching the architecture docs.
 - [ ] **`is_recurring` checkbox is silently dropped on add** — `_add_web_transaction_sync` hardcodes `False`; document the limitation or fix it.
 
+## Follow-up: PR #118 review notes (S4 SQLite-only, 2026-08-03)
+
+### Architect
+
+- [ ] `handlers/misc.py` retains direct `from file_storage import get_excel_path_for_reading` — handlers must not bypass storage_facade
+- [ ] `workbook_template.py` hardcodes `"StartDate"` / `"Label"` column headers instead of using `header_of(CyclesSchema, ...)` — silent schema drift risk with `cycle_dashboard.py`
+
+### Tester
+
+- [ ] `storage_facade.load_category_types()` has no unit tests
+- [ ] `storage_facade.get_recent_transactions_raw()` has no unit tests
+- [ ] `async_update_currency_rates`, `async_update_category_budget`, `async_apply_category_setup` need direct async write round-trip tests
+- [ ] `sqlite_ops.replace_categories()` and `sqlite_ops.rename_category()` have no direct tests
+- [ ] Migration script import blocks (cycles, salary keywords, category types) are not covered by tests
+- [ ] `load_dedup_evidence`, `detect_recurring`, `seed_from_master` paths uncovered — skipped tests have no SQLite replacements
+
+### TW
+
+- [ ] New `storage_facade` sync reads and async writes lack docstrings — inconsistent with existing convention
+- [ ] `RowMovedError = RowMismatchError` alias has no explanatory comment — backward-compat intent unclear
+- [ ] Deploy notes need rollback steps (delete DB file and revert code to restore Excel-read path)
+- [ ] `_seed_cycles_to_sqlite` helper copy-pasted into 3 test files — extract to `tests/conftest.py`
+
+### EM
+
+- [ ] 8 skipped Excel-backed tests need SQLite-native replacements written (`TestLoadTransactionData`, `TestLoadCurrencyRates`, `TestLoadDataCurrencyDefault`, `TestScheduledReportFillna`, `TestLoadDedupEvidenceNullCurrency`, `TestDetectRecurring`, `test_seed_from_master`, `test_setbudget_full_flow` if not fixed in blockers)
+
 ## Notes
 
 - Findings about `excel_schema` adoption, atomic saves, phantom-row replay, shared row-writer,
