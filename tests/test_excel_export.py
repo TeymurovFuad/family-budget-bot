@@ -97,4 +97,6 @@ def test_export_calls_dashboard_resync(seeded_db, template, tmp_path, monkeypatc
     generate_excel_from_sqlite(seeded_db, template, out)
 
     mock_dash.assert_called_once()
+    args, _ = mock_dash.call_args
+    assert len(args[1]) > 0
     mock_cycle.assert_called_once()
