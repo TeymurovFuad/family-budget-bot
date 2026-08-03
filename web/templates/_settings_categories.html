@@ -1,0 +1,33 @@
+<h2>Categories</h2>
+{% if error %}<p class="error-msg">{{ error }}</p>{% endif %}
+{% if categories %}
+<ul class="settings-list">
+  {% for cat in categories %}
+  {% set enc = cat | urlencode %}
+  {% set budget = category_budgets.get(cat) %}
+  <li class="settings-list-item" id="cat-row-{{ enc }}">
+    <span class="item-name">{{ cat }}</span>
+    <span class="cat-budget muted">
+      {% if budget %}Budget: {{ budget | int }}{% else %}Budget: —{% endif %}
+    </span>
+    <button class="btn btn--ghost btn--sm"
+            hx-get="/settings/categories/{{ enc }}/budget-form"
+            hx-target="#cat-row-{{ enc }}"
+            hx-swap="outerHTML">Edit budget</button>
+    <button class="btn btn--ghost btn--sm"
+            hx-get="/settings/categories/{{ enc }}/rename-form"
+            hx-target="#cat-row-{{ enc }}"
+            hx-swap="outerHTML">Rename</button>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No categories yet. Add one below.</p>
+{% endif %}
+<form class="inline-form"
+      hx-post="/settings/categories/add"
+      hx-target="#categories-section"
+      hx-swap="outerHTML">
+  <input type="text" name="name" placeholder="New category name" maxlength="60" required>
+  <button type="submit" class="btn btn--primary">Add</button>
+</form>

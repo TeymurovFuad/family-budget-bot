@@ -1,0 +1,13 @@
+<li class="settings-list-item" id="cat-row-{{ name | urlencode }}">
+  <form class="inline-form"
+        hx-post="/settings/categories/{{ name | urlencode }}/rename"
+        hx-target="#categories-section"
+        hx-swap="outerHTML">
+    <input type="text" name="new_name" value="{{ name }}" maxlength="60" autofocus required>
+    <button type="submit" class="btn btn--primary btn--sm">Save</button>
+    <a class="btn btn--ghost btn--sm"
+       hx-get="/settings/categories/{{ name | urlencode }}/row"
+       hx-target="#cat-row-{{ name | urlencode }}"
+       hx-swap="outerHTML">Cancel</a>
+  </form>
+</li>

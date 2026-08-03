@@ -452,6 +452,87 @@ def delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
         log.info("Deleted MasterData row %d", row_idx)
 
 
+def append_category_to_lists_sheet(name: str) -> None:
+    """Append a new category name to the first empty row in the Categories column of the Lists sheet."""
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb["Lists"]
+
+        idx = col_indices(ws, ListsSchema)
+        cat_col = idx.get("categories")
+        if cat_col is None:
+            log.warning("Categories column not found in Lists sheet — category not appended")
+            return
+
+        # Find first empty cell in the categories column (from row 2 down)
+        target_row = 2
+        for row in range(2, ws.max_row + 2):
+            val = ws.cell(row, cat_col).value
+            if val is None or (isinstance(val, str) and val.strip() == ""):
+                target_row = row
+                break
+
+        ws.cell(target_row, cat_col, name)
+        atomic_save(wb, excel_path)
+        log.info("Appended category '%s' to Lists sheet row %d", name, target_row)
+    _invalidate_reference_cache()
+
+
+def rename_category_in_lists_sheet(old: str, new: str) -> None:
+    """Rename a category in the Categories column of the Lists sheet."""
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb["Lists"]
+
+        idx = col_indices(ws, ListsSchema)
+        cat_col = idx.get("categories")
+        if cat_col is None:
+            log.warning("Categories column not found in Lists sheet — category not renamed")
+            return
+
+        for row in range(2, ws.max_row + 1):
+            val = ws.cell(row, cat_col).value
+            if val is not None and str(val).strip() == old:
+                ws.cell(row, cat_col, new)
+                atomic_save(wb, excel_path)
+                log.info("Renamed category '%s' → '%s' in Lists sheet", old, new)
+                _invalidate_reference_cache()
+                return
+
+        log.warning("Category '%s' not found in Lists sheet — not renamed", old)
+
+
+def append_person_to_lists_sheet(name: str) -> None:
+    """Append a new person name to the first empty row in the Persons column of the Lists sheet."""
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb["Lists"]
+
+        idx = col_indices(ws, ListsSchema)
+        persons_col = idx.get("persons")
+        if persons_col is None:
+            log.warning("Persons column not found in Lists sheet — person not appended")
+            return
+
+        target_row = 2
+        for row in range(2, ws.max_row + 2):
+            val = ws.cell(row, persons_col).value
+            if val is None or (isinstance(val, str) and val.strip() == ""):
+                target_row = row
+                break
+
+        ws.cell(target_row, persons_col, name)
+        atomic_save(wb, excel_path)
+        log.info("Appended person '%s' to Lists sheet row %d", name, target_row)
+    _invalidate_reference_cache()
+
+
 def update_transaction_field(row_idx: int, field, value=None, expected: dict | None = None) -> None:
     """
     Update one or more fields of a MasterData row in a single save.

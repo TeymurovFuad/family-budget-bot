@@ -1,0 +1,14 @@
+<li class="settings-list-item" id="cat-row-{{ name | urlencode }}">
+  <span class="item-name">{{ name }}</span>
+  <span class="cat-budget muted">
+    {% if budget %}Budget: {{ budget | int }}{% else %}Budget: —{% endif %}
+  </span>
+  <button class="btn btn--ghost btn--sm"
+          hx-get="/settings/categories/{{ name | urlencode }}/budget-form"
+          hx-target="#cat-row-{{ name | urlencode }}"
+          hx-swap="outerHTML">Edit budget</button>
+  <button class="btn btn--ghost btn--sm"
+          hx-get="/settings/categories/{{ name | urlencode }}/rename-form"
+          hx-target="#cat-row-{{ name | urlencode }}"
+          hx-swap="outerHTML">Rename</button>
+</li>
