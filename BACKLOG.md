@@ -15,7 +15,7 @@ Statement parsing, bulk preview, dedup UX, and person attribution.
 - [x] **Statement profile saved with wrong decimal separator corrupts every amount (79.99 → 7999)** — fixed: (a) profile list shows separator (`bulk_conv.py:75-77`); (b) debit/credit-split message includes separator (`bulk_conv.py:284-287`); (c) "Fix settings" keyboard handles decimal/date/sign (`bulk_conv.py:345-351`); (d) `validate_proposal_against_samples` sanity check (`statement_profiles.py:568-602`, called at `bulk_conv.py:1818`).
 - [x] **Statement imports categorize everything as 'Other'** — fixed: `_apply_ai_categorization` wired into `_do_finish_profile_parse` (`bulk_conv.py:485-487`).
 - [x] **Bulk preview separator orphan at page break** — fixed: `_format_bulk_preview` strips trailing separators before flushing each page (`bulk_conv.py:1395-1397`).
-- [ ] **Report chunking can break Markdown entities** — PARTIAL: `cmd_report` now splits at `━━━` section-break lines instead of raw 4000-char split (`reports.py:793-820`), preventing mid-span splits. Does not yet reuse the paginated-send helper from bulk_conv.
+- [x] **Report chunking can break Markdown entities** — fixed PR #89: two-level `_split_message` (section breaks, then blank lines), no silent truncation (`reports.py:46-95`).
 - [ ] **Message wording drifted from BACKLOG acceptance-criteria text** — footer format, skip-message phrasing, and row-range compression differ from the spec. PR #16 also retroactively edited BACKLOG.md to justify the changes, which is a process smell (spec says this wording is "never improvised"). Deliberate re-alignment pass, not urgent.
 - [x] **Person attribution per import** — fixed: `_finish_profile_parse` returns `BULK_PERSON` state, `bulk_person_callback` stamps all rows (`bulk_conv.py:410-452`); also stamped in the AI text/image path (`bulk_conv.py:1898-1902`).
 - [x] **`bulk_confirm` pre-existing backtick rendering bug** — fixed: removed backtick from "send \`save\` to store them all" message (no parse_mode on that reply). (`bulk_conv.py:2012`)
@@ -23,7 +23,7 @@ Statement parsing, bulk preview, dedup UX, and person attribution.
 - [x] **`bulk_confirm` invalid-input branch untested** — fixed: `TestBulkConfirmInvalidBranch` in `test_e2e_flows.py` covers unrecognised message, asserts no `parse_mode`.
 - [x] **Stale PLN docstrings** — fixed: `scheduled_report.py:60`, `file_storage.py:208` updated.
 - [x] **`scripts/rebuild_excel.py` and `scripts/make_template.py` hardcode PLN** — fixed: column header, descriptions, and comments updated to use base-currency terminology.
-- [ ] **Bulk draft archival instead of naming change** — drafts (`data/bulk_drafts/{uid}.json`) ARE deleted after successful save and on cancel (verified). Improvement: on save, move to `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` instead of deleting — cheap audit trail of what each import contained; prune archive >6 months on startup.
+- [x] **Bulk draft archival instead of naming change** — fixed PR #95: drafts archived to `data/bulk_drafts/archive/` on save with startup pruning.
 
 ### Group 2 — Cycles, reports & data quality
 
@@ -40,11 +40,11 @@ Cycle correctness, PLN neutrality, schema cleanup, and reporting gaps.
 - [x] **Default-currency fallback hardcodes PLN** — fixed in PR #81: `data.py` `fillna`, `excel_schema.py` writer default and Value formula condition, `scheduled_report.py` fallback, and `load_dedup_evidence` null-currency fallback all route through `settings.DISPLAY_CURRENCY`.
 - [x] **`goal_pln` field and "Goal (PLN)" column header in ListsSchema** — fixed in PR #81: `excel_schema.py` field renamed to `goal_base`, column header renamed to "Goal"; `scripts/migrate_base_currency_headers.py` updated with the header rename.
 - [ ] **Derive Year/Month from Date by formula** — MasterData carries Date + Year + Month as three independent columns; Year/Month should be formulas (`=YEAR(A2)`, `=TEXT(A2,"mmm")`) or removed entirely with Dashboard SUMIFS rewritten against Date ranges. Touches every Dashboard formula, the writers, and the schema — do as its own PR with a migration script for existing rows.
-- [ ] **Category rename support (simplify category names)** — PARTIAL: `/setup` rename flow calls `rename_category_in_workbook` covering MasterData + Dashboard; `scripts/rename_category.py` covers Lists + bulk drafts. Missing: merchant map not updated on rename; no standalone bot command (rename only via `/setup` wizard or CLI script).
-- [ ] **`_apply_bulk_edit` revalidation path not tested** — lines 1608–1612: when `lists` is provided, `_revalidate_bulk_row` is called after a field edit; no test asserts the returned notes list is populated when a field edit triggers a cross-field validation warning. (`tests/test_wave3_group_b.py`, `handlers/bulk_conv.py`)
-- [ ] **`_apply_bulk_edit` empty lists edge case silent** — when `lists={"categories": []}` is passed, category validation is silently skipped (`if categories and ...`); no test covers this branch. (`handlers/bulk_conv.py:1581`)
-- [ ] **Enforce the 50-row limit post-merge, not pre-merge** (Copilot PR review) — `_draft_limit_reached` checks the EXISTING draft before merging, so a draft at exactly 50 can still merge a 185-row import and blow past the documented maximum. Decide the rule (cap total? reject overflow rows? paginate drafts?) and enforce it after `_merge_bulk_draft` with a clear message about what was and wasn't added.
-- [ ] **Report every silent decision to the user, briefly** — standing principle: whenever the bot skips, corrects, deduplicates, or drops anything, the user gets one short line about it. Already done for validator corrections (🛡 auto-corrected list). Still needed: dedup skips ("↺ 3 rows skipped as already imported: …"), rows dropped at save due to Transaction validation errors (currently only shown as "Saved N of M" + first 5 errors), recovery-queue replays on startup ("re-applied 2 queued transactions"), and draft archival.
+- [ ] **Category rename support (simplify category names)** — PARTIAL: `/setup` rename flow + `scripts/rename_category.py`; merchant map now updated on rename (fixed PR #94); SQLite `rename_category` shipped in PR #118. Still missing: no standalone bot command (rename only via `/setup` wizard or CLI script).
+- [x] **`_apply_bulk_edit` revalidation path not tested** — fixed PR #91 (revalidation test added).
+- [x] **`_apply_bulk_edit` empty lists edge case silent** — fixed PR #91 (empty-lists note surfaced to user).
+- [x] **Enforce the 50-row limit post-merge, not pre-merge** — fixed PR #91 (post-merge draft cap).
+- [ ] **Report every silent decision to the user, briefly** — standing principle: whenever the bot skips, corrects, deduplicates, or drops anything, the user gets one short line about it. Already done for validator corrections (🛡 auto-corrected list), recovery-queue replays (PR #90), and draft archival (PR #95). Still needed: dedup skips ("↺ 3 rows skipped as already imported: …") and rows dropped at save due to Transaction validation errors (currently only shown as "Saved N of M" + first 5 errors).
 - [x] **Cycle Dashboard sheet** — implemented in `cycle_dashboard.py` (`ensure_cycle_dashboard`): cycle-label dropdown in B2, full category SUMIFS block; called from `record_cycle_start` and `record_cycle_starts_batch` (`cycles.py:110-111, 415-416`).
 
 ### Group 3 — Infrastructure, schema & quality
@@ -66,14 +66,16 @@ Test coverage gaps, module size, AI output contract, and tooling quality.
 - [x] **`CATEGORY_TYPE_HINTS` dict** — done: defined at `handlers/setup_conv.py:56`; used in `handlers/add_conv.py:15,70` to pre-select transaction type.
 - [x] **Monthly Summary sheet never updated by the bot** — done: `file_storage.py:420` calls `ensure_monthly_summary_rows_from_masterdata(wb)` after writing all batch rows, covering multi-month imports.
 
-### Group F — SQLite + web UI (S1/S2 shipped; S3 pending)
+### Group F — SQLite + web UI (S1/S2/S3/S4 shipped)
 
 SQLite is now the bot's primary store (S1, PRs #96/#100/#97/#99/#98) and a
 read-only web UI is live (S2): initial FastAPI+HTMX version (PR #101),
 WireGuard setup scripts (PR #102), auto-update restarting the web service
 (PR #105), and a full v2 "Ledger" redesign (PRs #104, #106–#112 — filters,
 search, sort, pagination, session currency + theme, colorful palette).
-Remaining: web write path (S3a/S3b) and scheduled Excel export.
+The web write path shipped as S3 (PR #116) and SQLite became the single
+source of truth in S4 (PR #118). Remaining: scheduled Excel export,
+merchant_map table, SQLite concurrency verification.
 
 See "Roadmap: Web UI + SQLite — phased integration" below for status and the
 remaining work.
@@ -107,7 +109,7 @@ Must ship before the user re-imports 1,400 historical rows.
 - [x] Partial bulk save loses failed rows *(fixed in prior PRs — failed rows kept in draft with retry message)*
 - [x] [PR #3] Preview edits not persisted to draft file *(fixed: `handlers/bulk_conv.py:1987` calls `_save_bulk_draft(uid, parsed)` after every edit)*
 - [x] [PR #3] Recovery replay writes Date as text string *(fixed: `excel_ops.py:114-120` rehydrates ISO date string → `datetime.date` before writing)*
-- [ ] [PR #3] Cosmetic cleanup *(PR #3 bulk-import bugs)*
+- [x] [PR #3] Cosmetic cleanup *(duplicate — fixed, see "In scope for PR #3" section below)*
 
 ### Run 2 — "Complete the cycles feature" (~35 items)
 Cycles is half-done: /summary and /budget are cycle-scoped, reports aren't, picker is missing.
@@ -250,17 +252,21 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
 > Run `gh pr list --repo TeymurovFuad/family-budget-bot --state open` and
 > `git log --oneline -5` first; trust those over anything written here.
 > Update this section at the end of every session so the next one starts clean.
-> *(Last updated: 2026-08-01 — PRs through #112 merged; SQLite cutover (S1)
-> and the full web UI v2 redesign (S2) are shipped. See "Roadmap: Web UI +
-> SQLite" for what shipped per PR and what remains: S3a/S3b web write path,
-> scheduled Excel export, remaining Excel-direct reads, cycles/merchant_map
-> tables, SQLite concurrency verification.)*
+> *(Last updated: 2026-08-03 — PRs through #119 merged. S3 web write path
+> (PR #116) and S4 SQLite-only cutover (PR #118) are both shipped: SQLite is
+> the single source of truth, Excel is output-only. See "Roadmap: Web UI +
+> SQLite" for what remains: scheduled Excel export, merchant_map table,
+> SQLite concurrency verification, plus PR #116/#118 review-note follow-ups.)*
 
 ### PR state at last update
-- **PRs #1–#112 merged.** Highlights since the notes below were written:
+- **PRs #1–#119 merged.** Highlights since the notes below were written:
   S1 SQLite cutover (#96–#100), read-only web UI (#101), WireGuard scripts
   (#102), docs pass (#103), web UI v2 redesign (#104, #106–#112),
-  auto-update restarts budget-web (#105). Details in the roadmap section.
+  auto-update restarts budget-web (#105), htmx vendored (#114),
+  rows-per-page fallback (#115), **S3 web write path — add/edit/delete via
+  web UI with optimistic locking (#116)** + review notes (#117), **S4 —
+  SQLite single source of truth, Excel output-only (#118)** + review notes
+  (#119). Details in the roadmap section.
 - **PR #50 merged 2026-07-27**: /setup onboarding — 7-step ConversationHandler
   (`handlers/setup_conv.py`): creates workbook from template, category add/rename,
   budget-per-category, currency setup, summary + rate fetch. Category types persisted
@@ -311,9 +317,14 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
   prefer mocked tests. See `.claude/memories/project-memory.md`.
 
 ### Next up (priority order — update when items complete)
-  0. **S3 — web write path** (S3a add, S3b edit/delete with optimistic
-     locking) + scheduled `excel_export.py` + remaining Excel-direct
-     migrations — see "Roadmap: Web UI + SQLite → Still pending".
+  0. ~~S3 — web write path~~ — ✅ merged as PR #116; ~~S4 — SQLite-only +
+     remaining Excel-direct migrations~~ — ✅ merged as PR #118.
+  0a. **Quick wins**: PR #116/#118 review-note follow-ups (`id` param rename,
+     late `MONTH_NAMES` import, misc.py direct file_storage import,
+     workbook_template hardcoded Cycles headers, missing test coverage for
+     the new web write routes and storage_facade reads/writes) + scheduled
+     `excel_export.py` + merchant_map SQLite table + SQLite concurrency
+     verification.
   1. ~~Run 3 Wave 1 (PRs #47–#50)~~ — ✅ merged 2026-07-27.
   2. **Run 3 Wave 2 — infra/performance**: reference-data TTL cache, JSONL recovery
      queue, split file_storage, typed DeepSeek model, lost-update protection,
@@ -381,8 +392,8 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       (unaccounted math), and the live salary prompt
       (`maybe_prompt_cycle_start`).
 
-- [ ] **Statement profile saved with wrong decimal separator corrupts every
-      amount (79.99 → 7999)** — a profile stored `decimal_separator: ","` for
+- [x] **Statement profile saved with wrong decimal separator corrupts every
+      amount (79.99 → 7999)** *(duplicate — fixed PR #39, see Group 1)* — a profile stored `decimal_separator: ","` for
       a dot-decimal bank; `_normalize_amount` strips "." as thousands. 1400
       rows imported with 100× inflated values. Three compounding gaps:
       (a) profile list (`/bulk profile`) doesn't show the separator;
@@ -393,7 +404,7 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       after ".") contradict comma-decimal — validate proposal against samples
       before saving. (`statement_profiles.py`, `handlers/bulk_conv.py`)
 
-- [ ] **Statement imports categorize everything as 'Other'** — `parse_statement`
+- [x] **Statement imports categorize everything as 'Other'** *(duplicate — fixed PR #40, see Group 1)* — `parse_statement`
       returns no category; `_normalize_parsed_rows` defaults empties to
       "Other"; merchant memory only helps for known merchants (empty on first
       import). The AI-categorization step for unknown merchants (BACKLOG
@@ -413,7 +424,7 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
       so send-failures reply with a fallback plain-text message instead of
       silence — "No error handlers are registered" appears in the same log.
 
-- [ ] **Monthly Summary sheet is never updated by the bot** — nothing in
+- [x] **Monthly Summary sheet is never updated by the bot** *(duplicate — fixed PR #38, see Run 1; single-transaction case fixed PR #92)* — nothing in
       runtime code writes to Monthly Summary; its per-month formula rows are
       created once by `scripts/rebuild_excel.py`. Any transaction saved for a
       month that has no pre-built row (bulk-imported history, or simply a new
@@ -575,18 +586,22 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
 
 ### Still pending
 
-- [ ] **S3a — add transaction via web UI**: same fields as /add, same
-      validation (reuse `validators.py`), writes through `storage_facade`.
-- [ ] **S3b — edit/delete via web UI** with optimistic-lock conflict
-      detection (bot and web editing the same row between reads).
+- [x] **S3a — add transaction via web UI** *(fixed PR #116 — `POST /transactions/new`,
+      shared validation via `validators.validate_web_transaction_form`, writes
+      through `storage_facade`)*.
+- [x] **S3b — edit/delete via web UI** *(fixed PR #116 — optimistic-lock
+      conflict detection via lock token)*.
 - [ ] **Schedule `excel_export.py`** so the workbook becomes a live-updating
       export instead of a one-time-import-then-frozen artifact (systemd timer
       or in-bot job; verify with `scripts/reconcile_sqlite_export.py`).
-- [ ] Migrate the remaining Excel-direct paths: currency rates + budget
-      targets reads (`data.load_rates` / `load_budgets`), rates-refresh write
-      (`excel_ops.async_update_currency_rates`), and `scheduled_report.py`.
-- [ ] `cycles` and `merchant_map` tables in `sqlite_ops.py` (deferred from
-      PR #96).
+      Still open as of PR #118 — no timer/job wired yet.
+- [x] Migrate the remaining Excel-direct paths *(fixed PR #118 —
+      `data.load_rates`/`load_budgets` delegate to `storage_facade`, rates
+      refresh and `scheduled_report.py` read/write SQLite)*.
+- [ ] `cycles` and `merchant_map` tables in `sqlite_ops.py` — PARTIAL:
+      `cycles` + `salary_keywords` tables shipped in PR #118
+      (`TABLE_CYCLES`/`TABLE_SALARY_KEYWORDS`); merchant map is still JSON
+      (`data/merchant_map.json`).
 - [ ] **SQLite concurrency**: WAL mode enabled (`sqlite_ops.init_db`,
       PR #96); still to verify bot + web server don't deadlock once the web
       write path (S3) exists.
@@ -922,7 +937,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 - [x] **Quick-add one-tap recovery** — on validation failure show what WAS parsed with a category
       keyboard instead of ejecting to the 9-step /add.
 - [x] **Bulk preview separator orphan at page break** — done: `_format_bulk_preview` strips trailing separators before page flush (`bulk_conv.py:1395-1397`).
-- [ ] **Report chunking can break Markdown entities** — PARTIAL: now splits at `━━━` section-break lines (not raw 4000-char); does not yet reuse bulk_conv paginated-send helper.
+- [x] **Report chunking can break Markdown entities** — fixed PR #89 (two-level `_split_message`, no silent truncation).
 - [x] **edit_conv currency keyboard hardcodes 3/3 split** — fixed: `edit_conv.py:105` now uses 2-per-row dynamic split (`ccy_list[i:i+2]`), not hardcoded 3-column rows.
 
 ## Follow-up PR: code clarity
@@ -978,10 +993,8 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: draft & log lifecycle
 
-- [ ] **Bulk draft archival instead of naming change** — drafts (`data/bulk_drafts/{uid}.json`)
-      ARE deleted after successful save and on cancel (verified). Improvement: on save, move to
-      `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` instead of deleting — cheap audit
-      trail of what each import contained; prune archive >6 months on startup.
+- [x] **Bulk draft archival instead of naming change** *(duplicate — fixed PR #95, see Group 1)* — drafts archived to
+      `data/bulk_drafts/archive/{uid}-{YYYYMMDD-HHMMSS}.json` on save; archive pruned on startup.
 - [ ] **Log retention: 6 months, enforced on startup** — daily rotation already exists
       (TimedRotatingFileHandler → budget-bot.log.YYYY-MM-DD), but backupCount pruning only fires
       on rollover, and the bot is stopped/started irregularly. Add a startup sweep in
@@ -1006,11 +1019,7 @@ Four non-blocking findings from the PR #16 adversarial review — safe to merge 
 
 ## Follow-up PR: draft limit semantics
 
-- [ ] **Enforce the 50-row limit post-merge, not pre-merge** (Copilot PR review) —
-      `_draft_limit_reached` checks the EXISTING draft before merging, so a draft at exactly 50
-      can still merge a 185-row import and blow past the documented maximum. Decide the rule
-      (cap total? reject overflow rows? paginate drafts?) and enforce it after `_merge_bulk_draft`
-      with a clear message about what was and wasn't added.
+- [x] **Enforce the 50-row limit post-merge, not pre-merge** *(duplicate — fixed PR #91, post-merge draft cap; see Group 2)*.
 
 ## Follow-up PR: user-visible reporting
 
@@ -1031,9 +1040,7 @@ Found by BOTH reviewers independently — highest confidence:
       until the file is hand-deleted. Also flush unlinks the file BEFORE replay completes — a crash
       during replay loses all queued rows. Fix: atomic queue writes, guarded parse (quarantine a
       corrupt file with .corrupt suffix + log), delete queue only after successful replay.
-- [ ] **Partial bulk save loses failed rows** — bulk_conv.py:425-448: rows failing Transaction
-      construction go to `errors`, the rest save, then `_delete_bulk_draft` removes EVERYTHING.
-      Fix: keep only failed rows in the draft after a partial save and tell the user how to fix/retry.
+- [x] **Partial bulk save loses failed rows** *(duplicate — fixed in prior PRs, see Run 1: failed rows kept in draft with retry message)*.
 - [x] **Stale row-index race in /delete and /edit** *(fixed PR #48 — re-verify under write lock, abort if row moved)*
 - [ ] **Repair scripts unsafe next to a live bot** — no _excel_write_lock, plain wb.save (no atomic),
       lost-update if the bot writes concurrently; on gcs/s3 they modify a local file the bot never
@@ -1042,8 +1049,7 @@ Found by BOTH reviewers independently — highest confidence:
 - [x] **Dual logging setup** — config.py calls logging.basicConfig at import while logger.init_logging
       installs its own handlers → duplicate console lines, LOG_LEVEL partially overridden.
       One owner: remove the basicConfig from config.py.
-- [ ] **Draft limit porous** — already tracked under "draft limit semantics"; reviewers add: no cap on
-      a single oversized parse (400-row statement merges fine), no dedupe on merge.
+- [x] **Draft limit porous** — fixed PR #91 (post-merge draft cap covers oversized parses); dedupe on merge covered by dedup v2.
 
 Unique findings (single reviewer, verified plausible):
 
@@ -1075,9 +1081,7 @@ Unique findings (single reviewer, verified plausible):
       (bulk_conv.py:229-260); run _normalize_parsed_rows (or the shared validator) on the edited
       field too. (Covered by the data-validation PR: `_apply_bulk_edit` now runs the shared
       validator on the edited row.)
-- [ ] **lists_currency_range caps at row 100** — currencies beyond Lists row 100 silently ignored
-      in every written Value (PLN) formula → #N/A. Derive the end row from actual data or use a
-      named range. (Overlaps with "unit-less magic numbers" sweep.)
+- [x] **lists_currency_range caps at row 100** *(duplicate — fixed, see Group 2: `_EXCEL_MAX_ROW = 1048576` at `excel_schema.py:121`)*.
 
 Fixed immediately during this review (not backlog): missing @auth on /bulk, /edit, /delete
 write paths — commit 309df08.
@@ -1105,14 +1109,9 @@ write paths — commit 309df08.
 - [x] **Timezone inconsistency** — reports.`_current_cycle_bounds` uses
       `now_utc().date()` while handlers/cycle.py uses `datetime.now(TIMEZONE)`;
       near midnight the "today" bound and the prompt-day can disagree by one day.
-- [ ] **Sync workbook I/O in async handlers** — `load_cycles()` /
-      `should_prompt_new_cycle()` block the event loop; matters mainly on remote
-      storage backends.
-- [ ] **Duplicate boundary still re-uploads on remote backends** —
-      `record_cycle_start` returning False inside `ExcelFileContext` triggers an
-      unnecessary upload of an unchanged workbook.
-- [ ] **Callback "yes" date not re-validated against future dates** — currently
-      unreachable but cheap to harden. (handlers/cycle.py)
+- [x] **Sync workbook I/O in async handlers** *(duplicate — fixed, see Group 2: `run_in_executor` in handlers/cycle.py; also superseded by S4 — no workbook I/O in handlers)*.
+- [x] **Duplicate boundary still re-uploads on remote backends** *(duplicate — fixed, see Group 2: `cycles.py` returns `None` on existing start date; also superseded by S4)*.
+- [x] **Callback "yes" date not re-validated against future dates** *(duplicate — fixed, see Group 2: future-date check in handlers/cycle.py)*.
 
 ### PR #30 review notes (2026-07-24)
 
@@ -1134,9 +1133,7 @@ write paths — commit 309df08.
 - [ ] **Flag-on removes the calendar view entirely** until the /summary picker
       PR ships — the picker PR is the usability completion of cycles, don't
       deprioritize it.
-- [ ] **check_budget_alert still calendar-scoped** while /budget is
-      cycle-scoped — contradictory percentages after every save when the flag
-      is on. (handlers/reports.py)
+- [x] **check_budget_alert still calendar-scoped** *(duplicate — fixed PR #47, see Run 2)*.
 - [ ] **Backdated Salary save proposes a backdated boundary with no undo
       path** — `should_prompt_new_cycle` gates on today's cycle age, not the
       transaction date; no `/cycle delete` exists and hand-editing the Cycles
@@ -1268,7 +1265,7 @@ Help text examples updated to EUR in PR #32 (groceries example, setbudget limit 
 rates help). Remaining PLN references in business logic strings and any timezone-specific
 wording need a second pass — deferred to avoid scope creep in PR #32.
 
-- [ ] **Remaining PLN in runtime messages** — `handlers/misc.py`: setcurrency confirmation
+- [x] **Remaining PLN in runtime messages** *(duplicate — confirmed clean as of PR #84, see Group 2)* — `handlers/misc.py`: setcurrency confirmation
       note (`1 {ccy} = {rates[ccy]} PLN`), setcurrency pick confirmation (`Rate: 1 {ccy} = X PLN`),
       setbudget category picker label (`Budget (PLN)`), setbudget amount prompts and confirm
       messages. `handlers/add_conv.py`: PLN equivalent note shown during /add.
@@ -1280,7 +1277,7 @@ wording need a second pass — deferred to avoid scope creep in PR #32.
       any Poland/Warsaw-specific timezone text exists in user-facing strings, replace with
       UTC or a generic "your local time" phrase.
 
-- [ ] **Default-currency fallback hardcodes PLN** — `data.py` (`fillna("PLN")`),
+- [x] **Default-currency fallback hardcodes PLN** *(duplicate — fixed PR #81, see Group 2)* — `data.py` (`fillna("PLN")`),
       `models.py` / `states.py` transaction defaults, `scheduled_report.py` fallback,
       `excel_schema.py` writer default (`row.get("currency", "PLN")`). For a public repo
       the fallback must come from the `DISPLAY_CURRENCY` setting (already prompted in
@@ -1325,18 +1322,10 @@ When `BUDGET_CYCLE=1`, the following commands are still calendar-scoped while `/
 and `/budget` are already cycle-scoped — giving contradictory numbers in the same session.
 All three need the same `_current_cycle_bounds()` branch that `/summary` and `/budget` use.
 
-- [ ] **`/report` still calendar-based** — `cmd_report` (handlers/reports.py:~325) uses
-      `current_year_and_month()` with no cycle branch. Month-over-month delta block also
-      uses calendar arithmetic. Accidental omission.
-- [ ] **`/top` still calendar-based** — `cmd_top` (handlers/reports.py:~235) filters on
-      `df["Year"] == year` and `df["Month"] == month`. Accidental omission.
-- [ ] **`/savings` 6-month trend is calendar-based** — `cmd_savings` (handlers/reports.py:~277)
-      iterates over calendar months. A full cycle-aware redesign (last N cycles instead of
-      last N calendar months) is non-trivial and lower priority than report/top, but the
-      current-month bar mismatches the cycle-scoped `/summary` rate.
-- [ ] **`check_budget_alert` still calendar-scoped** — already tracked in "PR #30 review
-      notes" above (line starting "check_budget_alert still calendar-scoped"). Contradictory
-      percentages after every save when the flag is on.
+- [x] **`/report` still calendar-based** *(duplicate — fixed PR #47, see Run 2)*.
+- [x] **`/top` still calendar-based** *(duplicate — fixed PR #47, see Run 2)*.
+- [x] **`/savings` 6-month trend is calendar-based** *(duplicate — fixed, see Run 2: cycle_periods + cycle_totals when BUDGET_CYCLE set)*.
+- [x] **`check_budget_alert` still calendar-scoped** *(duplicate — fixed PR #47, see Run 2)*.
 
 ## Follow-up PR: E2E test coverage (gap found 2026-07-24)
 
@@ -1559,32 +1548,15 @@ Non-blocking findings from the PR #43 fan-out review (Architect, EM, Tester, TW)
 
 Non-blocking findings from the PR #44 review (/keywords feature):
 
-- [ ] **`load_salary_keywords` duplicates strip/lowercase/dedup loop** —
-      `cycles.py::load_salary_keywords` re-implements the same strip/lowercase/dedup
-      loop that `_keyword_column_words` already provides. `load_salary_keywords` should
-      call `_keyword_column_words` instead of duplicating the logic. (`cycles.py`)
-- [ ] **`save_salary_keyword` re-seeds from `.env` on empty list** —
-      `save_salary_keyword` re-seeds from `.env` whenever the stored keyword list is
-      empty, not just on first use. If the user removes all keywords, the next `/keywords
-      add` silently re-seeds from the env defaults before appending. Either guard by
-      checking whether the header row already exists (meaning the sheet was intentionally
-      emptied), or update the docstring to document the actual behaviour explicitly.
-      (`cycles.py`)
+- [x] **`load_salary_keywords` duplicates strip/lowercase/dedup loop** *(superseded by S4, PR #118 — keyword storage moved to SQLite; `storage_facade.load_salary_keywords` reads the `salary_keywords` table, Excel loop deleted)*.
+- [x] **`save_salary_keyword` re-seeds from `.env` on empty list** *(superseded by S4, PR #118 — `async_save_salary_keyword` is a plain SQLite insert, no .env re-seed)*.
 - [ ] **`keywords_add_word` handler path for empty/whitespace input untested** —
       the storage-layer rejection of empty/whitespace input is tested, but the handler's
       re-prompt path (the Telegram reply asking the user to try again) is not covered.
       (`handlers/keywords_conv.py`, tests)
-- [ ] **`save_salary_keyword("payroll")` when env already contains "payroll"** —
-      returns `False` but the Excel write still happened; the False-return contract is
-      surprising for callers who expect "False means nothing was written". Add a test
-      that asserts the exact return value and Excel state for this case. (`cycles.py`,
-      tests)
-- [ ] **`test_detect_keywords_prefer_excel_over_env` tests seeded content, not pure
-      Excel content** — the test exercises env-seeded-then-persisted keywords rather
-      than keywords written directly to Excel bypassing `save_salary_keyword`. The test
-      name and intent are misleading. Add a companion test that writes keywords directly
-      to the Excel sheet to verify the Excel-over-env preference on genuinely
-      non-seeded data. (`tests/test_cycles.py`)
+- [x] **`save_salary_keyword("payroll")` when env already contains "payroll"** *(superseded by S4, PR #118 — Excel keyword write path deleted; SQLite insert uses `ON CONFLICT DO NOTHING`)*.
+- [x] **`test_detect_keywords_prefer_excel_over_env` tests seeded content, not pure
+      Excel content** *(superseded by S4, PR #118 — Excel keyword storage removed)*.
 - [ ] **`delete_salary_keyword("")` untested** — deleting an empty string is a benign
       named path (returns False, no-op) but has no test. Add a minimal test.
       (`tests/test_cycles.py`)
@@ -1680,7 +1652,7 @@ Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
 
 ## Follow-up: Wave 2 Group B (PR #64, 2026-07-27)
 
-- [ ] **Hardcoded PLN fallbacks sweep** — `row.get("currency", "PLN")`-style
+- [x] **Hardcoded PLN fallbacks sweep** *(superseded by S4 — grep of master shows the only remaining `"PLN"` literal is the `settings.DISPLAY_CURRENCY` env default, which is correct)* — `row.get("currency", "PLN")`-style
   defaults are hardcoded across the codebase (`handlers/bulk_conv.py`,
   `validators.py` `_dedup_key_parts`, `models.py`, formatters, etc.) even
   though `DISPLAY_CURRENCY` already exists in settings/.env. Sweep every
@@ -1694,14 +1666,14 @@ Non-blocking findings from the PR #46 fan-out review (Cycle Dashboard feature).
 
 ### Architect
 
-- [ ] **`asyncio.get_event_loop()` deprecated** — used in 3 places in `storage_facade.py` (~lines 89, 132, 165); raises `RuntimeError` in Python 3.12+ inside an async context. Replace with `asyncio.get_running_loop()`. (`storage_facade.py`)
+- [x] **`asyncio.get_event_loop()` deprecated** — fixed PR #118: `asyncio.get_running_loop()` used throughout `storage_facade.py`; no `get_event_loop` remains.
 - [ ] **`load_transactions()` now appends `_id` column** — audit all non-test callers for exact-column assertions before removing the column. One-time scan needed.
 
 ### Reviewer
 
 - [ ] **`id` parameter shadows `builtins.id`** — in `_update_web_transaction_sync`, `_delete_web_transaction_sync`, and route handlers. Rename to `txn_id` or `row_id`.
 - [ ] **Late `from models import MONTH_NAMES` import in hot path** — import is inside `validate_web_transaction_form` in `validators.py`; move to top of file.
-- [ ] **Dead inner imports in `_conn()` in `web/routes/transactions.py`** — `sqlite_ops` and `settings` already imported at module level; remove the inner imports.
+- [x] **Dead inner imports in `_conn()` in `web/routes/transactions.py`** — fixed PR #118: `_conn()` helper removed; routes use module-level imports.
 
 ### Tester
 
