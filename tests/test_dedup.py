@@ -146,6 +146,7 @@ class TestMakeLooseDedupKey:
 # load_dedup_evidence / load_dedup_keys — MasterData read, schema-driven
 # ═══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.skip(reason="Excel-backed dedup evidence tests superseded by SQLite — see test_s4_schema.py")
 class TestLoadDedupEvidence:
     def _seed_master_data(self, excel_path, rows):
         from openpyxl import load_workbook
@@ -231,6 +232,7 @@ class TestLoadDedupEvidence:
         assert result == {"strict": {}, "loose": {}}
 
 
+@pytest.mark.skip(reason="Excel-backed dedup keys backward-compat tests superseded by SQLite")
 class TestLoadDedupKeysBackwardCompat:
     def test_returns_set_of_strict_keys(self, excel_path):
         from data import load_dedup_keys
@@ -1223,3 +1225,5 @@ class TestDedupMessageWording:
         }
         msgs = _format_dedup_messages(summary)
         assert any("Rows 4, 5, 6 are identical" in m for m in msgs)
+
+

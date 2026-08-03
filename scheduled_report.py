@@ -2,7 +2,7 @@
 scheduled_report.py
 ===================
 Runs as a one-shot script inside GitHub Actions.
-Reads the Excel file, builds a report, sends it to Telegram, then exits.
+Reads from SQLite, builds a report, sends it to Telegram, then exits.
 
 No persistent process, no bot framework, no server.
 Triggered by GitHub Actions cron schedule or manual workflow dispatch.
@@ -28,8 +28,8 @@ import pandas as pd
 import httpx
 
 import settings
-
-from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
+import storage_facade
+from models import MONTH_NAMES
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -52,51 +52,22 @@ def load_user_prefs() -> dict:
 
 
 def _month_names() -> list[str]:
-    """Read month abbreviations from Lists sheet."""
-    return load_lists(get_excel_path_for_reading())["months"]
+    return list(MONTH_NAMES)
 
 
 def load_budget_amounts() -> dict[str, float]:
-    """Read monthly budget targets from the Dashboard sheet."""
-    return load_budgets_from_excel(get_excel_path_for_reading())
+    """Read monthly budget targets from SQLite categories table."""
+    return storage_facade.load_budgets()
 
 
 def load_transaction_data() -> pd.DataFrame:
-    excel_path = get_excel_path_for_reading()
-    df = pd.read_excel(excel_path, sheet_name="MasterData")
-    base_column = "Value (base)" if "Value (base)" in df.columns else "Value"
-    df["amount_base"] = pd.to_numeric(df[base_column], errors="coerce")
-    df["Value"]      = pd.to_numeric(df["Value"], errors="coerce")
-    df["Year"]       = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")
-    df["IsDone"]     = df["IsDone"].fillna(True).astype(bool)
-    df["Currency"]   = df["Currency"].fillna(DISPLAY_CURRENCY)
-    missing = df["amount_base"].isna() & df["Value"].notna()
-    if missing.any():
-        rates = load_currency_rates()
-        df.loc[missing, "amount_base"] = df.loc[missing].apply(
-            lambda r: r["Value"] * rates.get(str(r.get("Currency", DISPLAY_CURRENCY)).upper(), 1.0),
-            axis=1,
-        )
-    return df.dropna(subset=["amount_base", "Type", "Year", "Month"])
+    df = storage_facade.load_transactions()
+    df["amount_base"] = df["_base"]
+    return df
 
 
 def load_currency_rates() -> dict[str, float]:
-    try:
-        excel_path = get_excel_path_for_reading()
-        rates_df = pd.read_excel(excel_path, sheet_name="Lists", header=0)
-        currency_cols = [c for c in rates_df.columns if "currency" in str(c).lower()]
-        rate_cols     = [c for c in rates_df.columns if "rate" in str(c).lower() and ("pln" in str(c).lower() or "base" in str(c).lower())]
-        if not currency_cols or not rate_cols:
-            log.warning("Currency/Rate columns not found in Lists sheet")
-            return {DISPLAY_CURRENCY: 1.0}
-        rates_df = rates_df[[currency_cols[0], rate_cols[0]]].copy()
-        rates_df.columns = ["currency_code", "rate_to_base"]
-        rates_df = rates_df.dropna(subset=["currency_code", "rate_to_base"])
-        rates_df = rates_df[rates_df["currency_code"].astype(str).str.match(r"^[A-Z]{3}$")]
-        return dict(zip(rates_df["currency_code"], rates_df["rate_to_base"].astype(float)))
-    except Exception as error:
-        log.warning("Could not load currency rates: %s — using base currency only", error)
-        return {DISPLAY_CURRENCY: 1.0}
+    return storage_facade.load_rates()
 
 
 def convert_base_to_display_currency(base_amount: float, currency: str, rates: dict) -> float:

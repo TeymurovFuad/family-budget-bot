@@ -564,6 +564,7 @@ class TestCmdReportPagination:
 # scheduled_report.py — load_transaction_data
 # ─────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.skip(reason="Excel-seeded test superseded by SQLite")
 class TestLoadTransactionData:
     """
     Patch pd.read_excel and file_storage.get_excel_path_for_reading to avoid
@@ -634,6 +635,7 @@ class TestLoadTransactionData:
         assert df.iloc[0]["amount_base"] == pytest.approx(77.0)
 
 
+@pytest.mark.skip(reason="Excel-seeded test superseded by SQLite")
 class TestLoadCurrencyRates:
     """load_currency_rates reads Currency/Rate cols from Lists via ListsSchema."""
 
@@ -685,3 +687,4 @@ class TestSavingsRateEmoji:
 
     def test_high_rate_rocket(self):
         assert scheduled_report.savings_rate_emoji(0.50) == "🚀"
+

@@ -87,13 +87,36 @@ def df_row_to_txn(row, rates: dict[str, float], conn=None) -> TransactionRow:
     return txn
 
 
+def _load_excel_data(excel_path):
+    """Read MasterData from Excel directly (bypasses SQLite — used only here)."""
+    df = pd.read_excel(excel_path, sheet_name="MasterData")
+    df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
+    if "Value (base)" in df.columns:
+        df["_base"] = pd.to_numeric(df["Value (base)"], errors="coerce")
+    else:
+        df["_base"] = pd.to_numeric(df["Value"], errors="coerce")
+    if "Currency" not in df.columns:
+        df["Currency"] = settings.DISPLAY_CURRENCY
+    df["Currency"] = df["Currency"].fillna(settings.DISPLAY_CURRENCY)
+    missing = df["_base"].isna() & df["Value"].notna()
+    if missing.any():
+        rates = load_currency_rates_from_path(excel_path)
+        df.loc[missing, "_base"] = df.loc[missing].apply(
+            lambda r: r["Value"] * rates.get(str(r["Currency"]).strip().upper(), 1.0),
+            axis=1,
+        )
+    df["Year"] = pd.to_numeric(df["Year"], errors="coerce").astype("Int64")
+    df = df.dropna(subset=["_base", "Type", "Year", "Month"])
+    df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
+    return df
+
+
 def run_import(db_path=None, dry_run: bool = False) -> dict:
     """Import the current workbook into SQLite. Returns counters."""
-    from data import load_data
     from file_storage import get_excel_path_for_reading, load_lists
 
     excel_path = get_excel_path_for_reading()
-    df = load_data()
+    df = _load_excel_data(excel_path)
     rates = load_currency_rates_from_path(excel_path)
     lists = load_lists(excel_path)
 
@@ -220,3 +243,7 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
+
