@@ -255,7 +255,8 @@ _SORT_DIRECTIONS = frozenset({"asc", "desc"})
 
 
 def _build_where(filters: dict | None, date_from, date_to,
-                 description_contains) -> tuple[list[str], list]:
+                 description_contains,
+                 value_search: "float | None" = None) -> tuple[list[str], list]:
     """Shared WHERE builder for list/count. Every value is a bind parameter."""
     where, params = [], []
     for key, val in (filters or {}).items():
@@ -272,11 +273,35 @@ def _build_where(filters: dict | None, date_from, date_to,
     elif date_to is not None:
         where.append("date <= ?")
         params.append(str(date_to))
-    if description_contains is not None:
+    if description_contains is not None and value_search is not None:
+        # OR: match either description substring OR value_base in range.
+        # All values are bind parameters — no user input in SQL text.
+        desc_clause = "description LIKE ?"
+        desc_param = f"%{description_contains}%"
+        frac = value_search - int(value_search)
+        if abs(frac) < 1e-9:
+            # Integer-like: band match ±0.49 (e.g. "46" → 45.51–46.49)
+            val_clause = "value_base BETWEEN ? AND ?"
+            val_params = [value_search - 0.49, value_search + 0.49]
+        else:
+            # Decimal: exact match within 0.001
+            val_clause = "ABS(value_base - ?) < 0.001"
+            val_params = [value_search]
+        where.append(f"({desc_clause} OR {val_clause})")
+        params.extend([desc_param, *val_params])
+    elif description_contains is not None:
         # SQLite LIKE is case-insensitive for ASCII only. Parameterized —
         # the search term is never interpolated into the SQL text.
         where.append("description LIKE ?")
         params.append(f"%{description_contains}%")
+    elif value_search is not None:
+        frac = value_search - int(value_search)
+        if abs(frac) < 1e-9:
+            where.append("value_base BETWEEN ? AND ?")
+            params.extend([value_search - 0.49, value_search + 0.49])
+        else:
+            where.append("ABS(value_base - ?) < 0.001")
+            params.append(value_search)
     return where, params
 
 
@@ -286,6 +311,7 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
                       offset: int | None = None,
                       date_from=None, date_to=None,
                       description_contains: str | None = None,
+                      value_search: "float | None" = None,
                       sort_by: str | None = None,
                       sort_dir: str = "asc") -> list[dict]:
     """
@@ -308,7 +334,8 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
         raise ValueError(f"Unsupported sort column: {sort_by}")
     if sort_dir not in _SORT_DIRECTIONS:
         raise ValueError(f"Unsupported sort direction: {sort_dir}")
-    where, params = _build_where(filters, date_from, date_to, description_contains)
+    where, params = _build_where(filters, date_from, date_to, description_contains,
+                                 value_search)
     sql = f"SELECT * FROM {TABLE_TRANSACTIONS}"
     if where:
         sql += " WHERE " + " AND ".join(where)
@@ -329,9 +356,11 @@ def list_transactions(conn: sqlite3.Connection, filters: dict | None = None,
 
 def count_transactions(conn: sqlite3.Connection, filters: dict | None = None,
                        date_from=None, date_to=None,
-                       description_contains: str | None = None) -> int:
+                       description_contains: str | None = None,
+                       value_search: "float | None" = None) -> int:
     """Total row count for the same filter surface as list_transactions."""
-    where, params = _build_where(filters, date_from, date_to, description_contains)
+    where, params = _build_where(filters, date_from, date_to, description_contains,
+                                 value_search)
     sql = f"SELECT COUNT(*) FROM {TABLE_TRANSACTIONS}"
     if where:
         sql += " WHERE " + " AND ".join(where)

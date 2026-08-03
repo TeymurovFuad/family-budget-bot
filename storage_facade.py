@@ -269,6 +269,7 @@ _DF_COLUMNS = [
 def load_transactions(filters: dict | None = None, *,
                       date_from=None, date_to=None,
                       description_contains: str | None = None,
+                      value_search: "float | None" = None,
                       sort_by: str | None = None, sort_dir: str = "asc",
                       limit: int | None = None,
                       offset: int | None = None) -> pd.DataFrame:
@@ -286,6 +287,7 @@ def load_transactions(filters: dict | None = None, *,
         rows = sqlite_ops.list_transactions(
             conn, filters, date_from=date_from, date_to=date_to,
             description_contains=description_contains,
+            value_search=value_search,
             sort_by=sort_by, sort_dir=sort_dir, limit=limit, offset=offset)
     finally:
         conn.close()
@@ -324,7 +326,8 @@ def load_transactions(filters: dict | None = None, *,
 
 def count_transactions(filters: dict | None = None, *,
                        date_from=None, date_to=None,
-                       description_contains: str | None = None) -> int:
+                       description_contains: str | None = None,
+                       value_search: "float | None" = None) -> int:
     """Total matching row count for pagination — same filter surface as
     load_transactions minus sort/pagination."""
     _require_db()
@@ -332,7 +335,8 @@ def count_transactions(filters: dict | None = None, *,
     try:
         return sqlite_ops.count_transactions(
             conn, filters, date_from=date_from, date_to=date_to,
-            description_contains=description_contains)
+            description_contains=description_contains,
+            value_search=value_search)
     finally:
         conn.close()
 
