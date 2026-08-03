@@ -619,6 +619,211 @@ async def load_transaction_by_id(txn_id: int) -> dict | None:
     return await loop.run_in_executor(None, _load_transaction_by_id_sync, txn_id)
 
 
+def add_category(name: str) -> bool:
+    """
+    Add a new active category to SQLite. Returns True if added, False if already exists.
+    Dual-writes to Excel Lists sheet (best-effort).
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("Category name cannot be empty.")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            f"SELECT active, budget_base FROM {sqlite_ops.TABLE_CATEGORIES} WHERE name = ?",
+            (name,)).fetchone()
+        if row and row["active"]:
+            return False
+        existing_budget = row["budget_base"] if row else None
+        sqlite_ops.upsert_category(conn, name, budget_base=existing_budget, active=True)
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from file_storage import append_category_to_lists_sheet
+        append_category_to_lists_sheet(name)
+    except Exception:
+        log.warning("append_category_to_lists_sheet failed for '%s'", name)
+    return True
+
+
+def rename_category(old: str, new: str) -> None:
+    """
+    Rename a category in SQLite, updating all transactions atomically.
+    Dual-writes to Excel Lists sheet (best-effort).
+    """
+    old, new = old.strip(), new.strip()
+    if not old or not new:
+        raise ValueError("Names cannot be empty.")
+    if old == new:
+        return
+    conn = _conn()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        exists = conn.execute(
+            f"SELECT name FROM {sqlite_ops.TABLE_CATEGORIES} WHERE name = ?",
+            (new,)).fetchone()
+        if exists:
+            conn.rollback()
+            raise ValueError(f"'{new}' already exists.")
+        conn.execute(
+            f"UPDATE {sqlite_ops.TABLE_CATEGORIES} SET name = ? WHERE name = ?",
+            (new, old))
+        conn.execute(
+            f"UPDATE {sqlite_ops.TABLE_TRANSACTIONS} SET category = ? WHERE category = ?",
+            (new, old))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    try:
+        from file_storage import rename_category_in_lists_sheet
+        rename_category_in_lists_sheet(old, new)
+    except Exception:
+        log.warning("rename_category_in_lists_sheet failed: %s → %s", old, new)
+
+
+def add_person(name: str) -> bool:
+    """
+    Add a new active person to SQLite. Returns True if added, False if already exists.
+    Dual-writes to Excel Lists sheet (best-effort).
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("Person name cannot be empty.")
+    conn = _conn()
+    try:
+        row = conn.execute(
+            f"SELECT active FROM {sqlite_ops.TABLE_PERSONS} WHERE name = ?",
+            (name,)).fetchone()
+        if row and row["active"]:
+            return False
+        sqlite_ops.upsert_person(conn, name, active=True)
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from file_storage import append_person_to_lists_sheet
+        append_person_to_lists_sheet(name)
+    except Exception:
+        log.warning("append_person_to_lists_sheet failed for '%s'", name)
+    return True
+
+
+def set_category_budget(name: str, amount: float | None) -> None:
+    """
+    Update a category's budget_base in SQLite and dual-write to Excel Lists sheet.
+    Pass amount=None or 0.0 to clear the budget.
+    """
+    conn = _conn()
+    try:
+        conn.execute(
+            f"UPDATE {sqlite_ops.TABLE_CATEGORIES} SET budget_base = ? WHERE name = ?",
+            (amount, name))
+        conn.commit()
+    finally:
+        conn.close()
+    try:
+        from file_storage import update_category_budget_in_excel
+        update_category_budget_in_excel(name, amount if amount else 0.0)
+    except Exception:
+        log.warning("update_category_budget_in_excel failed for '%s'", name)
+
+
+def load_category_budgets() -> dict:
+    """Return {category_name: budget_base} for all active categories."""
+    _require_db()
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            f"SELECT name, budget_base FROM {sqlite_ops.TABLE_CATEGORIES} WHERE active = 1"
+        ).fetchall()
+        return {r["name"]: r["budget_base"] for r in rows}
+    finally:
+        conn.close()
+
+
+def get_owner_display_currency() -> str:
+    """Return the owner's persisted display currency, falling back to settings.DISPLAY_CURRENCY."""
+    try:
+        from file_storage import load_user_prefs
+        prefs = load_user_prefs()
+        if settings.ALLOWED_TELEGRAM_IDS:
+            uid = str(settings.ALLOWED_TELEGRAM_IDS[0])
+            currency = prefs.get("currency", {}).get(uid)
+            if currency:
+                return str(currency).strip().upper()
+    except Exception:
+        log.warning("Could not load owner display currency from user prefs")
+    return str(settings.DISPLAY_CURRENCY).strip().upper()
+
+
+def set_owner_display_currency(ccy: str) -> None:
+    """Persist the owner's display currency to user_prefs.json."""
+    ccy = ccy.strip().upper()
+    if not ccy:
+        raise ValueError("Currency code cannot be empty.")
+    if not settings.ALLOWED_TELEGRAM_IDS:
+        raise RuntimeError("No owner UID configured in ALLOWED_TELEGRAM_IDS.")
+    from file_storage import load_user_prefs, save_user_prefs
+    prefs = load_user_prefs()
+    if "currency" not in prefs:
+        prefs["currency"] = {}
+    uid = str(settings.ALLOWED_TELEGRAM_IDS[0])
+    prefs["currency"][uid] = ccy
+    save_user_prefs(prefs)
+    log.info("Set owner display currency to '%s'", ccy)
+
+
+async def refresh_currency_rates() -> dict[str, float]:
+    """
+    Fetch live exchange rates from frankfurter.dev and store them in SQLite.
+    Dual-writes to Excel Lists sheet via async_update_currency_rates (best-effort).
+    Returns the updated rates dict. Raises on network/parse failure.
+    """
+    import httpx
+
+    base = get_owner_display_currency()
+    urls = [
+        f"https://api.frankfurter.dev/v1/latest?from={base}",
+        f"https://api.frankfurter.app/latest?from={base}",
+    ]
+    data = None
+    async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+        for url in urls:
+            try:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                data = resp.json()
+                break
+            except Exception:
+                continue
+    if data is None:
+        raise RuntimeError("Could not reach any rate source — try again later.")
+    live: dict[str, float] = {
+        c.upper(): round(1 / r, 4) for c, r in data.get("rates", {}).items() if r > 0
+    }
+    live[base] = 1.0
+    # Store in SQLite
+    conn = _conn()
+    try:
+        for currency, rate in live.items():
+            sqlite_ops.upsert_rate(conn, currency, float(rate))
+        conn.commit()
+    finally:
+        conn.close()
+    # Best-effort Excel write
+    try:
+        from file_storage import update_currency_rates_in_excel
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, update_currency_rates_in_excel, live)
+    except Exception:
+        log.warning("update_currency_rates_in_excel failed after rates refresh")
+    return live
+
+
 def load_reference_data() -> dict:
     """
     Mirror data.load_reference_data()'s return shape, sourced from the

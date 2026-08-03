@@ -1,0 +1,20 @@
+<h2>Persons</h2>
+{% if error %}<p class="error-msg">{{ error }}</p>{% endif %}
+{% if persons %}
+<ul class="settings-list">
+  {% for p in persons %}
+  <li class="settings-list-item">
+    <span class="item-name">{{ p }}</span>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">No persons yet. Add one below.</p>
+{% endif %}
+<form class="inline-form"
+      hx-post="/settings/persons/add"
+      hx-target="#persons-section"
+      hx-swap="outerHTML">
+  <input type="text" name="name" placeholder="New person name" maxlength="60" required>
+  <button type="submit" class="btn btn--primary">Add</button>
+</form>

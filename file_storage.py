@@ -452,6 +452,132 @@ def delete_transaction_row(row_idx: int, expected: dict | None = None) -> None:
         log.info("Deleted MasterData row %d", row_idx)
 
 
+def append_category_to_lists_sheet(name: str) -> None:
+    """
+    Append a new category name to the first empty row in the Categories column of
+    the Lists sheet. Also syncs the Dashboard category block and extends MasterData
+    dropdown validation ranges so the new category appears in Excel dropdowns.
+    """
+    from openpyxl import load_workbook
+    from excel_schema import (
+        col_indices, ListsSchema, sync_dashboard_categories, extend_validation_ranges,
+        find_next_data_row,
+    )
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws_lists = wb["Lists"]
+
+        idx = col_indices(ws_lists, ListsSchema)
+        cat_col = idx.get("categories")
+        if cat_col is None:
+            log.warning("Categories column not found in Lists sheet — category not appended")
+            return
+
+        # Collect existing categories and check for duplicates
+        existing = []
+        target_row = None
+        for row in range(2, ws_lists.max_row + 2):
+            val = ws_lists.cell(row, cat_col).value
+            if val is None or (isinstance(val, str) and val.strip() == ""):
+                if target_row is None:
+                    target_row = row
+                break
+            existing.append(str(val).strip())
+
+        if target_row is None:
+            target_row = ws_lists.max_row + 1
+
+        if name in existing:
+            log.debug("Category '%s' already in Lists sheet — skipping append", name)
+            return
+
+        ws_lists.cell(target_row, cat_col, name)
+        all_categories = existing + [name]
+
+        # Extend MasterData dropdown validations to cover new rows
+        if "MasterData" in wb.sheetnames:
+            ws_master = wb["MasterData"]
+            last_data_row = find_next_data_row(ws_master) - 1
+            extend_validation_ranges(ws_master, max(last_data_row, target_row))
+
+        # Rebuild Dashboard category block
+        sync_dashboard_categories(wb, all_categories)
+
+        atomic_save(wb, excel_path)
+        log.info("Appended category '%s' to Lists sheet row %d", name, target_row)
+    _invalidate_reference_cache()
+
+
+def rename_category_in_lists_sheet(old: str, new: str) -> None:
+    """
+    Rename a category in the Lists sheet and cascade the rename through MasterData,
+    Dashboard cell values, and formula string literals (SUMIFS criteria).
+    Mirrors the full rename performed by scripts/rename_category.py.
+    """
+    from openpyxl import load_workbook
+    from excel_schema import col_indices, ListsSchema, rename_category_in_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws_lists = wb["Lists"]
+
+        idx = col_indices(ws_lists, ListsSchema)
+        cat_col = idx.get("categories")
+        if cat_col is None:
+            log.warning("Categories column not found in Lists sheet — category not renamed")
+            return
+
+        found = False
+        for row in range(2, ws_lists.max_row + 1):
+            val = ws_lists.cell(row, cat_col).value
+            if val is not None and str(val).strip() == old:
+                ws_lists.cell(row, cat_col, new)
+                found = True
+                break
+
+        if not found:
+            log.warning("Category '%s' not found in Lists sheet — not renamed", old)
+            return
+
+        # Cascade rename through MasterData values and Dashboard/Monthly Summary formulas
+        counts = rename_category_in_workbook(wb, old, new)
+        log.info(
+            "Renamed category '%s' → '%s' in Lists sheet; cascade: %s",
+            old, new, counts,
+        )
+
+        atomic_save(wb, excel_path)
+    _invalidate_reference_cache()
+
+
+def append_person_to_lists_sheet(name: str) -> None:
+    """Append a new person name to the first empty row in the Persons column of the Lists sheet."""
+    from openpyxl import load_workbook
+
+    with ExcelFileContext() as excel_path:
+        wb = load_workbook(excel_path)
+        ws = wb["Lists"]
+
+        idx = col_indices(ws, ListsSchema)
+        persons_col = idx.get("persons")
+        if persons_col is None:
+            log.warning("Persons column not found in Lists sheet — person not appended")
+            return
+
+        target_row = 2
+        for row in range(2, ws.max_row + 2):
+            val = ws.cell(row, persons_col).value
+            if val is None or (isinstance(val, str) and val.strip() == ""):
+                target_row = row
+                break
+
+        ws.cell(target_row, persons_col, name)
+        atomic_save(wb, excel_path)
+        log.info("Appended person '%s' to Lists sheet row %d", name, target_row)
+    _invalidate_reference_cache()
+
+
 def update_transaction_field(row_idx: int, field, value=None, expected: dict | None = None) -> None:
     """
     Update one or more fields of a MasterData row in a single save.

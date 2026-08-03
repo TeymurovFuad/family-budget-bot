@@ -648,6 +648,23 @@ dialog.modal::backdrop {
   text-decoration:underline; text-underline-offset:2px;
   background:none; border:none; padding:0; cursor:pointer;
 }
+
+/* ── Settings page ─────────────────────────────────────────────────────── */
+.settings-list { list-style: none; padding: 0; margin: 0 0 var(--space-3); }
+.settings-list-item {
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-list-item:last-child { border-bottom: none; }
+.settings-list-item .item-name { font-weight: 600; flex: 1 1 auto; }
+.settings-list-item .cat-budget { white-space: nowrap; }
+.inline-form { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; margin-top: var(--space-3); }
+.inline-form input[type="text"] { flex: 1 1 12rem; min-width: 0; }
+.btn--sm { padding: 4px 10px; font-size: var(--fs-sm, 0.85rem); }
+.error-msg { color: var(--money-neg); font-size: var(--fs-sm); margin: var(--space-2) 0 0; }
+.success-msg { color: var(--money-pos); font-size: var(--fs-sm); margin: var(--space-2) 0 0; }
+.muted-hint { font-size: var(--fs-sm); color: var(--ink-soft); margin: 2px 0 var(--space-2); }
 .txn-conflict .btn-reload:hover { opacity:.8; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
