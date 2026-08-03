@@ -24,7 +24,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 import settings
-from cycles import BEFORE_CYCLES_LABEL, cycle_periods, cycle_totals, load_cycles
+from cycles import BEFORE_CYCLES_LABEL, cycle_periods, cycle_totals
+from storage_facade import load_cycles
 from storage_facade import load_transactions
 from web.auth import get_session_currency, require_session
 from web.currency import convert_from_base, load_rates

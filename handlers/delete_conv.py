@@ -7,8 +7,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth, auth_write, log
 from log_decorators import log_call
-from file_storage import RowMovedError
-from storage_facade import RowMismatchError, delete_transaction_row, get_recent_transactions
+from storage_facade import RowMismatchError, RowMovedError, delete_transaction_row, get_recent_transactions
 from states import DELETE_PICK
 import settings
 

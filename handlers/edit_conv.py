@@ -8,11 +8,10 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from config import auth_write, get_display_currency, log
 from log_decorators import log_call
-from data import load_rates, now_utc
-from file_storage import RowMovedError
+from data import now_utc
 from storage_facade import (
-    RowMismatchError, get_recent_transactions, load_reference_data,
-    update_transaction_field,
+    RowMismatchError, RowMovedError, get_recent_transactions, load_rates,
+    load_reference_data, update_transaction_field,
 )
 from formatters import format_base_as_currency, format_amount, sanitize_description
 from models import MONTH_NAMES

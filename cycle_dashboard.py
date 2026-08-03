@@ -91,11 +91,12 @@ def _dashboard_categories(wb) -> list[str]:
 
 def _latest_cycle_label(wb) -> str:
     """Latest cycle label read straight from the open workbook's Cycles sheet."""
-    from cycles import CYCLES_SHEET_NAME, cycle_label
+    from cycles import cycle_label
 
-    if CYCLES_SHEET_NAME not in wb.sheetnames:
+    _CYCLES_SHEET = "Cycles"
+    if _CYCLES_SHEET not in wb.sheetnames:
         return ""
-    ws = wb[CYCLES_SHEET_NAME]
+    ws = wb[_CYCLES_SHEET]
     idx = col_indices(ws, CyclesSchema)
     start_col = idx.get("start_date")
     label_col = idx.get("label")
