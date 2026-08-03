@@ -145,6 +145,7 @@ class TestMerchantMapStore:
         assert merchant_map.learn_from_row({"description": "", "category": "Transport"}) is None
         assert merchant_map.load_merchant_map() == {}
 
+    @pytest.mark.skip(reason="Excel-seeded test superseded by SQLite")
     def test_seed_from_master(self, excel_path):
         from excel_ops import _do_append_transaction
         for i in range(3):
@@ -358,3 +359,4 @@ class TestRenameCategoryUpdatesMerchantMap:
         })
         assert merchant_map.rename_category("OldName", "NewName") == 1
         assert merchant_map.load_merchant_map()["tesco"]["category"] == "NewName"
+

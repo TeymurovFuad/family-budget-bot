@@ -1,18 +1,15 @@
 """
-data.py — read-only Excel helpers: load_data, load_rates, load_budgets,
-          now_utc, current_year_and_month, month_name.
+data.py — thin shim over storage_facade.
+
+All reads now delegate to SQLite via storage_facade. The TTL cache is gone —
+SQLite reads are local and fast; no remote-download cost.
 """
 
-import calendar
-import time
 from datetime import datetime, timezone
 
-import pandas as pd
-
+import storage_facade
 import settings
 from config import log
-from excel_schema import MasterDataSchema, header_of, load_currency_rates_from_path
-from file_storage import get_excel_path_for_reading, load_budgets_from_excel, load_lists
 from models import MONTH_NAMES
 from validators import make_dedup_key, make_loose_dedup_key
 
@@ -32,108 +29,25 @@ def current_year_and_month() -> tuple[int, str]:
     return n.year, month_name(n.month)
 
 
-# ── reference-data TTL cache ──────────────────────────────────────────────────
-# load_reference_data / load_rates / load_budgets are called several times per
-# incoming message and each call used to trigger a full workbook read — on
-# remote backends that meant re-downloading the whole workbook every time.
-# Results are now cached for REFERENCE_CACHE_TTL_SECONDS.
-#
-# Staleness guards:
-#   - local backend: the cache entry also stores (path, mtime_ns) of the
-#     workbook, so any write invalidates it immediately;
-#   - remote backends: TTL only, plus explicit invalidation — excel_ops.py and
-#     file_storage.py call invalidate_reference_cache() after every write.
-
-REFERENCE_CACHE_TTL_SECONDS = 120
-
-# key -> (expires_at_monotonic, signature, value)
-_ref_cache: dict[str, tuple[float, object, object]] = {}
-
-
-def invalidate_reference_cache() -> None:
-    """Drop all cached reference data. Called after any workbook write."""
-    _ref_cache.clear()
-
-
-def _cache_signature():
-    """
-    Freshness signature for the current workbook.
-
-    Local backend: (path, mtime_ns) — changes whenever the file changes.
-    Remote backends: None — computing a signature would require a download,
-    so freshness is governed by the TTL + explicit invalidation instead.
-    """
-    import file_storage
-    if file_storage._active_backend() != "local":
-        return None
-    try:
-        path = get_excel_path_for_reading()
-        return (str(path), path.stat().st_mtime_ns)
-    except OSError as e:
-        # A persistently locked/unreadable workbook must be visible in logs.
-        log.debug("stat failed for reference-cache signature: %s", e)
-        return object()
-    except Exception:
-        # Cannot stat the workbook — return a unique object so the cache
-        # never serves a possibly-stale entry.
-        return object()
-
-
-def _cached(key: str, loader):
-    now = time.monotonic()
-    signature = _cache_signature()
-    entry = _ref_cache.get(key)
-    if entry is not None:
-        expires_at, cached_sig, value = entry
-        # Tuple signatures must match exactly (local backend, mtime-based);
-        # None==None means remote backend where the TTL alone governs.
-        # A bare `object()` sentinel (stat failure) never matches anything.
-        if now < expires_at and isinstance(cached_sig, (tuple, type(None))) and cached_sig == signature:
-            return value
-    value = loader()
-    _ref_cache[key] = (now + REFERENCE_CACHE_TTL_SECONDS, signature, value)
-    return value
-
-
 # ── reference data ────────────────────────────────────────────────────────────
 
-def load_reference_data() -> dict:
-    def _load() -> dict:
-        lists = load_lists(get_excel_path_for_reading())
-        rates = load_rates()
-        lists["currencies"] = list(rates.keys()) if rates else [settings.DISPLAY_CURRENCY]
-        return lists
+def invalidate_reference_cache() -> None:
+    """No-op — SQLite reads are always fresh; no cache to invalidate."""
+    pass
 
-    cached = _cached("reference_data", _load)
-    # Shallow-copy per key so callers can't mutate the cached lists.
-    return {k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
-            for k, v in cached.items()}
+
+def load_reference_data() -> dict:
+    return storage_facade.load_reference_data()
 
 
 def load_budgets() -> dict[str, float]:
-    return dict(_cached(
-        "budgets",
-        lambda: load_budgets_from_excel(get_excel_path_for_reading()),
-    ))
+    return storage_facade.load_budgets()
 
 
 # ── rates ─────────────────────────────────────────────────────────────────────
 
 def load_rates() -> dict[str, float]:
-    """
-    Read currency rate table from the Lists sheet.
-    Column positions are resolved via ListsSchema — no hardcoded positions.
-    Returns {currency_code: base_units_per_foreign_unit}. Falls back to {settings.DISPLAY_CURRENCY: 1.0}.
-    Cached — see the reference-data TTL cache above.
-    """
-    def _load() -> dict[str, float]:
-        try:
-            return load_currency_rates_from_path(get_excel_path_for_reading())
-        except Exception as e:
-            log.warning("Could not load currency rates: %s", e)
-            return {settings.DISPLAY_CURRENCY: 1.0}
-
-    return dict(_cached("rates", _load))
+    return storage_facade.load_rates()
 
 
 def get_rate(ccy: str, rates: dict[str, float]) -> float:
@@ -143,100 +57,18 @@ def get_rate(ccy: str, rates: dict[str, float]) -> float:
 
 # ── master data ───────────────────────────────────────────────────────────────
 
-def load_data() -> pd.DataFrame:
-    """
-    Load MasterData sheet. All aggregations use the '_base' column.
-    Value (base) contains Excel formulas — pandas reads cached results, which may
-    be NaN for rows never opened in Excel. Falls back to computing from Value *
-    exchange rate so reports never show 0 due to stale formula cache.
-    """
-    excel_path = get_excel_path_for_reading()
-    df = pd.read_excel(excel_path, sheet_name="MasterData")
-
-    df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
-
-    if "Value (base)" in df.columns:
-        df["_base"] = pd.to_numeric(df["Value (base)"], errors="coerce")
-    else:
-        df["_base"] = pd.to_numeric(df["Value"], errors="coerce")
-
-    if "Currency" not in df.columns:
-        df["Currency"] = settings.DISPLAY_CURRENCY
-    df["Currency"] = df["Currency"].fillna(settings.DISPLAY_CURRENCY)
-
-    # Recompute _base for any row where the formula cache is missing
-    missing = df["_base"].isna() & df["Value"].notna()
-    if missing.any():
-        rates = load_rates()
-        df.loc[missing, "_base"] = df.loc[missing].apply(
-            lambda r: r["Value"] * rates.get(str(r["Currency"]).upper(), 1.0),
-            axis=1,
-        )
-
-    df["Year"]  = pd.to_numeric(df["Year"],  errors="coerce").astype("Int64")
-    df = df.dropna(subset=["_base", "Type", "Year", "Month"])
-    df["IsDone"] = df["IsDone"].fillna(True).astype(bool)
-
-    return df
+def load_data():
+    return storage_facade.load_transactions()
 
 
 def load_dedup_evidence(start=None, end=None) -> dict:
-    """
-    Multiset evidence of MasterData rows for dedup-v2's count-aware, two-pass
-    scan. Reads MasterData ONCE (the loose pass reuses this same read — no
-    extra workbook access, no AI calls) and returns:
-
-        {
-          "strict": {strict_key: [(date_iso, description), ...]},
-          "loose":  {loose_key:  [(date_iso, description), ...]},
-        }
-
-    strict_key = date|value|currency|cleaned-description (validators.make_dedup_key)
-    loose_key  = date|value|currency, no description (validators.make_loose_dedup_key)
-
-    len(evidence["strict"][key]) / len(evidence["loose"][key]) is that key's
-    multiset count in MasterData — the basis for count-aware matching ("3
-    identical rows found, 2 already in your sheet -> saving 1, skipping 2").
-    Only rows whose Date falls in [start, end] (date objects, both
-    optional/inclusive) are counted. Returns empty dicts on any read
-    failure — dedup never blocks an import, it just stops flagging anything.
-    """
-    empty = {"strict": {}, "loose": {}}
-    try:
-        df = pd.read_excel(get_excel_path_for_reading(), sheet_name="MasterData")
-        date_h  = header_of(MasterDataSchema, "date")
-        value_h = header_of(MasterDataSchema, "value")
-        ccy_h   = header_of(MasterDataSchema, "currency")
-        desc_h  = header_of(MasterDataSchema, "description")
-        if date_h not in df.columns or value_h not in df.columns:
-            return empty
-        dates = pd.to_datetime(df[date_h], errors="coerce")
-        mask = dates.notna() & df[value_h].notna()
-        if start is not None:
-            mask &= dates >= pd.Timestamp(start)
-        if end is not None:
-            mask &= dates <= pd.Timestamp(end)
-        strict: dict[str, list[tuple[str, str]]] = {}
-        loose: dict[str, list[tuple[str, str]]] = {}
-        for i in df.index[mask]:
-            date_iso = dates.loc[i].date().isoformat()
-            value = df.at[i, value_h]
-            ccy = df.at[i, ccy_h] if ccy_h in df.columns and pd.notna(df.at[i, ccy_h]) else settings.DISPLAY_CURRENCY
-            desc = df.at[i, desc_h] if desc_h in df.columns and pd.notna(df.at[i, desc_h]) else ""
-            strict_key = make_dedup_key(date_iso, value, ccy, desc)
-            loose_key = make_loose_dedup_key(date_iso, value, ccy)
-            strict.setdefault(strict_key, []).append((date_iso, str(desc)))
-            loose.setdefault(loose_key, []).append((date_iso, str(desc)))
-        return {"strict": strict, "loose": loose}
-    except Exception as e:
-        log.warning("Could not load dedup evidence from MasterData: %s", e)
-        return empty
+    return storage_facade.load_dedup_evidence(start, end)
 
 
 def load_dedup_keys(start=None, end=None) -> set[str]:
     """
     Backward-compatible view of load_dedup_evidence: the set of strict dedup
-    keys (see validators.make_dedup_key) present in MasterData in [start, end].
+    keys present in the transactions table in [start, end].
     Prefer load_dedup_evidence for count-aware / loose-match callers.
     """
     return set(load_dedup_evidence(start, end)["strict"].keys())
