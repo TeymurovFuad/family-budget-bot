@@ -72,3 +72,31 @@ def test_reconcile_matches(seeded_db, template, tmp_path):
     from scripts.reconcile_sqlite_export import reconcile
     mismatches = reconcile(seeded_db, template, tmp_path / "reconcile.xlsx")
     assert mismatches == []
+
+
+def test_export_calls_dashboard_resync(seeded_db, template, tmp_path, monkeypatch):
+    """Both dashboard sync functions are called exactly once during export."""
+    from unittest.mock import MagicMock
+    from openpyxl import load_workbook
+    import excel_export as _mod
+
+    # Ensure the template workbook has a Cycle Dashboard sheet so the guard
+    # inside generate_excel_from_sqlite lets the call through.
+    wb_tmp = load_workbook(template)
+    if "Cycle Dashboard" not in wb_tmp.sheetnames:
+        wb_tmp.create_sheet("Cycle Dashboard")
+        wb_tmp.save(template)
+
+    mock_dash = MagicMock(return_value=0)
+    mock_cycle = MagicMock(return_value=0)
+    # Patch the names as they are bound in excel_export's module namespace.
+    monkeypatch.setattr(_mod, "sync_dashboard_categories", mock_dash)
+    monkeypatch.setattr(_mod, "sync_cycle_dashboard_categories", mock_cycle)
+
+    out = tmp_path / "resync_out.xlsx"
+    generate_excel_from_sqlite(seeded_db, template, out)
+
+    mock_dash.assert_called_once()
+    args, _ = mock_dash.call_args
+    assert len(args[1]) > 0
+    mock_cycle.assert_called_once()

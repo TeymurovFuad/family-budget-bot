@@ -14,6 +14,7 @@ from logger import get_logger
 import sqlite_ops
 from sqlite_types import SyncDirection, SyncStatus
 from excel_schema import (
+    ListsSchema,
     MasterDataSchema,
     col_indices,
     ensure_monthly_summary_rows_from_masterdata,
@@ -21,7 +22,9 @@ from excel_schema import (
     lists_currency_range,
     to_date,
     write_transaction_row,
+    sync_dashboard_categories,
 )
+from cycle_dashboard import sync_cycle_dashboard_categories
 from storage_backends import atomic_save
 
 log = get_logger(__name__)
@@ -79,6 +82,29 @@ def generate_excel_from_sqlite(db_path, template_path, output_path) -> None:
             r += 1
 
         ensure_monthly_summary_rows_from_masterdata(wb)
+
+        # Rebuild Dashboard and Cycle Dashboard category blocks so renamed or
+        # newly added categories appear on those sheets after export.
+        if "Lists" in wb.sheetnames:
+            _idx_lists = col_indices(wb["Lists"], ListsSchema)
+            _cat_col = _idx_lists.get("categories")
+            if _cat_col:
+                _categories: list = []
+                for _r in range(2, wb["Lists"].max_row + 1):
+                    _val = wb["Lists"].cell(_r, _cat_col).value
+                    if _val is None:
+                        log.warning(
+                            "excel_export: category read stopped at row %d (empty cell)", _r
+                        )
+                        break
+                    if isinstance(_val, str) and _val.startswith("←"):
+                        break
+                    _categories.append(_val)
+                if _categories:
+                    sync_dashboard_categories(wb, _categories)
+                    if "Cycle Dashboard" in wb.sheetnames:
+                        sync_cycle_dashboard_categories(wb)
+
         atomic_save(wb, output_path)
         sqlite_ops.log_sync(conn, SyncDirection.EXPORT, SyncStatus.OK,
                             f"{len(rows)} rows -> {output_path}")
