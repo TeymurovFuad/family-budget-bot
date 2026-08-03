@@ -111,38 +111,19 @@ async def _reply(update: Update, text: str, **kwargs) -> bool:
 # ── Workbook state detection / IO ─────────────────────────────────────────────
 
 def _workbook_exists() -> bool:
-    import file_storage
-    if file_storage._active_backend() != "local":
-        return True  # remote backends: assume the object exists; load decides
-    return file_storage.LOCAL_XLSX_PATH.exists()
+    from pathlib import Path
+    return Path(settings.SQLITE_DB_PATH).exists()
 
 
 def _load_existing_state() -> tuple[list[tuple[str, str]], dict[str, float]]:
     """Read categories (with persisted or hinted types) and budgets."""
-    from file_storage import get_excel_path_for_reading, load_lists
-    path = get_excel_path_for_reading()
-    lists = load_lists(path)
-    stored_types: dict[str, str] = {}
-    try:
-        from openpyxl import load_workbook
-        from excel_schema import ListsSchema, col_indices
-        wb = load_workbook(path, read_only=True)
-        ws = wb["Lists"]
-        idx = col_indices(ws, ListsSchema)
-        cat_col, typ_col = idx.get("categories"), idx.get("category_type")
-        if cat_col and typ_col:
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                cat = row[cat_col - 1] if len(row) >= cat_col else None
-                typ = row[typ_col - 1] if len(row) >= typ_col else None
-                if cat is not None and typ:
-                    stored_types[str(cat).strip()] = str(typ).strip()
-        wb.close()
-    except Exception:
-        log.warning("/setup: could not read stored category types", exc_info=True)
-    cats = [(str(c),
-             stored_types.get(str(c)) or CATEGORY_TYPE_HINTS.get(str(c), "Expense"))
-            for c in lists.get("categories", [])]
-    return cats, dict(lists.get("budgets", {}))
+    import storage_facade
+    cats_types = storage_facade.load_category_types()
+    ref = storage_facade.load_reference_data()
+    budgets = storage_facade.load_budgets()
+    cats = [(cat, cats_types.get(cat) or CATEGORY_TYPE_HINTS.get(cat, "Expense"))
+            for cat in ref.get("categories", [])]
+    return cats, budgets
 
 
 def _extend_category_validation(wb, n_categories: int) -> None:
@@ -157,103 +138,33 @@ def _extend_category_validation(wb, n_categories: int) -> None:
             dv.formula1 = pattern.sub(rf"\g<1>{n_categories + 1}", f1)
 
 
-def _commit_categories(session: dict) -> None:
-    """Checkpoint A: Lists!C + both dashboards + validation, one atomic save."""
-    from openpyxl import load_workbook
-
-    import merchant_map
-    from cycle_dashboard import CYCLE_DASHBOARD_SHEET_NAME, sync_cycle_dashboard_categories
-    from excel_schema import (
-        ListsSchema, col_indices, header_of, sync_dashboard_categories,
-        rename_category_in_workbook,
+async def _commit_categories(session: dict) -> None:
+    """Checkpoint A: apply category setup via storage_facade."""
+    import storage_facade
+    await storage_facade.async_apply_category_setup(
+        session["categories"], session.get("renames", [])
     )
-    from file_storage import ExcelFileContext, atomic_save
-
-    names = [name for name, _typ in session["categories"]]
-    types = {name: typ for name, typ in session["categories"]}
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = wb["Lists"]
-        idx = col_indices(ws, ListsSchema)
-        cat_col = idx["categories"]
-        bud_col = idx.get("budget_base")
-        typ_col = idx.get("category_type")
-        if typ_col is None:  # older workbooks: add the column at the first free slot
-            typ_col = ws.max_column + 1
-            ws.cell(1, typ_col, header_of(ListsSchema, "category_type"))
-        # preserve budgets of surviving categories, clear the rest
-        old_budgets = {}
-        for r in range(2, ws.max_row + 1):
-            cat = ws.cell(r, cat_col).value
-            if cat is not None and bud_col:
-                old_budgets[str(cat).strip()] = ws.cell(r, bud_col).value
-            ws.cell(r, cat_col).value = None
-            ws.cell(r, typ_col).value = None
-            if bud_col:
-                ws.cell(r, bud_col).value = None
-        for i, name in enumerate(names, start=2):
-            ws.cell(i, cat_col, name)
-            ws.cell(i, typ_col, types.get(name, "Expense"))
-            if bud_col and old_budgets.get(name) is not None:
-                ws.cell(i, bud_col, old_budgets[name])
-        # cascade: MasterData rows + Dashboard values + formula literals (Lists!C handled above)
-        for old_name, new_name in session.get("renames", []):
-            counts = rename_category_in_workbook(wb, old_name, new_name)
-            log.info("/setup: cascaded rename '%s' → '%s': %s", old_name, new_name, counts)
-            merchant_map.rename_category(old_name, new_name)
-        session["renames"] = []
-        sync_dashboard_categories(wb, names)
-        if CYCLE_DASHBOARD_SHEET_NAME in wb.sheetnames:
-            sync_cycle_dashboard_categories(wb)
-        _extend_category_validation(wb, len(names))
-        atomic_save(wb, excel_path)
-    log.info("/setup: committed %d categories", len(names))
+    session["renames"] = []
+    log.info("/setup: committed %d categories", len(session["categories"]))
 
 
-def _commit_budgets_and_currency(session: dict) -> None:
-    """Checkpoint B: budgets into Lists!D, currency into Lists!H, one save."""
-    from openpyxl import load_workbook
-    from excel_schema import ListsSchema, col_indices
-    from file_storage import ExcelFileContext, atomic_save
-
-    with ExcelFileContext() as excel_path:
-        wb = load_workbook(excel_path)
-        ws = wb["Lists"]
-        idx = col_indices(ws, ListsSchema)
-        cat_col, bud_col = idx.get("categories"), idx.get("budget_base")
-        if cat_col and bud_col:
-            for r in range(2, ws.max_row + 1):
-                cat = ws.cell(r, cat_col).value
-                if cat is None:
-                    break
-                amount = session["budgets"].get(str(cat).strip())
-                if amount is not None and amount > NO_LIMIT:
-                    ws.cell(r, bud_col, round(float(amount), 2))
-        ccy = session.get("currency")
-        ccy_col, rate_col = idx.get("currency"), idx.get("rate_to_base")
-        if ccy and ccy_col:
-            existing, first_free = set(), None
-            for r in range(2, ws.max_row + 2):
-                val = ws.cell(r, ccy_col).value
-                if val is None or str(val).startswith("←"):
-                    first_free = first_free or r
-                    if val is None:
-                        break
-                else:
-                    existing.add(str(val).strip().upper())
-            if ccy not in existing and first_free:
-                ws.cell(first_free, ccy_col, ccy)
-                if rate_col:
-                    ws.cell(first_free, rate_col, 1.0)  # placeholder until rates refresh
-        atomic_save(wb, excel_path)
+async def _commit_budgets_and_currency(session: dict) -> None:
+    """Checkpoint B: budgets and currency into SQLite via storage_facade."""
+    import storage_facade
+    for cat, budget in session["budgets"].items():
+        if budget is not None and budget > NO_LIMIT:
+            await storage_facade.async_update_category_budget(cat, float(budget))
+    ccy = session.get("currency")
+    if ccy:
+        await storage_facade.async_update_currency_rates({ccy: 1.0})
     log.info("/setup: committed budgets (%d) and currency %s",
-             len(session["budgets"]), session.get("currency"))
+             len(session["budgets"]), ccy)
 
 
 async def _refresh_rates_best_effort() -> dict[str, float]:
-    """Fetch live rates from frankfurter and update Excel. Raises on failure."""
+    """Fetch live rates from frankfurter and update SQLite. Raises on failure."""
     import httpx
-    from excel_ops import async_update_currency_rates
+    from storage_facade import async_update_currency_rates
     urls = [f"https://api.frankfurter.dev/v1/latest?from={settings.DISPLAY_CURRENCY}",
             f"https://api.frankfurter.app/latest?from={settings.DISPLAY_CURRENCY}"]
     data = None
@@ -344,13 +255,13 @@ async def _show_review(update: Update, ctx) -> int:
 # ── Entry points ──────────────────────────────────────────────────────────────
 
 async def _begin_fresh(update: Update, ctx) -> int:
-    """Create the workbook if needed, seed defaults, show Step 1 + Step 2."""
-    import file_storage
+    """Create the DB if needed, seed defaults, show Step 1 + Step 2."""
     if not _workbook_exists():
         try:
-            file_storage.create_workbook_from_template(file_storage.LOCAL_XLSX_PATH)
+            import sqlite_ops
+            sqlite_ops.init_db(settings.SQLITE_DB_PATH)
         except Exception:
-            log.exception("/setup: workbook creation failed")
+            log.exception("/setup: DB creation failed")
             await _reply(update, CREATE_FAIL_TEXT)
             return ConversationHandler.END
     session = _session(ctx)
@@ -380,14 +291,11 @@ async def cmd_setup(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if not _workbook_exists():
         return await _begin_fresh(update, ctx)
 
-    from openpyxl import load_workbook
-    from file_storage import get_excel_path_for_reading, lists_categories_populated
+    import storage_facade
     try:
-        wb = load_workbook(get_excel_path_for_reading(), read_only=True)
-        populated = lists_categories_populated(wb)
-        wb.close()
+        populated = bool(storage_facade.load_reference_data()["categories"])
     except Exception:
-        log.exception("/setup: could not read workbook")
+        log.exception("/setup: could not read DB")
         await _reply(update, CREATE_FAIL_TEXT)
         return ConversationHandler.END
 
@@ -471,7 +379,7 @@ async def setup_review_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
         return SETUP_REMOVE
     if query.data == "setup:done":
         try:
-            _commit_categories(session)
+            await _commit_categories(session)
         except Exception:
             log.exception("/setup: category commit failed")
             await query.message.reply_text(CREATE_FAIL_TEXT)
@@ -628,7 +536,7 @@ async def _finish_with_currency(update: Update, ctx, ccy: str) -> int:
     session = _session(ctx)
     session["currency"] = ccy
     try:
-        _commit_budgets_and_currency(session)
+        await _commit_budgets_and_currency(session)
     except Exception:
         log.exception("/setup: final commit failed")
         await _reply(update, CREATE_FAIL_TEXT)

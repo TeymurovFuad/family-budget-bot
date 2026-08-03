@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 import settings
-from cycles import current_cycle_start, load_cycles
+from cycles import current_cycle_start
+from storage_facade import load_cycles
 from web.auth import require_session
 
 router = APIRouter()

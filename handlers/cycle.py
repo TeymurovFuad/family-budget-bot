@@ -10,15 +10,14 @@ from telegram.helpers import escape_markdown
 
 import settings
 from config import ALLOWED_USERS, auth, auth_write, get_display_currency, log
-from data import load_rates, now_utc
+from data import now_utc
 from formatters import format_base_as_currency
-from storage_facade import load_transactions
+from storage_facade import load_rates, load_transactions, load_cycles, async_record_cycle_start, async_remove_cycle_start
 from log_decorators import log_call
 from cycles import (
-    async_record_cycle_start, async_remove_cycle_start, current_cycle_start,
+    current_cycle_start,
     cycle_label, cycle_detect_keywords, detect_cycle_candidates,
-    fallback_income_candidates, load_cycles,
-    record_cycle_starts_batch, should_prompt_new_cycle,
+    fallback_income_candidates, should_prompt_new_cycle,
 )
 
 _CYCLES_DISABLED_MSG = (
@@ -433,13 +432,12 @@ async def handle_detect_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE)
 
     if data == "detect:confirm_all":
         candidates = ctx.user_data.get("detect_candidates") or []
-        loop = asyncio.get_running_loop()
-        n = await loop.run_in_executor(
-            None,
-            lambda: record_cycle_starts_batch(
-                [date.fromisoformat(c["date_str"]) for c in candidates]
-            ),
-        )
+        starts = [date.fromisoformat(c["date_str"]) for c in candidates]
+        n = 0
+        for s in starts:
+            lbl = await async_record_cycle_start(s)
+            if lbl:
+                n += 1
         ctx.user_data.pop("detect_candidates", None)
         await query.edit_message_text(
             _esc(f"✅ Confirmed {n} {'boundary' if n == 1 else 'boundaries'}."),
