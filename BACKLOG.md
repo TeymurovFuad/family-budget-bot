@@ -591,7 +591,7 @@ Goal: a simple web UI that mirrors the Excel view, backed by SQLite.
       through `storage_facade`)*.
 - [x] **S3b — edit/delete via web UI** *(fixed PR #116 — optimistic-lock
       conflict detection via lock token)*.
-- [ ] **Schedule `excel_export.py`** so the workbook becomes a live-updating
+- [x] **Schedule `excel_export.py`** so the workbook becomes a live-updating
       export instead of a one-time-import-then-frozen artifact (systemd timer
       or in-bot job; verify with `scripts/reconcile_sqlite_export.py`).
       Still open as of PR #118 — no timer/job wired yet.

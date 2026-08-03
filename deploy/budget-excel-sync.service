@@ -1,0 +1,11 @@
+[Unit]
+Description=Budget Bot — SQLite to Excel export
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/budget-bot
+EnvironmentFile=/home/ubuntu/budget-bot/.env
+ExecStart=/home/ubuntu/budget-bot/venv/bin/python -c "from excel_export import generate_excel_from_sqlite; import settings; generate_excel_from_sqlite(str(settings.SQLITE_DB_PATH), str(settings.DEFAULT_TEMPLATE_PATH), str(settings.EXCEL_EXPORT_PATH))"
+StandardOutput=journal
+StandardError=journal

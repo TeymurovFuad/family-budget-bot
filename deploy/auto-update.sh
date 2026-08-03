@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-/home/ubuntu/budget-bot}"
 SERVICE="${SERVICE:-budget-bot}"
 WEB_SERVICE="${WEB_SERVICE:-budget-web}"
+SYNC_SERVICE="${SYNC_SERVICE:-budget-excel-sync}"
 
 cd "$REPO_DIR"
 
@@ -31,12 +32,24 @@ echo "Deployed $(git rev-parse --short HEAD) and restarted $SERVICE"
 # failure here must never abort the script or block notify_update() below —
 # git pull already succeeded, and the next timer run would short-circuit at
 # the LOCAL=REMOTE check above, so a hard failure here would be permanent.
+
 if systemctl is-enabled --quiet "${WEB_SERVICE}.service" 2>/dev/null; then
     if sudo systemctl restart "$WEB_SERVICE"; then
         echo "Also restarted $WEB_SERVICE"
     else
         echo "auto-update: failed to restart $WEB_SERVICE, continuing"
     fi
+fi
+
+# Re-export SQLite → Excel immediately after every pull so the file stays fresh.
+# daemon-reload picks up any changes to the .service/.timer unit files from the pull.
+# systemctl start on a oneshot runs it once and exits — the scheduled timer continues
+# independently. Failure here is non-fatal: the next timer run will cover it.
+sudo systemctl daemon-reload
+if sudo systemctl start "${SYNC_SERVICE}.service"; then
+    echo "Excel export triggered (${SYNC_SERVICE}.service)"
+else
+    echo "auto-update: Excel export failed, continuing (timer will retry)"
 fi
 
 notify_update() {

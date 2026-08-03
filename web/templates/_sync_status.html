@@ -1,0 +1,9 @@
+<div id="sync-status">
+  <p class="muted">Last synced: {{ last_sync[:19].replace('T', ' ') ~ ' UTC' if last_sync else 'Never' }}</p>
+  {% if error %}<p class="error-msg">{{ error }}</p>{% endif %}
+  <button class="btn btn--primary"
+          hx-post="/settings/sync"
+          hx-target="#sync-status"
+          hx-swap="outerHTML"
+          hx-disabled-elt="this">Sync now</button>
+</div>
