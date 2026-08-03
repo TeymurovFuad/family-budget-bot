@@ -224,7 +224,6 @@ def budget_excel(tmp_path, monkeypatch):
     return path
 
 
-@pytest.mark.skip(reason="S4-C/B integration gap: setbudget_amount writes to Excel, keyboard reads from SQLite — fixed when handlers migrate to storage_facade")
 @pytest.mark.asyncio
 async def test_setbudget_full_flow(budget_excel):
     update = make_update(user_id=PRIMARY_UID)

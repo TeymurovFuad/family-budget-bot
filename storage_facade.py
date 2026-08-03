@@ -666,20 +666,16 @@ async def async_update_category_budget(category: str, new_budget_base: float) ->
     await loop.run_in_executor(None, _sync)
 
 
-async def async_record_cycle_start(start) -> "str | None":
-    from cycles import _dedup_cycle_label
+async def async_record_cycle_start(start, label: str) -> bool:
     def _sync():
         with _get_conn() as conn:
             existing_rows = sqlite_ops.list_cycles(conn)
             existing_dates_iso = [r["start_date"] for r in existing_rows]
             if start.isoformat() in existing_dates_iso:
-                return None
-            from datetime import date as _date3
-            existing_dates = [_date3.fromisoformat(d) for d in existing_dates_iso]
-            label = _dedup_cycle_label(start, existing_dates)
+                return False
             sqlite_ops.upsert_cycle(conn, start.isoformat(), label)
             _schedule_excel_export()
-            return label
+            return True
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _sync)
 
@@ -717,7 +713,10 @@ async def async_apply_category_setup(
         with _get_conn() as conn:
             for old, new in renames:
                 sqlite_ops.rename_category(conn, old, new)
-            existing_budgets = load_budgets()
+            rows = conn.execute(
+                "SELECT name, budget_base FROM categories WHERE active=1 AND budget_base > 0"
+            ).fetchall()
+            existing_budgets = {r["name"]: r["budget_base"] for r in rows}
             sqlite_ops.replace_categories(conn, categories, existing_budgets)
         _schedule_excel_export()
     loop = asyncio.get_running_loop()

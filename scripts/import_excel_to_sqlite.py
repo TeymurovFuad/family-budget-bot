@@ -155,6 +155,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
             sqlite_ops.upsert_person(conn, str(person))
 
         # ── Cycles ────────────────────────────────────────────────────────────
+        wb = None
         try:
             import openpyxl as _openpyxl
             wb = _openpyxl.load_workbook(excel_path, data_only=True)
@@ -184,7 +185,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
 
         # ── Salary keywords ────────────────────────────────────────────────────
         try:
-            if "Lists" in wb.sheetnames:
+            if wb is not None and "Lists" in wb.sheetnames:
                 ws_lists = wb["Lists"]
                 headers = [str(c.value).strip() if c.value is not None else "" for c in ws_lists[1]]
                 try:
@@ -203,7 +204,7 @@ def run_import(db_path=None, dry_run: bool = False) -> dict:
 
         # ── Category types ─────────────────────────────────────────────────────
         try:
-            if "Lists" in wb.sheetnames:
+            if wb is not None and "Lists" in wb.sheetnames:
                 ws_lists = wb["Lists"]
                 headers = [str(c.value).strip() if c.value is not None else "" for c in ws_lists[1]]
                 try:
