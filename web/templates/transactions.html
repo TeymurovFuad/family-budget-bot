@@ -87,4 +87,43 @@
      hx-get="/transactions"
      hx-target="#txn-list"
      hx-swap="innerHTML">{% include "_txn_list.html" %}</div>
+
+<template id="bulk-edit-tpl">
+  <dialog class="modal" id="bulk-edit-modal" aria-labelledby="bedit-title">
+    <div class="modal-header">
+      <h2 id="bedit-title">Edit field for <span id="bulk-edit-count"></span> transaction(s)</h2>
+      <button type="button" class="modal-close-btn"
+              onclick="this.closest('dialog').close()"
+              aria-label="Close">&#10005;</button>
+    </div>
+    <form id="bulk-edit-form" hx-post="/transactions/bulk-edit" hx-swap="none">
+      <div class="modal-body">
+        <div id="bulk-edit-hidden-fields"></div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="bulk-field-select">Field</label>
+            <select id="bulk-field-select" name="bulk_field">
+              <option value="category">Category</option>
+              <option value="person">Person</option>
+              <option value="type">Type</option>
+            </select>
+          </div>
+          <div class="form-field" id="bulk-value-row">
+            <label for="bulk-value-select">Value</label>
+            <select id="bulk-value-select" name="bulk_value" disabled>
+              <option value="">— choose a value —</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn--ghost"
+                onclick="this.closest('dialog').close()">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="bulk-edit-submit" disabled>Apply</button>
+      </div>
+    </form>
+  </dialog>
+</template>
+
+<script src="/static/js/bulk_select.js" defer></script>
 {% endblock %}
