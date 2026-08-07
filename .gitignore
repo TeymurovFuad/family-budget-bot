@@ -84,3 +84,7 @@ logs/
 *.bak
 *.swp
 *~
+
+# Scratchpad path artifacts (tool-generated temp path strings accidentally
+# materialized as filenames in repo root)
+C:Users*AppDataLocalTempclaudeC--repos-budget-bot*scratchpad*

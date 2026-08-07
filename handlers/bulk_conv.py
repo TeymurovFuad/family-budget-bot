@@ -1,7 +1,6 @@
 """/bulk conversation — import transactions from photo, file, or pasted text."""
 
 import asyncio
-import json
 import re
 from datetime import datetime, date, timezone
 from pathlib import Path
@@ -23,6 +22,7 @@ import settings
 import storage_facade
 from storage_facade import load_dedup_evidence, load_reference_data
 import merchant_map
+from bulk_drafts import archive_user_draft, load_user_draft, save_user_draft
 from handlers.cycle import maybe_prompt_cycle_start
 from models import Transaction
 import statement_profiles as sp
@@ -38,6 +38,7 @@ from validators import (
     make_dedup_key,
     make_loose_dedup_key,
     parse_amount,
+    resolve_fallback_category,
     validate_parsed_row,
 )
 
@@ -819,43 +820,21 @@ async def _announce_parse_plan(update: Update, text: str) -> None:
     else:
         await update.message.reply_text("🔍 Parsing transactions...")
 
-def _bulk_draft_dir() -> Path:
-    return settings.BULK_DRAFTS_DIR
-
-
-def _user_draft_path(user_id: int) -> Path:
-    return _bulk_draft_dir() / f"{user_id}.json"
-
-
 def _load_user_draft(user_id: int) -> list[dict]:
     """Read one user's draft directly — avoids scanning every user's file."""
-    path = _user_draft_path(user_id)
-    if not path.exists():
+    rows = load_user_draft(user_id)
+    if not rows:
         return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        log.exception("Could not read bulk draft from %s", path)
-        return []
+    return rows
 
 
 def _save_bulk_draft(user_id: int, rows: list[dict]) -> None:
-    path = _user_draft_path(user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_user_draft(user_id, rows)
 
 
 def _archive_bulk_draft(user_id: int) -> None:
     """Move draft to archive instead of deleting — 6-month audit trail."""
-    path = _user_draft_path(user_id)
-    if not path.exists():
-        return
-    from datetime import datetime
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    archive_dir = _bulk_draft_dir() / "archive"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    path.rename(archive_dir / f"{user_id}-{ts}.json")
+    archive_user_draft(user_id)
 
 
 def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
@@ -1163,6 +1142,7 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
     """
     categories = lists.get("categories") or []
     cat_by_lower = {c.lower(): c for c in categories}
+    fallback_other = resolve_fallback_category(categories)
     types = set(lists.get("txn_types") or ["Expense", "Income", "Savings"])
     corrections: list[str] = []
 
@@ -1184,7 +1164,7 @@ def _normalize_parsed_rows(parsed: list[dict], lists: dict) -> tuple[list[dict],
                 fuzzy = [c for c in categories
                          if cat.lower() in c.lower() or c.lower() in cat.lower()]
                 fixed = fuzzy[0] if len(fuzzy) == 1 else None
-            row["category"] = fixed or "Other"
+            row["category"] = fixed or fallback_other
             corrections.append(f"row {i}: category '{cat}' → '{row['category']}'")
 
         # Person field is retired — any name the AI still emits belongs in the description
@@ -1246,6 +1226,7 @@ def _apply_ai_categorization(parsed: list[dict], lists: dict) -> list[str]:
     become sticky. Rows touched get row['ai'] = True (🤖 in the preview).
     """
     categories = lists.get("categories") or []
+    fallback_other = resolve_fallback_category(categories)
     if not categories:
         return []
 
@@ -1254,7 +1235,7 @@ def _apply_ai_categorization(parsed: list[dict], lists: dict) -> list[str]:
         if row.get("mem") or row.get("dropped"):
             continue
         cat = str(row.get("category") or "").strip()
-        if cat and cat != "Other":
+        if cat and cat != fallback_other:
             continue
         desc = str(row.get("description") or "").strip()
         if desc:
@@ -1267,7 +1248,7 @@ def _apply_ai_categorization(parsed: list[dict], lists: dict) -> list[str]:
     notes: list[str] = []
     for merchant, rows in targets.items():
         cat = str(mapping.get(merchant) or "").strip()
-        if cat in cat_set and cat != "Other":
+        if cat in cat_set and cat != fallback_other:
             for row in rows:
                 row["category"] = cat
                 row["ai"] = True
@@ -1284,9 +1265,11 @@ def _revalidate_bulk_row(row: dict, lists: dict, row_no: int) -> list[str]:
     notes: list[str] = []
     if not str(row.get("type") or "").strip():
         row["type"] = "Expense"
-    if not str(row.get("category") or "").strip() and lists.get("categories"):
-        row["category"] = "Other"
-        notes.append(f"row {row_no}: empty category → 'Other'")
+    categories = lists.get("categories") or []
+    fallback_other = resolve_fallback_category(categories)
+    if not str(row.get("category") or "").strip() and categories:
+        row["category"] = fallback_other
+        notes.append(f"row {row_no}: empty category → '{fallback_other}'")
 
     desc = str(row.get("description") or "")
     if desc and desc[0] in ("=", "+", "-", "@"):
@@ -2088,7 +2071,8 @@ async def bulk_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 value=float(item["value"]),
                 currency=(item.get("currency") or settings.DISPLAY_CURRENCY).upper(),
                 transaction_type=item.get("type", "Expense"),
-                category=item.get("category", "Other"),
+                category=item.get("category")
+                or resolve_fallback_category(lists.get("categories") or []),
                 person=item.get("person", ""),
                 description=item.get("description", ""),
                 is_recurring=is_recurring,

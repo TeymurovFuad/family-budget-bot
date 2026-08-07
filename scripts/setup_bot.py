@@ -28,6 +28,7 @@ ENV_PATH = ROOT / ".env"
 ENV_EXAMPLE_PATH = ROOT / ".env.example"
 DATA_DIR = ROOT / "data"
 TEMPLATE_PATH = DATA_DIR / "Expenses_Template.xlsx"
+DEFAULT_XLSX_REL = str(Path("data") / "Expenses.xlsx")
 
 MIN_PYTHON = (3, 12)
 
@@ -185,7 +186,7 @@ OPTIONAL_PROMPTS = [
     ("TIMEZONE", "Timezone", "IANA name, e.g. America/New_York, Europe/London.", "UTC"),
     ("DISPLAY_CURRENCY", "Display currency", "Currency code used in reports.", ""),
     ("STORAGE_BACKEND", "Storage backend", "local | gcs | s3. 'local' keeps the Excel file on disk.", "local"),
-    ("XLSX_PATH", "Excel file path", "Where the workbook lives (relative to the repo).", "data/Expenses_Improved.xlsx"),
+    ("XLSX_PATH", "Excel file path", "Where the workbook lives (relative to the repo).", DEFAULT_XLSX_REL),
 ]
 
 DEEPSEEK_HELP = (
@@ -281,7 +282,7 @@ def setup_data_dir(values: dict[str, str]) -> None:
     DATA_DIR.mkdir(exist_ok=True)
     say(f"{DATA_DIR} exists — OK")
 
-    xlsx = Path(values.get("XLSX_PATH", "data/Expenses_Improved.xlsx"))
+    xlsx = Path(values.get("XLSX_PATH", DEFAULT_XLSX_REL))
     if not xlsx.is_absolute():
         xlsx = ROOT / xlsx
     if xlsx.exists():
@@ -340,7 +341,7 @@ def print_summary(values: dict[str, str], start_cmd: str) -> None:
     ds = values.get("DEEPSEEK_API_KEY", "")
     say(f"  DeepSeek key:   {mask_secret(ds) if ds else '(not set — AI parsing disabled)'}")
     say(f"  Storage:        {values.get('STORAGE_BACKEND', 'local')}")
-    say(f"  Workbook:       {values.get('XLSX_PATH', 'data/Expenses_Improved.xlsx')}")
+    say(f"  Workbook:       {values.get('XLSX_PATH', DEFAULT_XLSX_REL)}")
     say(f"  Timezone:       {values.get('TIMEZONE', 'UTC')}")
     say(f"  Currency:       {values.get('DISPLAY_CURRENCY', '')}")
     say()

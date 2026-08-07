@@ -32,12 +32,12 @@ Environment variables by backend
 ─────────────────────────────────────────────────────────────────────────────
 
 Local (default — development, phone hosting, Oracle VM with local disk):
-  XLSX_PATH          Path to the Excel file. Default: data/Expenses_Improved.xlsx
+    XLSX_PATH          Path to the Excel file. Default: data/Expenses.xlsx
 
 GCS (Google Cloud Storage — free tier, recommended for reports + phone setup):
   STORAGE_BACKEND    gcs
   GCS_BUCKET_NAME    Bucket name, e.g. your-bucket-name
-  GCS_OBJECT_NAME    Object name inside bucket. Default: Expenses_Improved.xlsx
+    GCS_OBJECT_NAME    Object name inside bucket. Default: Expenses.xlsx
   GCS_KEY_JSON       Full contents of service account JSON key (for GitHub Actions
                      or any host where you can't write a file to disk)
                      Leave empty if GOOGLE_APPLICATION_CREDENTIALS is set instead.
@@ -45,7 +45,7 @@ GCS (Google Cloud Storage — free tier, recommended for reports + phone setup):
 S3-compatible (Oracle Object Storage, Cloudflare R2, Backblaze B2, AWS S3):
   STORAGE_BACKEND    s3
   S3_BUCKET_NAME     Bucket name
-  S3_OBJECT_NAME     Object name. Default: Expenses_Improved.xlsx
+    S3_OBJECT_NAME     Object name. Default: Expenses.xlsx
   S3_ENDPOINT_URL    Full endpoint URL. Examples:
                        Oracle:     https://<namespace>.compat.objectstorage.<region>.oraclecloud.com
                        Cloudflare: https://<account-id>.r2.cloudflarestorage.com

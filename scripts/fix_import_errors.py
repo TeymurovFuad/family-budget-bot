@@ -9,7 +9,7 @@ Fixes in MasterData:
      moved into Description, Person cleared.
 
 Usage:  python scripts/fix_import_errors.py [path-to-xlsx]
-Default path: data/Expenses_Improved.xlsx (or XLSX_PATH env var).
+Default path: XLSX_PATH (or data/Expenses.xlsx when unset).
 A .bak copy is written next to the file before any change.
 """
 import os

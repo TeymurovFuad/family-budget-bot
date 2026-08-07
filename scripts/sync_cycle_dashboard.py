@@ -10,7 +10,7 @@ if it's absent. Safe to run any number of times — no change → no save.
 Usage (on the bot machine):
   python scripts/sync_cycle_dashboard.py
   python scripts/sync_cycle_dashboard.py --dry-run
-  python scripts/sync_cycle_dashboard.py --path /path/to/Expenses_Improved.xlsx
+    python scripts/sync_cycle_dashboard.py --path /path/to/Expenses.xlsx
 """
 
 import sys

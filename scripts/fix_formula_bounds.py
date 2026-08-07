@@ -16,7 +16,7 @@ Monthly Summary rows. Writes a .bak backup before saving.
 
 Usage (on the bot machine):
   python scripts/fix_formula_bounds.py
-  python scripts/fix_formula_bounds.py --path /path/to/Expenses_Improved.xlsx
+    python scripts/fix_formula_bounds.py --path /path/to/Expenses.xlsx
 """
 
 import sys

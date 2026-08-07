@@ -5,18 +5,18 @@
   {% for cat in categories %}
   {% set enc = cat | urlencode %}
   {% set budget = category_budgets.get(cat) %}
-  <li class="settings-list-item" id="cat-row-{{ enc }}">
+  <li class="settings-list-item" data-category="{{ cat }}">
     <span class="item-name">{{ cat }}</span>
     <span class="cat-budget muted">
       {% if budget %}Budget: {{ budget | int }}{% else %}Budget: —{% endif %}
     </span>
     <button class="btn btn--ghost btn--sm"
             hx-get="/settings/categories/{{ enc }}/budget-form"
-            hx-target="#cat-row-{{ enc }}"
+            hx-target="closest .settings-list-item"
             hx-swap="outerHTML">Edit budget</button>
     <button class="btn btn--ghost btn--sm"
             hx-get="/settings/categories/{{ enc }}/rename-form"
-            hx-target="#cat-row-{{ enc }}"
+            hx-target="closest .settings-list-item"
             hx-swap="outerHTML">Rename</button>
   </li>
   {% endfor %}

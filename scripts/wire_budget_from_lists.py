@@ -1,10 +1,13 @@
-import sys, openpyxl
+import sys
+
+import openpyxl
+import settings
 
 from _repair_guard import repair_guard
 from file_storage import atomic_save
 
-sys.stdout.reconfigure(encoding='utf-8')
-PATH = 'data/Expenses_Improved.xlsx'
+sys.stdout.reconfigure(encoding="utf-8")
+PATH = str(settings.XLSX_PATH)
 
 with repair_guard():
     wb = openpyxl.load_workbook(PATH, data_only=False)

@@ -15,6 +15,7 @@
 <nav>
   <a href="/">Summary</a>
   <a href="/transactions">Transactions</a>
+  <a href="/drafts"{% if request.url.path.startswith('/drafts') %} class="nav-active"{% endif %}>Drafts</a>
   <a href="/cycles">Cycles</a>
   <a href="/settings"{% if request.url.path.startswith('/settings') %} class="nav-active"{% endif %}>Settings</a>
   <div class="nav-actions">

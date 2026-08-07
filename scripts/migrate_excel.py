@@ -83,14 +83,14 @@ def _remove_named_ranges(wb, names) -> None:
             del wb.defined_names[name]
 
 
-EXCEL_PATH = Path(__file__).parent.parent / "data" / "Expenses_Improved.xlsx"
+EXCEL_PATH = settings.XLSX_PATH
 
 
 def main():
     if not EXCEL_PATH.exists():
         print(
             f"File not found: {EXCEL_PATH}\n"
-            "Please place your Expenses_Improved.xlsx in the data/ directory first."
+            "Please configure XLSX_PATH (or place the workbook at the default path) first."
         )
         return
 
