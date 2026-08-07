@@ -1,6 +1,7 @@
 """test_web_drafts.py - route tests for Drafts web UI flows."""
 
 import time
+from urllib.parse import unquote_plus
 from unittest.mock import patch
 
 import settings
@@ -58,6 +59,18 @@ def test_drafts_page_renders_pending_rows(monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert "Drafts" in resp.text
     assert "User 1001" in resp.text
+
+
+def test_reanalyze_text_avoids_category_type_anchoring():
+    from web.routes.drafts import _build_reanalyze_text
+
+    row = _draft_row(type="Income", category="Salary", description="bonus payout")
+    text = _build_reanalyze_text(row, "Prefer nearest valid category")
+
+    assert "bonus payout" in text
+    assert "Instruction: Prefer nearest valid category" in text
+    assert "Salary" not in text
+    assert "Income" not in text
 
 
 def test_bulk_set_field_revalidates_and_clears_invalid(monkeypatch, tmp_path):
@@ -182,7 +195,8 @@ def test_bulk_reanalyze_preview_enforces_selection_cap(monkeypatch, tmp_path):
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert "Select at most 20 rows" in resp.headers.get("location", "")
+    location = unquote_plus(resp.headers.get("location", ""))
+    assert "Select at most 20 rows" in location
 
 
 def test_single_row_update_allows_unscoped_category_types(monkeypatch, tmp_path):
@@ -262,5 +276,72 @@ def test_reanalyze_preview_timeout_sets_row_reason(monkeypatch, tmp_path):
 
     assert resp.status_code == 303
     rows = load_user_draft(uid)
-    assert rows[0]["_ai_preview"]["status"] == "unchanged"
+    assert rows[0]["_ai_preview"]["status"] == "timeout"
     assert "timed out" in rows[0]["_ai_preview"]["reason"].lower()
+
+
+def test_reanalyze_preview_failure_is_reported(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1011
+    save_user_draft(uid, [_draft_row(description="broken ai")])
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    with patch("web.routes.drafts.parse_quick", side_effect=_boom):
+        resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+            },
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    assert "0%20failed" not in resp.headers.get("location", "")
+    assert "failed" in resp.headers.get("location", "")
+
+    rows = load_user_draft(uid)
+    assert rows[0]["_ai_preview"]["status"] == "error"
+    assert "failed" in rows[0]["_ai_preview"]["reason"].lower()
+
+
+def test_reanalyze_preview_mixed_status_summary(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1012
+    save_user_draft(uid, [
+        _draft_row(description="fuel"),
+        _draft_row(description="broken"),
+        _draft_row(description="skip me", dropped=True),
+    ])
+
+    changed_row = {
+        "date": "2024-06-15",
+        "value": 10.0,
+        "currency": "PLN",
+        "type": "Expense",
+        "category": "Transport",
+        "description": "fuel",
+    }
+
+    with patch("web.routes.drafts.parse_quick", side_effect=[changed_row, RuntimeError("provider down")]) as mocked_parse:
+        resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0", "1", "2"],
+            },
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    assert mocked_parse.call_count == 2
+
+    location = unquote_plus(resp.headers.get("location", ""))
+    assert "level=error" in location
+    assert "1 changed" in location
+    assert "0 unchanged" in location
+    assert "1 failed" in location
+    assert "0 timed out" in location
+    assert "1 skipped" in location

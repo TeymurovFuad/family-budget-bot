@@ -52,15 +52,23 @@ def _allowed_categories_for_type(txn_type: str, categories_by_type: dict[str, li
 
 
 def _build_reanalyze_text(row: dict, instruction: str) -> str:
+    # Exclude current type/category from the primary text so AI can
+    # reconsider classification instead of mirroring existing labels.
     parts = [
         str(row.get("date") or "").strip(),
         str(row.get("value") or "").strip(),
         str(row.get("currency") or "").strip(),
         str(row.get("description") or "").strip(),
-        str(row.get("category") or "").strip(),
-        str(row.get("type") or "").strip(),
     ]
     base = " ".join([p for p in parts if p])
+    if not base:
+        # Keep a final fallback for severely incomplete rows.
+        base = " ".join(
+            [
+                str(row.get("category") or "").strip(),
+                str(row.get("type") or "").strip(),
+            ]
+        ).strip()
     if instruction:
         return f"{base}\n\nInstruction: {instruction}"
     return base
@@ -84,10 +92,11 @@ def _compute_preview_for_row(
 ) -> dict:
     if row.get("dropped"):
         return {
-            "status": "unchanged",
+            "status": "skipped",
             "reason": "Row is dropped.",
             "changed_fields": [],
             "proposed": {},
+            "is_invalid": False,
         }
 
     if parsed is None:
@@ -266,6 +275,14 @@ async def drafts_bulk_update(request: Request, user_id: int):
                     "proposed": {},
                     "is_invalid": False,
                 }
+            if row.get("dropped"):
+                return idx, {
+                    "status": "skipped",
+                    "reason": "Row is dropped.",
+                    "changed_fields": [],
+                    "proposed": {},
+                    "is_invalid": False,
+                }
             try:
                 async with semaphore:
                     text = _build_reanalyze_text(row, instruction)
@@ -279,7 +296,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 return idx, preview
             except asyncio.TimeoutError:
                 return idx, {
-                    "status": "unchanged",
+                    "status": "timeout",
                     "reason": "AI preview timed out for this row.",
                     "changed_fields": [],
                     "proposed": {},
@@ -288,7 +305,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
             except Exception as exc:
                 log.warning("Draft AI preview failed for user=%s row=%s: %s", user_id, idx, exc)
                 return idx, {
-                    "status": "unchanged",
+                    "status": "error",
                     "reason": "AI preview failed for this row.",
                     "changed_fields": [],
                     "proposed": {},
@@ -301,23 +318,39 @@ async def drafts_bulk_update(request: Request, user_id: int):
         changed = 0
         unchanged = 0
         invalid = 0
+        failed = 0
+        timed_out = 0
+        skipped = 0
         for idx, preview in previews:
             row = rows[idx]
             row["_ai_preview"] = preview
-            if preview.get("status") == "changed":
+            status = str(preview.get("status") or "")
+            if status == "changed":
                 changed += 1
+            elif status == "error":
+                failed += 1
+            elif status == "timeout":
+                timed_out += 1
+            elif status == "skipped":
+                skipped += 1
             else:
                 unchanged += 1
             if preview.get("is_invalid"):
                 invalid += 1
         save_user_draft(user_id, rows)
         log.info(
-            "Draft AI preview: user=%s rows=%s instruction=%r changed=%s unchanged=%s invalid=%s",
-            user_id, len(idxs), instruction, changed, unchanged, invalid,
+            "Draft AI preview: user=%s rows=%s instruction=%r changed=%s unchanged=%s invalid=%s failed=%s timed_out=%s skipped=%s",
+            user_id, len(idxs), instruction, changed, unchanged, invalid, failed, timed_out, skipped,
         )
+        level = "error" if failed or timed_out else "success"
         return _redirect(
             user_id,
-            f"AI preview ready: {changed} changed, {unchanged} unchanged, {invalid} invalid.",
+            (
+                "AI preview ready: "
+                f"{changed} changed, {unchanged} unchanged, {invalid} invalid, "
+                f"{failed} failed, {timed_out} timed out, {skipped} skipped."
+            ),
+            level,
         )
 
     if action == "apply_ai_preview":
