@@ -69,7 +69,7 @@
               <option value="">Choose value</option>
             </select>
             <span id="draft-mixed-type-warning" class="draft-mixed-type-warning" style="display:none">Select rows with the same type first</span>
-            <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
+            <button type="button" class="btn btn--primary" id="draft-apply-btn" disabled onclick="submitBulkAction('set_field')">
               ✓ Apply to selected
             </button>
           </div>
@@ -80,14 +80,14 @@
           <label class="draft-bulk-label" for="draft-ai-instruction">AI re-analyze</label>
           <div class="draft-bulk-row">
             <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional instruction…">
-            <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
+            <button type="button" class="btn btn--ghost" id="draft-preview-ai-btn" disabled onclick="submitBulkAction('preview_ai')">
               🔍 Re-analyze
             </button>
-            <span id="draft-ai-row-counter" class="draft-ai-row-counter">0 / 20 rows selected</span>
-            <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled>
+            <span id="draft-ai-row-counter" class="draft-ai-row-counter">0 rows selected</span>
+            <button type="button" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled onclick="submitBulkAction('apply_ai_preview')">
               ✓ Apply AI
             </button>
-            <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
+            <button type="button" class="btn btn--ghost" id="draft-clear-preview-btn" disabled onclick="submitBulkAction('clear_ai_preview')">
               ✕ Clear
             </button>
           </div>
@@ -97,10 +97,10 @@
         <div class="draft-bulk-section draft-bulk-section--mgmt">
           <label class="draft-bulk-label">Row management</label>
           <div class="draft-bulk-row">
-            <button type="submit" name="action" value="drop" class="btn btn--ghost" id="draft-drop-btn" disabled>
+            <button type="button" class="btn btn--ghost" id="draft-drop-btn" disabled onclick="submitBulkAction('drop')">
               🗑 Drop (skip on save)
             </button>
-            <button type="submit" name="action" value="restore" class="btn btn--ghost" id="draft-restore-btn" disabled>
+            <button type="button" class="btn btn--ghost" id="draft-restore-btn" disabled onclick="submitBulkAction('restore')">
               ↩ Restore dropped row
             </button>
           </div>
@@ -110,13 +110,17 @@
         <div class="draft-bulk-section draft-bulk-section--save-all">
           <label class="draft-bulk-label">Bulk save</label>
           <div class="draft-bulk-row">
-            <button type="submit" name="action" value="save_all_valid" class="btn btn--primary" id="draft-save-all-btn">
+            <button type="button" class="btn btn--primary" id="draft-save-all-btn" onclick="submitBulkAction('save_all_valid')">
               💾 Save all valid rows
             </button>
           </div>
         </div>
 
       </div>
+
+      {# Hidden action field — set by submitBulkAction() before submit; prevents mobile browsers
+         from silently dropping the button value and triggering "Unknown action" #}
+      <input type="hidden" name="action" id="draft-action-input" value="">
 
       {# ── Status bar: peak hours + test connection ── #}
       <div class="draft-status-bar">
@@ -171,21 +175,25 @@
           {% set _proposed = _preview.get('proposed', {}) if (_preview and _ps == 'changed') else {} %}
           <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }} {{ 'draft-row--ai-changed' if _ps == 'changed' else '' }} {{ 'draft-row--ai-error' if _ps in ('error','timeout') else '' }}" data-row-idx="{{ loop.index0 }}">
             <td class="draft-cell draft-cell--summary" colspan="11">
-              <button type="button" class="draft-row-summary-toggle">
-                <span class="draft-summary-date">{{ _proposed.get('date') or row.get('date', '—') }}</span>
-                <span class="draft-summary-value">{{ _proposed.get('value') or row.get('value', '—') }} {{ _proposed.get('currency') or row.get('currency', '') }}</span>
-                <span class="draft-summary-category">{{ _proposed.get('category') or row.get('category', '—') }}</span>
-                {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
-                {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">Invalid</span>
-                {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI</span>
-                {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ {{ _preview.get('reason') or 'AI error' }}</span>
-                {% else %}<span class="draft-summary-status">OK</span>{% endif %}
-                <span class="draft-summary-chevron">▸</span>
-              </button>
+              <div class="draft-summary-bar">
+                <label class="draft-summary-cb-wrap" for="draft-row-cb-{{ loop.index0 }}" onclick="event.stopPropagation()">
+                  <input id="draft-row-cb-{{ loop.index0 }}" type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">
+                </label>
+                <button type="button" class="draft-row-summary-toggle">
+                  <span class="draft-summary-date">{{ _proposed.get('date') or row.get('date', '—') }}</span>
+                  <span class="draft-summary-value">{{ _proposed.get('value') or row.get('value', '—') }} {{ _proposed.get('currency') or row.get('currency', '') }}</span>
+                  {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
+                  {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">⚠ {{ row.get('invalid') }}</span>
+                  {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI ready</span>
+                  {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ {{ _preview.get('reason') or 'AI error' }}</span>
+                  {% else %}<span class="draft-summary-status">✓ OK</span>{% endif %}
+                  <span class="draft-summary-chevron">▸</span>
+                </button>
+              </div>
             </td>
             <td class="draft-cell draft-cell--pick" data-label="Select">
               <label class="draft-row-select" for="draft-row-cb-{{ loop.index0 }}">
-                <input id="draft-row-cb-{{ loop.index0 }}" type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">
+                <input type="checkbox" class="draft-row-cb draft-row-cb--pick" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">
                 <span class="draft-row-id">Row {{ loop.index }}</span>
               </label>
             </td>

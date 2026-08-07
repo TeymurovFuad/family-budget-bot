@@ -373,13 +373,6 @@ async def drafts_bulk_update(request: Request, user_id: int):
         return _redirect(user_id, "Select at least one row first.", "error", selected=selected)
 
     if action == "preview_ai":
-        if len(idxs) > _REANALYZE_MAX_ROWS:
-            return _redirect(
-                user_id,
-                f"Select at most {_REANALYZE_MAX_ROWS} rows for AI preview.",
-                "error",
-                selected=selected,
-            )
         instruction = str(form.get("ai_instruction", "")).strip()
         loop = asyncio.get_running_loop()
         semaphore = asyncio.Semaphore(_REANALYZE_MAX_PARALLEL)
