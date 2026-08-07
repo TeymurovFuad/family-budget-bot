@@ -299,12 +299,35 @@
     });
   });
 
-  // Mobile collapsed rows — tap summary bar to expand/collapse
+  // Collapsed rows — tap/click summary bar to expand/collapse on any screen size.
+  // Rows default to EXPANDED (CSS default, no class needed) — safe for no-JS.
+  // An inline script after the table immediately collapses mobile rows before first paint.
+  // This JS only handles the toggle and reactive breakpoint crossing.
+
+  var mobileQuery = window.matchMedia('(max-width: 47.99rem)');
+
+  function collapseAll() {
+    document.querySelectorAll('.draft-row').forEach(function(row) {
+      row.classList.add('draft-row--collapsed');
+    });
+  }
+
+  function expandAll() {
+    document.querySelectorAll('.draft-row').forEach(function(row) {
+      row.classList.remove('draft-row--collapsed');
+    });
+  }
+
+  // Reactive: crossing the breakpoint resets all rows to the new default.
+  mobileQuery.addEventListener('change', function(e) {
+    if (e.matches) { collapseAll(); } else { expandAll(); }
+  });
+
   document.querySelectorAll('.draft-row-summary-toggle').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var row = btn.closest('.draft-row');
       if (!row) return;
-      row.classList.toggle('draft-row--expanded');
+      row.classList.toggle('draft-row--collapsed');
     });
   });
 

@@ -837,6 +837,7 @@ dialog.modal::backdrop {
 .draft-preview--unchanged { opacity: .7; }
 .draft-preview-title { font-weight: 700; margin-bottom: var(--space-1); }
 .draft-preview-reason { color: var(--ink-soft); font-size: var(--fs-xs); margin-top: var(--space-1); }
+.draft-preview-reason--inline { display: block; margin-top: var(--space-1); }
 .draft-diff {
   width: 100%;
   border-collapse: collapse;
@@ -892,48 +893,76 @@ dialog.modal::backdrop {
 }
 
 
-/* ── Mobile collapsed rows ─────────────────────────────────────────────────── */
+/* ── Collapsible rows — all screen sizes ───────────────────────────────────── */
+/*
+ * Default (no class): row is EXPANDED — detail cells visible, summary bar hidden.
+ * .draft-row--collapsed: summary bar shown, detail cells hidden.
+ * This means no-JS users always see the full table (safe fallback).
+ * JS collapses mobile rows immediately via an inline script after the table.
+ */
+
+/* Summary bar: hidden by default (expanded state), shown only when collapsed */
 .draft-cell--summary { display: none; }
 
-@media (max-width: 47.99rem) {
-  /* Summary bar — shown collapsed */
-  .draft-cell--summary {
-    display: block;
-    padding: 0;
-    border-bottom: none;
-  }
-  .draft-cell--summary::before { display: none; }
-
-  .draft-row-summary-toggle {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: none;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    color: var(--ink);
-  }
-  .draft-summary-date   { color: var(--ink-soft); font-size: var(--fs-sm); flex: 0 0 auto; }
-  .draft-summary-value  { font-weight: 600; flex: 0 0 auto; }
-  .draft-summary-category { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
-  .draft-summary-status { flex: 0 0 auto; font-size: var(--fs-xs); font-weight: 700; }
-  .draft-summary-status--invalid { color: var(--money-neg); }
-  .draft-summary-status--dropped { color: var(--ink-soft); }
-  .draft-summary-status--ai      { color: var(--accent); }
-  .draft-summary-status--error   { color: var(--money-neg); }
-  .draft-summary-chevron { flex: 0 0 auto; color: var(--ink-soft); font-size: var(--fs-sm); transition: transform .15s; }
-
-  /* Collapsed: hide all detail cells */
-  .draft-row:not(.draft-row--expanded) .draft-cell:not(.draft-cell--summary) { display: none !important; }
-
-  /* Expanded: hide summary bar, show detail cells */
-  .draft-row--expanded .draft-cell--summary { display: none; }
-  .draft-row--expanded .draft-summary-chevron { transform: rotate(90deg); }
+.draft-row--collapsed .draft-cell--summary {
+  display: block;
+  padding: 0;
+  border-bottom: none;
 }
+.draft-row--collapsed .draft-cell--summary::before { display: none; }
+
+/* Collapsed: hide all detail cells */
+.draft-row--collapsed .draft-cell:not(.draft-cell--summary) { display: none !important; }
+
+.draft-row-summary-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--ink);
+}
+.draft-summary-date     { color: var(--ink-soft); font-size: var(--fs-sm); flex: 0 0 auto; }
+.draft-summary-value    { font-weight: 600; flex: 0 0 auto; }
+.draft-summary-category { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+.draft-summary-status   { flex: 0 0 auto; font-size: var(--fs-xs); font-weight: 700; }
+.draft-summary-status--invalid { color: var(--money-neg); }
+.draft-summary-status--dropped { color: var(--ink-soft); }
+.draft-summary-status--ai      { color: var(--accent); }
+.draft-summary-status--error   {
+  color: var(--money-neg);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draft-summary-chevron  {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--surface-raised, #f0f0f0);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  transition: transform .15s, background .15s;
+}
+.draft-row-summary-toggle:hover .draft-summary-chevron,
+.draft-row-summary-toggle:focus-visible .draft-summary-chevron {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* Chevron direction: ▸ when collapsed, ▾ when expanded */
+.draft-row--collapsed .draft-summary-chevron { transform: rotate(0deg); }
+.draft-row:not(.draft-row--collapsed) .draft-summary-chevron { transform: rotate(90deg); }
 
 @media (max-width: 47.99rem) {
   .bulk-bar--drafts {

@@ -178,7 +178,7 @@
                 {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
                 {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">Invalid</span>
                 {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI</span>
-                {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ AI error</span>
+                {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ {{ _preview.get('reason') or 'AI error' }}</span>
                 {% else %}<span class="draft-summary-status">OK</span>{% endif %}
                 <span class="draft-summary-chevron">▸</span>
               </button>
@@ -242,7 +242,11 @@
                 {% elif pstatus == 'timeout' %}⏱ Timed out
                 {% else %}{{ pstatus }}{% endif %}
               </span>
+              {% if pstatus == 'changed' %}
               <button type="button" class="draft-preview-toggle btn btn--sm btn--ghost" data-target="draft-preview-row-{{ loop.index0 }}" aria-expanded="false">▾ Details</button>
+              {% elif preview.get('reason') %}
+              <span class="draft-preview-reason draft-preview-reason--inline">{{ preview.get('reason') }}</span>
+              {% endif %}
               {% endif %}
             </td>
             <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
@@ -262,7 +266,7 @@
               </div>
             </td>
           </tr>
-          {% if row.get('_ai_preview') %}
+          {% if row.get('_ai_preview') and row.get('_ai_preview').get('status') == 'changed' %}
           {% set preview = row.get('_ai_preview') %}
           {% set pstatus = preview.get('status', 'unchanged') %}
           <tr id="draft-preview-row-{{ loop.index0 }}" class="draft-preview-row draft-preview-row--{{ pstatus }}" hidden>
@@ -295,6 +299,14 @@
           {% endfor %}
         </tbody>
       </table>
+      {# Collapse mobile rows immediately — runs sync before first paint, no FOUC. #}
+      <script>
+        if (window.matchMedia('(max-width: 47.99rem)').matches) {
+          document.querySelectorAll('.draft-row').forEach(function(r) {
+            r.classList.add('draft-row--collapsed');
+          });
+        }
+      </script>
     </div>
   </div>
 
