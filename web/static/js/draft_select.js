@@ -166,6 +166,25 @@
     updateBulkBar();
   }
 
+  // #16 — client-side invalid highlight when type/category changes
+  function updateRowInvalidClass(rowIdx) {
+    var typeSelect = document.querySelector('.draft-type-select[data-row-idx="' + rowIdx + '"]');
+    var categorySelect = document.querySelector('.draft-category-select[data-row-idx="' + rowIdx + '"]');
+    var row = document.querySelector('.draft-row[data-row-idx="' + rowIdx + '"]');
+    if (!typeSelect || !categorySelect || !row) return;
+    var allowed = categoryOptionsForType(String(typeSelect.value || ''));
+    if (!allowed.length) {
+      row.classList.remove('draft-row--invalid');
+      return;
+    }
+    var cat = String(categorySelect.value || '');
+    if (cat && allowed.indexOf(cat) === -1) {
+      row.classList.add('draft-row--invalid');
+    } else {
+      row.classList.remove('draft-row--invalid');
+    }
+  }
+
   document.addEventListener('change', function(e) {
     if (e.target.classList.contains('draft-row-cb')) {
       updateBulkBar();
@@ -187,12 +206,39 @@
       var idx = e.target.getAttribute('data-row-idx');
       if (idx !== null) {
         syncRowCategoryForType(idx);
+        updateRowInvalidClass(idx);
       }
       populateValues();
       return;
     }
+    if (e.target.classList.contains('draft-category-select')) {
+      var idx = e.target.getAttribute('data-row-idx');
+      if (idx !== null) {
+        updateRowInvalidClass(idx);
+      }
+      return;
+    }
     if (e.target.id === 'draft-bulk-value') {
       updateBulkBar();
+    }
+  });
+
+  // #9 — AI preview collapsible row toggle
+  document.addEventListener('click', function(e) {
+    if (!e.target.classList.contains('draft-preview-toggle')) return;
+    var targetId = e.target.getAttribute('data-target');
+    if (!targetId) return;
+    var detailRow = document.getElementById(targetId);
+    if (!detailRow) return;
+    var expanded = e.target.getAttribute('aria-expanded') === 'true';
+    if (expanded) {
+      detailRow.hidden = true;
+      e.target.setAttribute('aria-expanded', 'false');
+      e.target.textContent = '▾ Details';
+    } else {
+      detailRow.hidden = false;
+      e.target.setAttribute('aria-expanded', 'true');
+      e.target.textContent = '▴ Hide';
     }
   });
 

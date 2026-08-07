@@ -20,6 +20,7 @@ class DraftInfo:
     row_count: int
     invalid_count: int
     dropped_count: int
+    display_name: str = ""  # Human-readable label (username or user ID string)
 
 
 def draft_directory() -> Path:
@@ -83,5 +84,6 @@ def list_user_drafts() -> list[DraftInfo]:
             row_count=len(data),
             invalid_count=invalid_count,
             dropped_count=dropped_count,
+            display_name=str(user_id),
         ))
     return items

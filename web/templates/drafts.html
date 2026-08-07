@@ -13,7 +13,8 @@
 {% if not draft_infos %}
 <div class="empty">
   <p class="empty-title">No pending drafts</p>
-  <p class="empty-hint">When users import with /bulk, draft rows appear here.</p>
+  <p class="empty-hint">Drafts are created when you send a <code>/bulk</code> message in Telegram.</p>
+  <a href="/" class="btn btn--ghost">← Back to dashboard</a>
 </div>
 {% else %}
 <div class="drafts-layout">
@@ -24,7 +25,7 @@
         <select id="draft-user" name="user_id" onchange="this.form.submit()" aria-label="Select draft user">
           {% for d in draft_infos %}
           <option value="{{ d.user_id }}" {% if d.user_id == selected_user_id %}selected{% endif %}>
-            User {{ d.user_id }} · {{ d.row_count }} row(s)
+            {{ d.display_name if d.display_name and d.display_name != d.user_id | string else 'User ' ~ d.user_id }} · {{ d.row_count }} row(s)
             {% if d.invalid_count %} · {{ d.invalid_count }} invalid{% endif %}
             {% if d.dropped_count %} · {{ d.dropped_count }} dropped{% endif %}
           </option>
@@ -120,6 +121,20 @@
 
     </form>
 
+    {# ── Telegram commit hint (#1) ── #}
+    <div class="draft-commit-hint">
+      When ready, send <strong>save</strong> in Telegram to commit all valid rows, or <strong>cancel</strong> to discard the draft.
+    </div>
+
+    {# ── Row count summary (#18) ── #}
+    {% if selected_info %}
+    <p class="draft-row-summary">
+      {{ selected_info.row_count }} row{{ 's' if selected_info.row_count != 1 else '' }}
+      {% if selected_info.invalid_count %} · <span class="draft-row-summary__invalid">{{ selected_info.invalid_count }} invalid</span>{% endif %}
+      {% if selected_info.dropped_count %} · {{ selected_info.dropped_count }} dropped{% endif %}
+    </p>
+    {% endif %}
+
     <script type="application/json" id="draft-ref-data">{"category": {{ categories | tojson }}, "person": {{ persons | tojson }}, "type": {{ txn_types | tojson }}, "currency": {{ currencies | tojson }}, "category_by_type": {{ category_by_type | tojson }}}</script>
 
     <div class="table-scroll draft-table-wrap">
@@ -196,18 +211,43 @@
               {% if row.get('_ai_preview') %}
               {% set preview = row.get('_ai_preview') %}
               {% set pstatus = preview.get('status', 'unchanged') %}
+              <span class="draft-preview-badge draft-preview-badge--{{ pstatus }}">
+                {% if pstatus == 'changed' %}✏️ AI changed
+                {% elif pstatus == 'unchanged' %}✓ No change
+                {% elif pstatus == 'skipped' %}— Skipped
+                {% elif pstatus == 'error' %}❌ AI failed
+                {% elif pstatus == 'timeout' %}⏱ Timed out
+                {% else %}{{ pstatus }}{% endif %}
+              </span>
+              <button type="button" class="draft-preview-toggle btn btn--sm btn--ghost" data-target="draft-preview-row-{{ loop.index0 }}" aria-expanded="false">▾ Details</button>
+              {% endif %}
+            </td>
+            <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
+              <div class="draft-row-actions">
+                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
+                  <button type="submit" class="btn btn--sm btn--primary">✓ Save row</button>
+                  {% if row_error == loop.index0 | string %}<span class="draft-row-save-error error-msg">{{ msg }}</span>{% endif %}
+                </form>
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
+                  <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
+                </form>
+                {% if row.get('_ai_preview') and row.get('_ai_preview').get('status') == 'changed' %}
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
+                  <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
+                </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% if row.get('_ai_preview') %}
+          {% set preview = row.get('_ai_preview') %}
+          {% set pstatus = preview.get('status', 'unchanged') %}
+          <tr id="draft-preview-row-{{ loop.index0 }}" class="draft-preview-row draft-preview-row--{{ pstatus }}" hidden>
+            <td colspan="11" class="draft-preview-cell">
               <div class="draft-preview
                 {{- ' draft-preview--changed' if pstatus == 'changed' else '' }}
                 {{- ' draft-preview--error'   if pstatus in ('error','timeout') else '' }}
                 {{- ' draft-preview--unchanged' if pstatus == 'unchanged' else '' }}">
-                <div class="draft-preview-title">
-                  {% if pstatus == 'changed' %}✏️ AI suggests changes
-                  {% elif pstatus == 'unchanged' %}✓ No changes needed
-                  {% elif pstatus == 'skipped' %}— Skipped (dropped)
-                  {% elif pstatus == 'error' %}❌ AI failed
-                  {% elif pstatus == 'timeout' %}⏱ Timed out
-                  {% else %}{{ pstatus }}{% endif %}
-                </div>
                 {% if pstatus == 'changed' and preview.get('proposed') %}
                 <table class="draft-diff">
                   <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
@@ -226,24 +266,9 @@
                 <div class="draft-preview-reason">{{ preview.get('reason') }}</div>
                 {% endif %}
               </div>
-              {% endif %}
-            </td>
-            <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
-              <div class="draft-row-actions">
-                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
-                  <button type="submit" class="btn btn--sm btn--primary">✓ Save row</button>
-                </form>
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
-                  <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
-                </form>
-                {% if _preview and _preview.get('status') == 'changed' %}
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
-                  <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
-                </form>
-                {% endif %}
-              </div>
             </td>
           </tr>
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>
@@ -251,6 +276,23 @@
   </div>
 
 <script>
+(function () {
+  // #14 — AI loading indicator
+  var bulkForm = document.getElementById('draft-bulk-form');
+  if (bulkForm) {
+    bulkForm.addEventListener('submit', function (e) {
+      var submitter = e.submitter;
+      if (submitter && submitter.value === 'preview_ai') {
+        var aiBtn = document.getElementById('draft-preview-ai-btn');
+        if (aiBtn) {
+          aiBtn.disabled = true;
+          aiBtn.textContent = '⏳ Analyzing… (may take up to 90s)';
+        }
+      }
+    });
+  }
+})();
+
 (function () {
   const btn = document.getElementById('draft-test-ai-btn');
   const result = document.getElementById('draft-test-ai-result');
