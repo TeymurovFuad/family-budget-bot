@@ -141,6 +141,7 @@
           {% for row in rows %}
           {% set _preview = row.get('_ai_preview') %}
           {% set _ps = _preview.get('status') if _preview else '' %}
+          {% set _proposed = _preview.get('proposed', {}) if (_preview and _ps == 'changed') else {} %}
           <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }} {{ 'draft-row--ai-changed' if _ps == 'changed' else '' }} {{ 'draft-row--ai-error' if _ps in ('error','timeout') else '' }}" data-row-idx="{{ loop.index0 }}">
             <td class="draft-cell draft-cell--pick" data-label="Select">
               <label class="draft-row-select" for="draft-row-cb-{{ loop.index0 }}">
@@ -150,29 +151,29 @@
             </td>
             <td class="draft-cell draft-cell--idx" data-label="#">{{ loop.index }}</td>
             <td class="draft-cell draft-cell--date" data-label="Date">
-              <input form="draft-row-{{ loop.index0 }}" type="date" name="date" value="{{ row.get('date', '') }}" class="draft-input">
+              <input form="draft-row-{{ loop.index0 }}" type="date" name="date" value="{{ _proposed.get('date') or row.get('date', '') }}" class="draft-input">
             </td>
             <td class="draft-cell draft-cell--value num" data-label="Value">
-              <input form="draft-row-{{ loop.index0 }}" type="text" name="value" value="{{ row.get('value', '') }}" class="draft-input draft-input--num">
+              <input form="draft-row-{{ loop.index0 }}" type="text" name="value" value="{{ _proposed.get('value') or row.get('value', '') }}" class="draft-input draft-input--num">
             </td>
             <td class="draft-cell draft-cell--currency" data-label="Currency">
               <select form="draft-row-{{ loop.index0 }}" name="currency" class="draft-input">
                 {% for ccy in currencies %}
-                <option value="{{ ccy }}" {% if ccy == row.get('currency', '') %}selected{% endif %}>{{ ccy }}</option>
+                <option value="{{ ccy }}" {% if ccy == (_proposed.get('currency') or row.get('currency', '')) %}selected{% endif %}>{{ ccy }}</option>
                 {% endfor %}
               </select>
             </td>
             <td class="draft-cell draft-cell--type" data-label="Type">
               <select form="draft-row-{{ loop.index0 }}" name="type" class="draft-input draft-type-select" data-row-idx="{{ loop.index0 }}">
                 {% for t in txn_types %}
-                <option value="{{ t }}" {% if t == row.get('type', '') %}selected{% endif %}>{{ t }}</option>
+                <option value="{{ t }}" {% if t == (_proposed.get('type') or row.get('type', '')) %}selected{% endif %}>{{ t }}</option>
                 {% endfor %}
               </select>
             </td>
             <td class="draft-cell draft-cell--category" data-label="Category">
               <select form="draft-row-{{ loop.index0 }}" name="category" class="draft-input draft-category-select" data-row-idx="{{ loop.index0 }}">
                 {% for cat in categories %}
-                <option value="{{ cat }}" {% if cat == row.get('category', '') %}selected{% endif %}>{{ cat }}</option>
+                <option value="{{ cat }}" {% if cat == (_proposed.get('category') or row.get('category', '')) %}selected{% endif %}>{{ cat }}</option>
                 {% endfor %}
               </select>
             </td>
@@ -185,7 +186,7 @@
               </select>
             </td>
             <td class="draft-cell draft-cell--description" data-label="Description">
-              <input form="draft-row-{{ loop.index0 }}" type="text" name="description" value="{{ row.get('description', '') }}" class="draft-input draft-input--desc">
+              <input form="draft-row-{{ loop.index0 }}" type="text" name="description" value="{{ _proposed.get('description') or row.get('description', '') }}" class="draft-input draft-input--desc">
             </td>
             <td class="draft-cell draft-cell--status" data-label="Status">
               {% if row.get('dropped') %}<span class="muted">Dropped</span>{% endif %}
@@ -233,6 +234,11 @@
                 <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
                   <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
                 </form>
+                {% if _preview and _preview.get('status') == 'changed' %}
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
+                  <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>

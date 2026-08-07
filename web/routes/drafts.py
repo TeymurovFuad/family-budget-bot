@@ -585,6 +585,36 @@ async def drafts_row_toggle_drop(user_id: int, row_idx: int):
     return _redirect(user_id, f"Row {row_idx + 1} {action}.")
 
 
+@router.post("/drafts/{user_id}/row/{row_idx}/apply-ai-preview", dependencies=[Depends(require_session)])
+async def drafts_row_apply_ai_preview(request: Request, user_id: int, row_idx: int):
+    """Apply the AI suggestion for a single row directly, without the bulk panel."""
+    rows = load_user_draft(user_id)
+    if not rows:
+        return _redirect(user_id, "Draft not found.", "error")
+    if row_idx < 0 or row_idx >= len(rows) or not isinstance(rows[row_idx], dict):
+        return _redirect(user_id, "Row not found.", "error")
+    row = rows[row_idx]
+    preview = row.get("_ai_preview") if isinstance(row.get("_ai_preview"), dict) else None
+    if not preview or preview.get("status") != "changed":
+        return _redirect(user_id, f"No AI suggestion to apply on row {row_idx + 1}.", "error")
+    proposed = preview.get("proposed") if isinstance(preview.get("proposed"), dict) else {}
+    for key in ("date", "value", "currency", "type", "category", "description"):
+        if key in proposed:
+            row[key] = proposed[key]
+    ref = load_reference_data()
+    _revalidate_draft_row(row, ref)
+    category_types = load_category_types()
+    categories_by_type = _build_categories_by_type(ref, category_types)
+    strict_allowed = _allowed_categories_for_type(
+        str(row.get("type") or "").strip(), categories_by_type
+    )
+    if strict_allowed and row.get("category") not in strict_allowed:
+        row["invalid"] = f"Category '{row.get('category')}' does not match type '{row.get('type')}'."
+    row.pop("_ai_preview", None)
+    save_user_draft(user_id, rows)
+    return _redirect(user_id, f"Applied AI suggestion to row {row_idx + 1}.")
+
+
 @router.post("/drafts/{user_id}/archive", dependencies=[Depends(require_session)])
 async def drafts_archive(user_id: int):
     archived = archive_user_draft(user_id)
