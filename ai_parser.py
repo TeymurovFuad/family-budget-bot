@@ -19,6 +19,7 @@ from datetime import datetime, time
 from pydantic import BaseModel, ValidationError
 
 import settings
+from validators import resolve_fallback_category
 
 log = logging.getLogger(__name__)
 
@@ -346,6 +347,7 @@ def _build_reference_block(lists: dict) -> str:
     prompt-prefix cache applies.
     """
     all_cats   = ", ".join(lists.get("categories", []))
+    fallback_category = resolve_fallback_category(lists.get("categories", []))
     txn_types  = " | ".join(lists.get("txn_types", ["Expense", "Income", "Savings"]))
     currency_list = lists.get("currencies") or [settings.DISPLAY_CURRENCY]
     currencies = " | ".join(currency_list)
@@ -360,6 +362,7 @@ def _build_reference_block(lists: dict) -> str:
         "Reference data for this request:\n"
         f"Allowed currencies: {currencies}\n"
         f"Default currency: {default_ccy}\n"
+        f"Fallback category: {fallback_category}\n"
         f"Allowed transaction types: {txn_types}\n"
         f"Allowed categories: {all_cats}"
     )
@@ -390,11 +393,11 @@ CRITICAL field rules:
   routing blocks, or trailing city/country codes from the raw statement line.
 - category MUST be copied EXACTLY, character for character, from the allowed list.
   Never invent, shorten, translate, or paraphrase a category name.
-  If unsure, use "Other".
+    If unsure, use the fallback category named in the reference data.
 - Transfer recipients, counterparties, and landlords belong in description —
   there is no separate field for them.
 - "Savings" is a transaction TYPE, never a category: transfers to your own
-  savings account get type "Savings" and category "Other", never Expense.
+    savings account get type "Savings" and fallback category, never Expense.
 - type must be coherent with category:
   category Salary ⇒ type Income. Refunds/returns are Income with the
   category of the ORIGINAL purchase (e.g. a returned jacket is Income/Shopping).
@@ -411,7 +414,7 @@ Rules:
 - If a transaction is ambiguous, still return the best possible structured entry rather than skipping it.
 - Receipt: all items = Expense, category = Groceries unless clearly otherwise.
 - Round amounts to 2 decimal places.
-- Use the exact categories and types provided in the reference data when possible; otherwise fall back to "Other".
+- Use the exact categories and types provided in the reference data when possible; otherwise use the fallback category named in the reference data.
 
 Return ONLY the JSON array, no other text."""
 
@@ -431,7 +434,7 @@ Return ONLY a JSON object with these keys:
 - "description": clean 2-4 word merchant label (max 40 chars) — never card numbers, BPID:/reference codes, or city/country suffixes
 
 Use only the exact categories and types provided in the reference data. Do not invent new categories or transaction types.
-"Savings" is a transaction TYPE, never a category: when the message says "savings", "saved", "put into savings" or similar, set type "Savings" and category "Other". Moving money to your own savings is type Savings, never Expense.
+"Savings" is a transaction TYPE, never a category: when the message says "savings", "saved", "put into savings" or similar, set type "Savings" and category equal to the fallback category named in the reference data. Moving money to your own savings is type Savings, never Expense.
 Keep "type" coherent with "category": category Salary ⇒ type Income. Refunds/returns are Income with the category of the original purchase.
 If you cannot map the message to an exact known category or type, return: {"not_transaction": true}
 
@@ -439,7 +442,7 @@ Examples (assuming default currency EUR):
 "groceries 89" → {"value": 89, "currency": "EUR", "type": "Expense", "category": "Groceries", "description": "groceries"}
 "lunch 45 GEL" → {"value": 45, "currency": "GEL", "type": "Expense", "category": "Dining Out", "description": "lunch"}
 "salary 5000" → {"value": 5000, "currency": "EUR", "type": "Income", "category": "Salary", "description": "salary"}
-"2380 added to savings" → {"value": 2380, "currency": "EUR", "type": "Savings", "category": "Other", "description": "savings"}
+"2380 added to savings" → {"value": 2380, "currency": "EUR", "type": "Savings", "category": "<fallback category>", "description": "savings"}
 "hello" → {"not_transaction": true}
 "2026-05-24 groceries 89" → {"date": "2026-05-24", "value": 89, "currency": "EUR", "type": "Expense", "category": "Groceries", "description": "groceries"}
 """
@@ -665,7 +668,8 @@ _CATEGORIZE_SYSTEM_PROMPT = (
     "You assign spending categories to bank-statement merchant names. "
     "Reply with ONLY a JSON object mapping each merchant name (key verbatim, "
     "exactly as given) to the single best category from the provided list. "
-    'Use category names exactly as given. If unsure, use "Other".'
+    "Use category names exactly as given. "
+    "If unsure, use the fallback category named in the user message."
 )
 
 _CATEGORIZE_BATCH_SIZE = 80
@@ -683,7 +687,9 @@ def categorize_merchants(merchants: list[str], categories: list[str]) -> dict[st
     result: dict[str, str] = {}
     for i in range(0, len(merchants), _CATEGORIZE_BATCH_SIZE):
         batch = merchants[i:i + _CATEGORIZE_BATCH_SIZE]
+        fallback_category = resolve_fallback_category(categories)
         user = (
+            f"Fallback category: {json.dumps(fallback_category, ensure_ascii=False)}\n"
             f"Categories: {json.dumps(categories, ensure_ascii=False)}\n"
             f"Merchants: {json.dumps(batch, ensure_ascii=False)}"
         )

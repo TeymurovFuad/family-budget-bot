@@ -131,7 +131,7 @@ class TestCollectConfig:
         assert values["TIMEZONE"] == "UTC"
         assert values["DISPLAY_CURRENCY"] == "USD"
         assert values["STORAGE_BACKEND"] == "local"
-        assert values["XLSX_PATH"] == "data/Expenses_Improved.xlsx"
+        assert values["XLSX_PATH"] == "data/Expenses.xlsx"
 
     def test_existing_values_not_prompted(self, monkeypatch):
         existing = {

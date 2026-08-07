@@ -1,7 +1,7 @@
 """
 make_template.py
 ================
-Strips all personal data from Expenses_Improved.xlsx and saves a clean
+Strips all personal data from the configured workbook and saves a clean
 template to data/Expenses_Template.xlsx that can be committed to the repo.
 
 What is removed / replaced:
@@ -34,8 +34,8 @@ sys.path.insert(0, str(ROOT))
 import openpyxl
 import settings
 
-SOURCE_DEFAULT = ROOT / "data" / "Expenses_Improved.xlsx"
-DEST_DEFAULT   = ROOT / "data" / "Expenses_Template.xlsx"
+SOURCE_DEFAULT = settings.XLSX_PATH
+DEST_DEFAULT   = settings.DEFAULT_TEMPLATE_PATH
 
 GENERIC_PERSONS = ["Person 1", "Person 2"]
 

@@ -1,4 +1,4 @@
-<li class="settings-list-item" id="cat-row-{{ name | urlencode }}">
+<li class="settings-list-item" data-category="{{ name }}">
   <form class="inline-form"
         hx-post="/settings/categories/{{ name | urlencode }}/budget"
         hx-target="#categories-section"
@@ -9,7 +9,7 @@
     <button type="submit" class="btn btn--primary btn--sm">Save</button>
     <a class="btn btn--ghost btn--sm"
        hx-get="/settings/categories/{{ name | urlencode }}/row"
-       hx-target="#cat-row-{{ name | urlencode }}"
+       hx-target="closest .settings-list-item"
        hx-swap="outerHTML">Cancel</a>
   </form>
 </li>

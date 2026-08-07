@@ -10,7 +10,7 @@ Triggered by GitHub Actions cron schedule or manual workflow dispatch.
 Environment variables (set as GitHub Secrets / Variables):
   TELEGRAM_BOT_TOKEN    Required. From @BotFather.
   ALLOWED_TELEGRAM_IDS  Required. Comma-separated Telegram user IDs.
-  XLSX_PATH             Path to Excel file. Default: data/Expenses_Improved.xlsx
+    XLSX_PATH             Path to Excel file. Default: data/Expenses.xlsx
   DISPLAY_CURRENCY      Currency for display. Default: set via env var
   REPORT_TYPE           weekly | monthly | yearly. Default: weekly
   TIMEZONE              Default: UTC

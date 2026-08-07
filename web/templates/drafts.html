@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Drafts{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Drafts</h1>
+  <span class="muted">Fix pending /bulk rows before Telegram save</span>
+</div>
+
+{% if msg %}
+<p class="{{ 'error-msg' if level == 'error' else 'success-msg' }}">{{ msg }}</p>
+{% endif %}
+
+{% if not draft_infos %}
+<div class="empty">
+  <p class="empty-title">No pending drafts</p>
+  <p class="empty-hint">When users import with /bulk, draft rows appear here.</p>
+</div>
+{% else %}
+<form class="toolbar toolbar--drafts" method="get" action="/drafts">
+  <div class="toolbar-row">
+    <label for="draft-user" class="visually-hidden">Draft user</label>
+    <select id="draft-user" name="user_id" onchange="this.form.submit()" aria-label="Select draft user">
+      {% for d in draft_infos %}
+      <option value="{{ d.user_id }}" {% if d.user_id == selected_user_id %}selected{% endif %}>
+        User {{ d.user_id }} · {{ d.row_count }} row(s)
+        {% if d.invalid_count %} · {{ d.invalid_count }} invalid{% endif %}
+        {% if d.dropped_count %} · {{ d.dropped_count }} dropped{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+    {% if selected_user_id is not none %}
+    <button type="submit" formaction="/drafts/{{ selected_user_id }}/archive" formmethod="post" class="btn btn--ghost">
+      Archive draft
+    </button>
+    {% endif %}
+  </div>
+</form>
+
+{% if selected_user_id is not none %}
+<form id="draft-bulk-form" class="draft-actions" method="post" action="/drafts/{{ selected_user_id }}/bulk-update">
+  <div class="bulk-bar" id="draft-bulk-bar" hidden aria-live="polite">
+    <label class="bulk-select-all">
+      <input type="checkbox" id="draft-select-all" aria-label="Select all rows">
+      <span>Select all</span>
+    </label>
+    <span class="bulk-count" id="draft-selected-count">0 selected</span>
+
+    <select id="draft-bulk-field" name="bulk_field" aria-label="Bulk field">
+      <option value="category">Category</option>
+      <option value="person">Person</option>
+      <option value="type">Type</option>
+      <option value="currency">Currency</option>
+    </select>
+    <select id="draft-bulk-value" name="bulk_value" aria-label="Bulk value" disabled>
+      <option value="">Choose value</option>
+    </select>
+    <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
+      Apply field
+    </button>
+    <button type="submit" name="action" value="drop" class="btn btn--ghost" id="draft-drop-btn" disabled>
+      Drop selected
+    </button>
+    <button type="submit" name="action" value="restore" class="btn btn--ghost" id="draft-restore-btn" disabled>
+      Restore selected
+    </button>
+  </div>
+</form>
+
+  <script type="application/json" id="draft-ref-data">{"category": {{ categories | tojson }}, "person": {{ persons | tojson }}, "type": {{ txn_types | tojson }}, "currency": {{ currencies | tojson }}}</script>
+
+  <div class="table-scroll draft-table-wrap">
+    <table class="draft-table">
+      <thead>
+        <tr>
+          <th style="width:2rem;"></th>
+          <th>#</th>
+          <th>Date</th>
+          <th class="num">Value</th>
+          <th>Currency</th>
+          <th>Type</th>
+          <th>Category</th>
+          <th>Person</th>
+          <th>Description</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="{{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }}">
+          <td><input type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}"></td>
+          <td>{{ loop.index }}</td>
+          <td>
+            <input form="draft-row-{{ loop.index0 }}" type="date" name="date" value="{{ row.get('date', '') }}" class="draft-input">
+          </td>
+          <td class="num">
+            <input form="draft-row-{{ loop.index0 }}" type="text" name="value" value="{{ row.get('value', '') }}" class="draft-input draft-input--num">
+          </td>
+          <td>
+            <select form="draft-row-{{ loop.index0 }}" name="currency" class="draft-input">
+              {% for ccy in currencies %}
+              <option value="{{ ccy }}" {% if ccy == row.get('currency', '') %}selected{% endif %}>{{ ccy }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select form="draft-row-{{ loop.index0 }}" name="type" class="draft-input">
+              {% for t in txn_types %}
+              <option value="{{ t }}" {% if t == row.get('type', '') %}selected{% endif %}>{{ t }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select form="draft-row-{{ loop.index0 }}" name="category" class="draft-input">
+              {% for cat in categories %}
+              <option value="{{ cat }}" {% if cat == row.get('category', '') %}selected{% endif %}>{{ cat }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <select form="draft-row-{{ loop.index0 }}" name="person" class="draft-input">
+              <option value="" {% if not row.get('person', '') %}selected{% endif %}>—</option>
+              {% for p in persons %}
+              <option value="{{ p }}" {% if p == row.get('person', '') %}selected{% endif %}>{{ p }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <input form="draft-row-{{ loop.index0 }}" type="text" name="description" value="{{ row.get('description', '') }}" class="draft-input draft-input--desc">
+          </td>
+          <td>
+            {% if row.get('dropped') %}<span class="muted">Dropped</span>{% endif %}
+            {% if row.get('invalid') %}<span class="error-msg">{{ row.get('invalid') }}</span>{% endif %}
+          </td>
+          <td class="draft-actions-col">
+            <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
+              <button type="submit" class="btn btn--sm btn--primary">Update</button>
+            </form>
+            <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
+              <button type="submit" class="btn btn--sm btn--ghost">{{ 'Restore' if row.get('dropped') else 'Drop' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+<script src="/static/js/draft_select.js" defer></script>
+{% endif %}
+{% endif %}
+{% endblock %}

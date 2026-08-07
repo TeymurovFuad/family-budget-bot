@@ -92,6 +92,20 @@ def _normalize_str(value) -> str:
     return str(value or "").strip()
 
 
+def resolve_fallback_category(categories: list[str], *, default: str = "Other") -> str:
+    """Return the canonical fallback category from configured categories."""
+    if not categories:
+        return default
+    by_lower = {str(c).strip().lower(): str(c).strip() for c in categories if str(c).strip()}
+    if "other" in by_lower:
+        return by_lower["other"]
+    for category in categories:
+        lowered = str(category).strip().lower()
+        if "other" in lowered:
+            return str(category).strip()
+    return str(categories[0]).strip()
+
+
 # ── Merchant-description cleaning ─────────────────────────────────────────────
 # Bank exports carry junk around the merchant name: masked card numbers
 # (4111XXXXXXXX1111), BPID: reference codes, /OPT/X///// routing blocks,

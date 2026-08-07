@@ -16,7 +16,7 @@ What it does:
   9.  Applies Monthly Summary arrow/delta columns and totals row
   10. Rebuilds the Guide sheet
   11. Verifies row count matches — aborts if not
-  12. Saves as data/Expenses_Improved.xlsx (replaces old file)
+    12. Saves to XLSX_PATH (replaces old file)
 
 Safe to run multiple times — always reads from the live file and writes
 a fresh copy. A backup is saved before overwriting.
@@ -46,8 +46,8 @@ from openpyxl.formatting.rule import FormulaRule
 
 from file_storage import create_blank_excel, TEMPLATE_PATH
 
-SOURCE_DEFAULT = ROOT / "data" / "Expenses_Improved.xlsx"
-DEST           = ROOT / "data" / "Expenses_Improved.xlsx"
+SOURCE_DEFAULT = settings.XLSX_PATH
+DEST           = settings.XLSX_PATH
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -639,6 +639,6 @@ def _run(source: Path, dest: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Rebuild Excel from scratch, migrating all data.")
     parser.add_argument("--source", type=Path, default=SOURCE_DEFAULT,
-                        help="Path to source Excel (default: data/Expenses_Improved.xlsx)")
+                        help="Path to source Excel (default: XLSX_PATH env / settings)")
     args = parser.parse_args()
     main(args.source, DEST)
