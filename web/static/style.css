@@ -721,3 +721,21 @@ dialog.modal::backdrop {
 .draft-table td, .draft-table th { vertical-align: top; }
 .draft-row--dropped { opacity: .6; }
 .draft-row--invalid { background: color-mix(in srgb, var(--money-neg) 6%, var(--surface)); }
+.draft-input {
+  width: 100%;
+  min-width: 6rem;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  padding: .25rem .4rem;
+}
+.draft-input--num { min-width: 5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.draft-input--desc { min-width: 14rem; }
+.draft-actions-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 6.5rem;
+}

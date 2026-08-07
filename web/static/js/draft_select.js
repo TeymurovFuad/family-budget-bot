@@ -46,9 +46,19 @@
     }
 
     var options = ref[field.value] || [];
-    value.innerHTML = '<option value="">Choose value</option>' + options.map(function(v) {
-      return '<option value="' + String(v) + '">' + String(v) + '</option>';
-    }).join('');
+    while (value.firstChild) {
+      value.removeChild(value.firstChild);
+    }
+    var placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Choose value';
+    value.appendChild(placeholder);
+    options.forEach(function(v) {
+      var opt = document.createElement('option');
+      opt.value = String(v);
+      opt.textContent = String(v);
+      value.appendChild(opt);
+    });
     value.disabled = options.length === 0;
     updateBulkBar();
   }

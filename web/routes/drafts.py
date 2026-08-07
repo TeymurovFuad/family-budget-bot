@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from bulk_drafts import archive_user_draft, list_user_drafts, load_user_draft, save_user_draft
 from storage_facade import load_reference_data
+from validators import resolve_fallback_category, validate_parsed_row
 from web.auth import require_session
 
 router = APIRouter()
@@ -58,6 +59,26 @@ def _parse_selected_indices(raw_values: Sequence[object], total_rows: int) -> li
     return sorted(idxs)
 
 
+def _revalidate_draft_row(row: dict, lists: dict) -> None:
+    """Recompute one row's invalid state after web-side edits."""
+    if not isinstance(row, dict):
+        return
+
+    categories = lists.get("categories") or []
+    if not str(row.get("type") or "").strip():
+        row["type"] = "Expense"
+    if categories and not str(row.get("category") or "").strip():
+        row["category"] = resolve_fallback_category(categories)
+
+    ok, reason, normalized, _ = validate_parsed_row(row, lists)
+    if ok:
+        row.pop("invalid", None)
+        for field in ("value", "type", "category", "currency"):
+            row[field] = normalized[field]
+        return
+    row["invalid"] = reason
+
+
 @router.get("/drafts", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def drafts_page(request: Request):
@@ -90,6 +111,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
         return _redirect(user_id, "Draft not found.", "error")
 
     form = await request.form()
+    ref = load_reference_data()
     action = str(form.get("action", "")).strip()
     if action not in _BULK_ACTIONS:
         return _redirect(user_id, "Unknown action.", "error")
@@ -106,7 +128,6 @@ async def drafts_bulk_update(request: Request, user_id: int):
         if not value:
             return _redirect(user_id, "Choose a value.", "error")
 
-        ref = load_reference_data()
         allowed = {
             "category": set(ref["categories"]),
             "person": set(ref["persons"]),
@@ -119,6 +140,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
         for idx in idxs:
             if isinstance(rows[idx], dict):
                 rows[idx][field] = value
+                _revalidate_draft_row(rows[idx], ref)
         save_user_draft(user_id, rows)
         return _redirect(user_id, f"Updated {len(idxs)} row(s): set {field} = {value}.")
 
@@ -132,10 +154,60 @@ async def drafts_bulk_update(request: Request, user_id: int):
     # action == "restore"
     restored = 0
     for idx in idxs:
-        if isinstance(rows[idx], dict) and rows[idx].pop("dropped", None):
-            restored += 1
+        if isinstance(rows[idx], dict):
+            if rows[idx].pop("dropped", None):
+                restored += 1
+            _revalidate_draft_row(rows[idx], ref)
     save_user_draft(user_id, rows)
     return _redirect(user_id, f"Restored {restored} row(s).")
+
+
+@router.post("/drafts/{user_id}/row/{row_idx}/update", dependencies=[Depends(require_session)])
+async def drafts_row_update(request: Request, user_id: int, row_idx: int):
+    """Single-row edit path for Drafts UI."""
+    rows = load_user_draft(user_id)
+    if not rows:
+        return _redirect(user_id, "Draft not found.", "error")
+    if row_idx < 0 or row_idx >= len(rows) or not isinstance(rows[row_idx], dict):
+        return _redirect(user_id, "Row not found.", "error")
+
+    form = await request.form()
+    row = rows[row_idx]
+    ref = load_reference_data()
+
+    updated = {
+        "date": str(form.get("date", row.get("date", ""))).strip(),
+        "value": str(form.get("value", row.get("value", ""))).strip(),
+        "currency": str(form.get("currency", row.get("currency", ""))).strip(),
+        "type": str(form.get("type", row.get("type", ""))).strip(),
+        "category": str(form.get("category", row.get("category", ""))).strip(),
+        "person": str(form.get("person", row.get("person", ""))).strip(),
+        "description": str(form.get("description", row.get("description", ""))).strip(),
+    }
+    row.update(updated)
+    _revalidate_draft_row(row, ref)
+    save_user_draft(user_id, rows)
+    return _redirect(user_id, f"Updated row {row_idx + 1}.")
+
+
+@router.post("/drafts/{user_id}/row/{row_idx}/toggle-drop", dependencies=[Depends(require_session)])
+async def drafts_row_toggle_drop(user_id: int, row_idx: int):
+    """Single-row drop/restore toggle."""
+    rows = load_user_draft(user_id)
+    if not rows:
+        return _redirect(user_id, "Draft not found.", "error")
+    if row_idx < 0 or row_idx >= len(rows) or not isinstance(rows[row_idx], dict):
+        return _redirect(user_id, "Row not found.", "error")
+
+    row = rows[row_idx]
+    if row.get("dropped"):
+        row.pop("dropped", None)
+        action = "restored"
+    else:
+        row["dropped"] = True
+        action = "dropped"
+    save_user_draft(user_id, rows)
+    return _redirect(user_id, f"Row {row_idx + 1} {action}.")
 
 
 @router.post("/drafts/{user_id}/archive", dependencies=[Depends(require_session)])
