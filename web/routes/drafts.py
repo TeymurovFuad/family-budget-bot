@@ -6,6 +6,7 @@ returns to Telegram to save/cancel the draft.
 
 import asyncio
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from urllib.parse import urlencode
 
@@ -206,6 +207,18 @@ def _revalidate_draft_row(row: dict, lists: dict) -> None:
     row["invalid"] = reason
 
 
+def _preview_error_reason(exc: Exception) -> str:
+    """Return a short, user-visible error reason for AI preview failures."""
+    kind = exc.__class__.__name__
+    raw = str(exc or "").strip()
+    if not raw:
+        return kind
+    compact = " ".join(raw.split())
+    if len(compact) > 180:
+        compact = f"{compact[:177]}..."
+    return f"{kind}: {compact}"
+
+
 @router.get("/drafts", response_class=HTMLResponse,
             dependencies=[Depends(require_session)])
 async def drafts_page(request: Request):
@@ -303,10 +316,17 @@ async def drafts_bulk_update(request: Request, user_id: int):
                     "is_invalid": False,
                 }
             except Exception as exc:
-                log.warning("Draft AI preview failed for user=%s row=%s: %s", user_id, idx, exc)
+                err = _preview_error_reason(exc)
+                log.warning(
+                    "Draft AI preview failed for user=%s row=%s: %s",
+                    user_id,
+                    idx,
+                    err,
+                    exc_info=True,
+                )
                 return idx, {
                     "status": "error",
-                    "reason": "AI preview failed for this row.",
+                    "reason": f"AI preview failed: {err}",
                     "changed_fields": [],
                     "proposed": {},
                     "is_invalid": False,
@@ -321,6 +341,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
         failed = 0
         timed_out = 0
         skipped = 0
+        error_reasons: list[str] = []
         for idx, preview in previews:
             row = rows[idx]
             row["_ai_preview"] = preview
@@ -329,6 +350,9 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 changed += 1
             elif status == "error":
                 failed += 1
+                reason = str(preview.get("reason") or "").strip()
+                if reason:
+                    error_reasons.append(reason)
             elif status == "timeout":
                 timed_out += 1
             elif status == "skipped":
@@ -343,12 +367,19 @@ async def drafts_bulk_update(request: Request, user_id: int):
             user_id, len(idxs), instruction, changed, unchanged, invalid, failed, timed_out, skipped,
         )
         level = "error" if failed or timed_out else "success"
+        reason_suffix = ""
+        if error_reasons:
+            top = Counter(error_reasons).most_common(2)
+            summary = "; ".join([f"{reason} ({count}x)" for reason, count in top])
+            if summary:
+                reason_suffix = f" Top failures: {summary}."
         return _redirect(
             user_id,
             (
                 "AI preview ready: "
                 f"{changed} changed, {unchanged} unchanged, {invalid} invalid, "
                 f"{failed} failed, {timed_out} timed out, {skipped} skipped."
+                f"{reason_suffix}"
             ),
             level,
         )
