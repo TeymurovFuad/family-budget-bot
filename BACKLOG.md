@@ -300,11 +300,10 @@ Cancel button available from Step 2 onward — exits, keeps partial writes, tell
   always squash-merge. See `.github/pull_request_template.md`.
 
 ### Standing mechanics (doesn't change session to session)
-- **Push/merge**: `fuadteymurov` is NOT a collaborator on
-  `TeymurovFuad/family-budget-bot`. Pushes go to `fork` remote
-  (`fuadteymurov/family-budget-bot`), PRs opened
-  `--head fuadteymurov:branch --base master`. **Merging requires the repo
-  owner** — always ask the user; never assume it can be automated.
+- **Push/merge**: when the active account is not an upstream collaborator,
+      push to the `fork` remote and open PRs with
+      `--head <fork-owner>:branch --base master`. **Merging requires the repo
+      owner** — always ask the user; never assume it can be automated.
 - **Worktree isolation**: always give each parallel file-editing agent its own
   `git worktree add` — shared worktrees caused branch entanglement this session.
   See `.claude/memories/orchestrator-memory.md` "Parallel agent isolation".
