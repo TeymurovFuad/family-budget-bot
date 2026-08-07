@@ -924,7 +924,24 @@ dialog.modal::backdrop {
 .draft-summary-status--dropped { color: var(--ink-soft); }
 .draft-summary-status--ai      { color: var(--accent); }
 .draft-summary-status--error   { color: var(--money-neg); }
-.draft-summary-chevron  { flex: 0 0 auto; color: var(--ink-soft); font-size: var(--fs-sm); transition: transform .15s; }
+.draft-summary-chevron  {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--surface-raised, #f0f0f0);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  transition: transform .15s, background .15s;
+}
+.draft-row-summary-toggle:hover .draft-summary-chevron,
+.draft-row-summary-toggle:focus-visible .draft-summary-chevron {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
 
 /* Collapsed: hide all detail cells */
 .draft-row:not(.draft-row--expanded) .draft-cell:not(.draft-cell--summary) { display: none !important; }
