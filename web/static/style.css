@@ -722,6 +722,10 @@ dialog.modal::backdrop {
 .drafts-content { display: grid; gap: var(--space-2); }
 .draft-peak-note { margin: 0; font-size: var(--fs-sm); color: var(--ink-soft); }
 .draft-peak-note--warn { color: var(--warn); }
+.draft-ai-test { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.draft-ai-test__result { font-size: var(--fs-sm); color: var(--ink-soft); }
+.draft-ai-test__result--ok { color: var(--success, #2d8a4e); font-weight: 500; }
+.draft-ai-test__result--error { color: var(--error, #c0392b); font-weight: 500; }
 .draft-table-wrap { margin-top: var(--space-2); }
 .draft-table td, .draft-table th { vertical-align: top; }
 .draft-row { border-bottom: 1px solid var(--border-soft); }

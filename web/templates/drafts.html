@@ -83,6 +83,11 @@
       </p>
     </form>
 
+    <div class="draft-ai-test">
+      <button type="button" class="btn btn--ghost btn--sm" id="draft-test-ai-btn">Test AI Connection</button>
+      <span id="draft-test-ai-result" class="draft-ai-test__result" aria-live="polite"></span>
+    </div>
+
     <script type="application/json" id="draft-ref-data">{"category": {{ categories | tojson }}, "person": {{ persons | tojson }}, "type": {{ txn_types | tojson }}, "currency": {{ currencies | tojson }}, "category_by_type": {{ category_by_type | tojson }}}</script>
 
     <div class="table-scroll draft-table-wrap">
@@ -185,6 +190,38 @@
     </div>
   </div>
 
+<script>
+(function () {
+  const btn = document.getElementById('draft-test-ai-btn');
+  const result = document.getElementById('draft-test-ai-result');
+  if (!btn || !result) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    result.className = 'draft-ai-test__result';
+    result.textContent = 'Testing…';
+
+    try {
+      const resp = await fetch('/drafts/test-ai');
+      const data = await resp.json();
+
+      if (data.ok) {
+        result.className = 'draft-ai-test__result draft-ai-test__result--ok';
+        result.textContent =
+          `OK — ${data.provider} / ${data.model} (${data.elapsed_ms} ms)`;
+      } else {
+        result.className = 'draft-ai-test__result draft-ai-test__result--error';
+        result.textContent = `Failed — ${data.error || 'unknown error'} (${data.elapsed_ms} ms)`;
+      }
+    } catch (err) {
+      result.className = 'draft-ai-test__result draft-ai-test__result--error';
+      result.textContent = `Request error — ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
 <script src="/static/js/draft_select.js" defer></script>
 {% endif %}
 </div>
