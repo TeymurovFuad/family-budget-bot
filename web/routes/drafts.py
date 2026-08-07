@@ -26,6 +26,8 @@ _BULK_ACTIONS = (
     "set_field", "drop", "restore", "preview_ai", "apply_ai_preview", "clear_ai_preview"
 )
 _REANALYZE_MAX_ROWS = 20
+_REANALYZE_MAX_PARALLEL = 4
+_REANALYZE_TIMEOUT_S = 20.0
 
 
 def _build_categories_by_type(ref: dict, category_types: dict[str, str]) -> dict[str, list[str]]:
@@ -252,28 +254,55 @@ async def drafts_bulk_update(request: Request, user_id: int):
             )
         instruction = str(form.get("ai_instruction", "")).strip()
         loop = asyncio.get_running_loop()
-        changed = 0
-        unchanged = 0
-        invalid = 0
-        for idx in idxs:
+        semaphore = asyncio.Semaphore(_REANALYZE_MAX_PARALLEL)
+
+        async def _preview_one(idx: int) -> tuple[int, dict]:
             row = rows[idx]
             if not isinstance(row, dict):
-                continue
+                return idx, {
+                    "status": "unchanged",
+                    "reason": "Row is not editable.",
+                    "changed_fields": [],
+                    "proposed": {},
+                    "is_invalid": False,
+                }
             try:
-                text = _build_reanalyze_text(row, instruction)
-                parsed = await loop.run_in_executor(None, lambda: parse_quick(text, ref))
+                async with semaphore:
+                    text = _build_reanalyze_text(row, instruction)
+                    parsed = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: parse_quick(text, ref)),
+                        timeout=_REANALYZE_TIMEOUT_S,
+                    )
                 preview = _compute_preview_for_row(
                     row, ref, categories_by_type, instruction, parsed=parsed
                 )
+                return idx, preview
+            except asyncio.TimeoutError:
+                return idx, {
+                    "status": "unchanged",
+                    "reason": "AI preview timed out for this row.",
+                    "changed_fields": [],
+                    "proposed": {},
+                    "is_invalid": False,
+                }
             except Exception as exc:
                 log.warning("Draft AI preview failed for user=%s row=%s: %s", user_id, idx, exc)
-                preview = {
+                return idx, {
                     "status": "unchanged",
                     "reason": "AI preview failed for this row.",
                     "changed_fields": [],
                     "proposed": {},
                     "is_invalid": False,
                 }
+
+        work = [idx for idx in idxs if isinstance(rows[idx], dict)]
+        previews = await asyncio.gather(*[_preview_one(idx) for idx in work])
+
+        changed = 0
+        unchanged = 0
+        invalid = 0
+        for idx, preview in previews:
+            row = rows[idx]
             row["_ai_preview"] = preview
             if preview.get("status") == "changed":
                 changed += 1
