@@ -132,6 +132,7 @@ def _compute_preview_for_row(
         if row.get(key) != candidate.get(key):
             changed_fields.append(key)
 
+    # NOTE: person is not included — AI parser does not return it.
     proposed = {k: candidate.get(k) for k in ("date", "value", "currency", "type", "category", "description")}
     if changed_fields:
         return {
@@ -150,13 +151,20 @@ def _compute_preview_for_row(
     }
 
 
-def _redirect(user_id: int | None, msg: str, level: str = "success") -> RedirectResponse:
+def _redirect(
+    user_id: int | None,
+    msg: str,
+    level: str = "success",
+    row_error: int | None = None,
+) -> RedirectResponse:
     params = {}
     if user_id is not None:
         params["user_id"] = int(user_id)
     if msg:
         params["msg"] = msg
         params["level"] = level
+    if row_error is not None:
+        params["row_error"] = int(row_error)
     url = "/drafts"
     if params:
         url = f"/drafts?{urlencode(params)}"
@@ -292,6 +300,7 @@ async def drafts_page(request: Request):
         "peak_status": peak_status,
         "msg": request.query_params.get("msg", ""),
         "level": request.query_params.get("level", "success"),
+        "row_error": request.query_params.get("row_error", ""),
     }
     return request.app.state.templates.TemplateResponse(request, "drafts.html", ctx)
 
@@ -557,6 +566,7 @@ async def drafts_row_update(request: Request, user_id: int, row_idx: int):
             user_id,
             f"Category '{updated['category']}' does not match type '{updated['type']}'.",
             "error",
+            row_error=row_idx,
         )
 
     row.update(updated)
