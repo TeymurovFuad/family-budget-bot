@@ -1,3 +1,2 @@
-* text=auto eol=lf
 deploy/* text eol=lf
 *.sh text eol=lf
