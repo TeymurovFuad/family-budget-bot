@@ -125,6 +125,9 @@
 
     if (byId('draft-clear-preview-btn')) byId('draft-clear-preview-btn').disabled = !enabled;
 
+    // "Save all valid" acts on all valid rows — always enabled regardless of selection
+    // (no-op: button is enabled by default and we intentionally do not disable it here)
+
     // #2 — Mixed-type inline warning for category field
     var field = byId('draft-bulk-field');
     var value = byId('draft-bulk-value');
@@ -139,6 +142,38 @@
     }
 
     byId('draft-apply-btn').disabled = !enabled || !field || !value || !value.value;
+  }
+
+  function selectedIndices() {
+    return selectedBoxes().map(function(cb) { return cb.value; });
+  }
+
+  function appendSelectedToActionUrl(form) {
+    var indices = selectedIndices();
+    var base = form.getAttribute('action') || '';
+    // Strip any existing ?selected= param
+    base = base.replace(/([?&])selected=[^&]*/g, '').replace(/[?&]$/, '');
+    if (indices.length > 0) {
+      var sep = base.indexOf('?') >= 0 ? '&' : '?';
+      form.setAttribute('action', base + sep + 'selected=' + indices.join(','));
+    } else {
+      form.setAttribute('action', base);
+    }
+  }
+
+  function restoreSelectionsFromUrl() {
+    var search = window.location.search;
+    var match = search.match(/[?&]selected=([^&]*)/);
+    if (!match) return;
+    var raw = match[1];
+    if (!raw) return;
+    var parts = raw.split(',');
+    parts.forEach(function(part) {
+      var idx = part.trim();
+      var cb = document.querySelector('.draft-row-cb[value="' + idx + '"]');
+      if (cb) cb.checked = true;
+    });
+    updateBulkBar();
   }
 
   function populateValues() {
@@ -254,5 +289,14 @@
     });
     populateValues();
     updateBulkBar();
+    restoreSelectionsFromUrl();
+  }
+
+  // Persist checkbox selections into the form action URL on submit
+  var bulkForm = byId('draft-bulk-form');
+  if (bulkForm) {
+    bulkForm.addEventListener('submit', function() {
+      appendSelectedToActionUrl(bulkForm);
+    });
   }
 })();
