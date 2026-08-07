@@ -1,6 +1,7 @@
 """/bulk conversation — import transactions from photo, file, or pasted text."""
 
 import asyncio
+import json
 import re
 from datetime import datetime, date, timezone
 from pathlib import Path
@@ -22,7 +23,6 @@ import settings
 import storage_facade
 from storage_facade import load_dedup_evidence, load_reference_data
 import merchant_map
-from bulk_drafts import archive_user_draft, load_user_draft, save_user_draft
 from handlers.cycle import maybe_prompt_cycle_start
 from models import Transaction
 import statement_profiles as sp
@@ -820,21 +820,43 @@ async def _announce_parse_plan(update: Update, text: str) -> None:
     else:
         await update.message.reply_text("🔍 Parsing transactions...")
 
+
+def _bulk_draft_dir() -> Path:
+    """Compatibility hook for tests that patch draft storage location."""
+    return settings.BULK_DRAFTS_DIR
+
+
+def _user_draft_path(user_id: int) -> Path:
+    return _bulk_draft_dir() / f"{int(user_id)}.json"
+
 def _load_user_draft(user_id: int) -> list[dict]:
     """Read one user's draft directly — avoids scanning every user's file."""
-    rows = load_user_draft(user_id)
-    if not rows:
+    path = _user_draft_path(user_id)
+    if not path.exists():
         return []
-    return rows
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        log.exception("Could not read bulk draft from %s", path)
+        return []
 
 
 def _save_bulk_draft(user_id: int, rows: list[dict]) -> None:
-    save_user_draft(user_id, rows)
+    path = _user_draft_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _archive_bulk_draft(user_id: int) -> None:
     """Move draft to archive instead of deleting — 6-month audit trail."""
-    archive_user_draft(user_id)
+    path = _user_draft_path(user_id)
+    if not path.exists():
+        return
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_dir = _bulk_draft_dir() / "archive"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    path.rename(archive_dir / f"{int(user_id)}-{ts}.json")
 
 
 def _sort_bulk_rows(parsed: list[dict]) -> list[dict]:
