@@ -299,6 +299,14 @@
           {% endfor %}
         </tbody>
       </table>
+      {# Collapse mobile rows immediately — runs sync before first paint, no FOUC. #}
+      <script>
+        if (window.matchMedia('(max-width: 47.99rem)').matches) {
+          document.querySelectorAll('.draft-row').forEach(function(r) {
+            r.classList.add('draft-row--collapsed');
+          });
+        }
+      </script>
     </div>
   </div>
 

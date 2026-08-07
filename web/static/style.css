@@ -894,14 +894,25 @@ dialog.modal::backdrop {
 
 
 /* ── Collapsible rows — all screen sizes ───────────────────────────────────── */
+/*
+ * Default (no class): row is EXPANDED — detail cells visible, summary bar hidden.
+ * .draft-row--collapsed: summary bar shown, detail cells hidden.
+ * This means no-JS users always see the full table (safe fallback).
+ * JS collapses mobile rows immediately via an inline script after the table.
+ */
 
-/* Summary bar always visible */
-.draft-cell--summary {
+/* Summary bar: hidden by default (expanded state), shown only when collapsed */
+.draft-cell--summary { display: none; }
+
+.draft-row--collapsed .draft-cell--summary {
   display: block;
   padding: 0;
   border-bottom: none;
 }
-.draft-cell--summary::before { display: none; }
+.draft-row--collapsed .draft-cell--summary::before { display: none; }
+
+/* Collapsed: hide all detail cells */
+.draft-row--collapsed .draft-cell:not(.draft-cell--summary) { display: none !important; }
 
 .draft-row-summary-toggle {
   width: 100%;
@@ -923,7 +934,13 @@ dialog.modal::backdrop {
 .draft-summary-status--invalid { color: var(--money-neg); }
 .draft-summary-status--dropped { color: var(--ink-soft); }
 .draft-summary-status--ai      { color: var(--accent); }
-.draft-summary-status--error   { color: var(--money-neg); }
+.draft-summary-status--error   {
+  color: var(--money-neg);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .draft-summary-chevron  {
   flex: 0 0 auto;
   display: inline-flex;
@@ -943,12 +960,9 @@ dialog.modal::backdrop {
   color: var(--accent-contrast);
 }
 
-/* Collapsed: hide all detail cells */
-.draft-row:not(.draft-row--expanded) .draft-cell:not(.draft-cell--summary) { display: none !important; }
-
-/* Expanded: hide summary bar, show detail cells */
-.draft-row--expanded .draft-cell--summary { display: none; }
-.draft-row--expanded .draft-summary-chevron { transform: rotate(90deg); }
+/* Chevron direction: ▸ when collapsed, ▾ when expanded */
+.draft-row--collapsed .draft-summary-chevron { transform: rotate(0deg); }
+.draft-row:not(.draft-row--collapsed) .draft-summary-chevron { transform: rotate(90deg); }
 
 @media (max-width: 47.99rem) {
   .bulk-bar--drafts {
