@@ -305,6 +305,8 @@ def test_reanalyze_preview_failure_is_reported(monkeypatch, tmp_path):
     rows = load_user_draft(uid)
     assert rows[0]["_ai_preview"]["status"] == "error"
     assert "failed" in rows[0]["_ai_preview"]["reason"].lower()
+    assert "runtimeerror" in rows[0]["_ai_preview"]["reason"].lower()
+    assert "provider unavailable" in rows[0]["_ai_preview"]["reason"].lower()
 
 
 def test_reanalyze_preview_mixed_status_summary(monkeypatch, tmp_path):
@@ -345,3 +347,5 @@ def test_reanalyze_preview_mixed_status_summary(monkeypatch, tmp_path):
     assert "1 failed" in location
     assert "0 timed out" in location
     assert "1 skipped" in location
+    assert "top failures" in location.lower()
+    assert "provider down" in location.lower()

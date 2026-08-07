@@ -19,6 +19,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from logger import init_logging
 from web import auth
 from web import currency as currency_routes
 from web import theme as theme_routes
@@ -42,6 +43,8 @@ def cat_color_idx(name: str) -> int:
 
 
 def create_app() -> FastAPI:
+    # Ensure web routes use the same file/console logging setup as the bot.
+    init_logging()
     validate_web_settings()  # fail closed — no password/secret, no app
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)

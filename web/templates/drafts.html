@@ -43,44 +43,78 @@
   <div class="drafts-content">
     <form id="draft-bulk-form" class="draft-actions" method="post" action="/drafts/{{ selected_user_id }}/bulk-update">
       <div class="bulk-bar bulk-bar--drafts" id="draft-bulk-bar" aria-live="polite">
-        <label class="bulk-select-all bulk-select-all-hit">
-          <input type="checkbox" id="draft-select-all" aria-label="Select all rows">
-          <span>Select all</span>
-        </label>
-        <span class="bulk-count" id="draft-selected-count">0 selected</span>
 
-        <select id="draft-bulk-field" name="bulk_field" aria-label="Bulk field">
-          <option value="category">Category</option>
-          <option value="person">Person</option>
-          <option value="type">Type</option>
-          <option value="currency">Currency</option>
-        </select>
-        <select id="draft-bulk-value" name="bulk_value" aria-label="Bulk value" disabled>
-          <option value="">Choose value</option>
-        </select>
-        <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional AI instruction (selected rows only)">
-        <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
-          Apply field
-        </button>
-        <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
-          Re-analyze selected
-        </button>
-        <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost" id="draft-apply-preview-btn" disabled>
-          Apply preview
-        </button>
-        <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
-          Clear preview
-        </button>
-        <button type="submit" name="action" value="drop" class="btn btn--ghost" id="draft-drop-btn" disabled>
-          Drop selected
-        </button>
-        <button type="submit" name="action" value="restore" class="btn btn--ghost" id="draft-restore-btn" disabled>
-          Restore selected
-        </button>
+        {# ── Selection header ── #}
+        <div class="draft-bulk-header">
+          <label class="bulk-select-all bulk-select-all-hit">
+            <input type="checkbox" id="draft-select-all" aria-label="Select all rows">
+            <span>Select all</span>
+          </label>
+          <span class="bulk-count" id="draft-selected-count">0 selected</span>
+        </div>
+
+        {# ── Set field section ── #}
+        <div class="draft-bulk-section draft-bulk-section--field">
+          <label class="draft-bulk-label" for="draft-bulk-field">Set field</label>
+          <div class="draft-bulk-row">
+            <select id="draft-bulk-field" name="bulk_field" aria-label="Bulk field">
+              <option value="category">Category</option>
+              <option value="person">Person</option>
+              <option value="type">Type</option>
+              <option value="currency">Currency</option>
+            </select>
+            <select id="draft-bulk-value" name="bulk_value" aria-label="Bulk value" disabled>
+              <option value="">Choose value</option>
+            </select>
+            <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
+              Apply
+            </button>
+          </div>
+        </div>
+
+        {# ── AI re-analyze section ── #}
+        <div class="draft-bulk-section draft-bulk-section--ai">
+          <label class="draft-bulk-label" for="draft-ai-instruction">AI re-analyze</label>
+          <div class="draft-bulk-row">
+            <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional instruction…">
+            <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
+              Re-analyze
+            </button>
+            <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled>
+              Apply preview
+            </button>
+            <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {# ── Row management section ── #}
+        <div class="draft-bulk-section draft-bulk-section--mgmt">
+          <label class="draft-bulk-label">Row management</label>
+          <div class="draft-bulk-row">
+            <button type="submit" name="action" value="drop" class="btn btn--ghost" id="draft-drop-btn" disabled>
+              Drop selected
+            </button>
+            <button type="submit" name="action" value="restore" class="btn btn--ghost" id="draft-restore-btn" disabled>
+              Restore selected
+            </button>
+          </div>
+        </div>
+
       </div>
-      <p class="draft-peak-note {{ 'draft-peak-note--warn' if peak_status.get('known') and peak_status.get('is_peak') else '' }}">
-        {{ peak_status.get('message') }}
-      </p>
+
+      {# ── Status bar: peak hours + test connection ── #}
+      <div class="draft-status-bar">
+        <p class="draft-peak-note {{ 'draft-peak-note--warn' if peak_status.get('known') and peak_status.get('is_peak') else '' }}">
+          {{ peak_status.get('message') }}
+        </p>
+        <div class="draft-ai-test">
+          <button type="button" class="btn btn--ghost btn--sm" id="draft-test-ai-btn">🔌 Test AI</button>
+          <span id="draft-test-ai-result" class="draft-ai-test__result" aria-live="polite"></span>
+        </div>
+      </div>
+
     </form>
 
     <script type="application/json" id="draft-ref-data">{"category": {{ categories | tojson }}, "person": {{ persons | tojson }}, "type": {{ txn_types | tojson }}, "currency": {{ currencies | tojson }}, "category_by_type": {{ category_by_type | tojson }}}</script>
@@ -185,6 +219,38 @@
     </div>
   </div>
 
+<script>
+(function () {
+  const btn = document.getElementById('draft-test-ai-btn');
+  const result = document.getElementById('draft-test-ai-result');
+  if (!btn || !result) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    result.className = 'draft-ai-test__result';
+    result.textContent = 'Testing…';
+
+    try {
+      const resp = await fetch('/drafts/test-ai');
+      const data = await resp.json();
+
+      if (data.ok) {
+        result.className = 'draft-ai-test__result draft-ai-test__result--ok';
+        result.textContent =
+          `OK — ${data.provider} / ${data.model} (${data.elapsed_ms} ms)`;
+      } else {
+        result.className = 'draft-ai-test__result draft-ai-test__result--error';
+        result.textContent = `Failed — ${data.error || 'unknown error'} (${data.elapsed_ms} ms)`;
+      }
+    } catch (err) {
+      result.className = 'draft-ai-test__result draft-ai-test__result--error';
+      result.textContent = `Request error — ${err.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
 <script src="/static/js/draft_select.js" defer></script>
 {% endif %}
 </div>
