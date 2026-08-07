@@ -53,33 +53,44 @@ def _in_window(now_utc: time, start: time, end: time) -> bool:
     return now_utc >= start or now_utc < end
 
 
+_DEEPSEEK_DEFAULT_PEAK_WINDOWS = "01:00-04:00,06:00-10:00"
+
+
 def get_peak_hours_status(provider_name: str | None = None) -> dict:
     """Return provider peak-hour status and user-facing message."""
     provider = str(provider_name or settings.AI_PROVIDER or "").strip().lower()
     now_utc = datetime.utcnow().time()
 
-    if provider != "deepseek":
+    if provider not in ("deepseek", ""):
         return {
-            "provider": provider or "unknown",
+            "provider": provider,
             "known": False,
             "is_peak": None,
             "message": (
-                f"I can't detect peak hours for {provider or 'unknown provider'}; "
-                "please check manually to avoid overusage."
+                f"Peak-hour detection is not available for provider '{provider}'; "
+                "please check usage manually."
             ),
         }
 
-    windows = _parse_peak_windows_utc(settings.DEEPSEEK_PEAK_WINDOWS_UTC)
+    # Accept "deepseek" or empty/unset (falls back to deepseek as the only provider).
+    raw_windows = str(settings.DEEPSEEK_PEAK_WINDOWS_UTC or "").strip()
+    using_default = not raw_windows
+    if using_default:
+        # DEEPSEEK_PEAK_WINDOWS_UTC is empty or unset — use hardcoded defaults.
+        raw_windows = _DEEPSEEK_DEFAULT_PEAK_WINDOWS
+
+    windows = _parse_peak_windows_utc(raw_windows)
+    now_utc = datetime.utcnow().time()
     is_peak = any(_in_window(now_utc, start, end) for start, end in windows)
-    label = settings.DEEPSEEK_PEAK_WINDOWS_UTC
+    label = f"{raw_windows} (default)" if using_default else raw_windows
     return {
-        "provider": provider,
+        "provider": "deepseek",
         "known": True,
         "is_peak": is_peak,
         "message": (
-            f"DeepSeek peak hours now (UTC windows: {label})."
+            f"DeepSeek peak hours active (UTC: {label}). AI may be slower."
             if is_peak else
-            f"DeepSeek off-peak now (UTC windows: {label})."
+            f"DeepSeek off-peak (UTC: {label}). Good time to re-analyze."
         ),
     }
 
