@@ -52,6 +52,7 @@
           </label>
           <span class="bulk-count" id="draft-selected-count">0 selected</span>
         </div>
+        <p class="draft-bulk-tip">☝️ Tick one or more rows below, then use the actions here.</p>
 
         {# ── Set field section ── #}
         <div class="draft-bulk-section draft-bulk-section--field">
@@ -67,7 +68,7 @@
               <option value="">Choose value</option>
             </select>
             <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
-              Apply
+              ✓ Apply to selected
             </button>
           </div>
         </div>
@@ -78,13 +79,13 @@
           <div class="draft-bulk-row">
             <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional instruction…">
             <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
-              Re-analyze
+              🔍 Re-analyze with AI
             </button>
             <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled>
-              Apply preview
+              ✓ Apply AI suggestion
             </button>
             <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
-              Clear
+              ✕ Clear preview
             </button>
           </div>
         </div>
@@ -94,10 +95,10 @@
           <label class="draft-bulk-label">Row management</label>
           <div class="draft-bulk-row">
             <button type="submit" name="action" value="drop" class="btn btn--ghost" id="draft-drop-btn" disabled>
-              Drop selected
+              🗑 Drop (skip on save)
             </button>
             <button type="submit" name="action" value="restore" class="btn btn--ghost" id="draft-restore-btn" disabled>
-              Restore selected
+              ↩ Restore dropped row
             </button>
           </div>
         </div>
@@ -138,7 +139,9 @@
         </thead>
         <tbody>
           {% for row in rows %}
-          <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }}" data-row-idx="{{ loop.index0 }}">
+          {% set _preview = row.get('_ai_preview') %}
+          {% set _ps = _preview.get('status') if _preview else '' %}
+          <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }} {{ 'draft-row--ai-changed' if _ps == 'changed' else '' }} {{ 'draft-row--ai-error' if _ps in ('error','timeout') else '' }}" data-row-idx="{{ loop.index0 }}">
             <td class="draft-cell draft-cell--pick" data-label="Select">
               <label class="draft-row-select" for="draft-row-cb-{{ loop.index0 }}">
                 <input id="draft-row-cb-{{ loop.index0 }}" type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">
@@ -189,12 +192,32 @@
               {% if row.get('invalid') %}<span class="error-msg">{{ row.get('invalid') }}</span>{% endif %}
               {% if row.get('_ai_preview') %}
               {% set preview = row.get('_ai_preview') %}
-              <div class="draft-preview {{ 'draft-preview--changed' if preview.get('status') == 'changed' else '' }}">
+              {% set pstatus = preview.get('status', 'unchanged') %}
+              <div class="draft-preview
+                {{- ' draft-preview--changed' if pstatus == 'changed' else '' }}
+                {{- ' draft-preview--error'   if pstatus in ('error','timeout') else '' }}
+                {{- ' draft-preview--unchanged' if pstatus == 'unchanged' else '' }}">
                 <div class="draft-preview-title">
-                  AI preview: {{ preview.get('status', 'unchanged') }}
+                  {% if pstatus == 'changed' %}✏️ AI suggests changes
+                  {% elif pstatus == 'unchanged' %}✓ No changes needed
+                  {% elif pstatus == 'skipped' %}— Skipped (dropped)
+                  {% elif pstatus == 'error' %}❌ AI failed
+                  {% elif pstatus == 'timeout' %}⏱ Timed out
+                  {% else %}{{ pstatus }}{% endif %}
                 </div>
-                {% if preview.get('changed_fields') %}
-                <div class="draft-preview-fields">Changed: {{ preview.get('changed_fields') | join(', ') }}</div>
+                {% if pstatus == 'changed' and preview.get('proposed') %}
+                <table class="draft-diff">
+                  <thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+                  <tbody>
+                  {% for field in preview.get('changed_fields', []) %}
+                  <tr>
+                    <td class="draft-diff__field">{{ field }}</td>
+                    <td class="draft-diff__before">{{ row.get(field, '—') }}</td>
+                    <td class="draft-diff__after">{{ preview.get('proposed', {}).get(field, '—') }}</td>
+                  </tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
                 {% endif %}
                 {% if preview.get('reason') %}
                 <div class="draft-preview-reason">{{ preview.get('reason') }}</div>
@@ -205,10 +228,10 @@
             <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
               <div class="draft-row-actions">
                 <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
-                  <button type="submit" class="btn btn--sm btn--primary">Update</button>
+                  <button type="submit" class="btn btn--sm btn--primary">✓ Save row</button>
                 </form>
                 <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
-                  <button type="submit" class="btn btn--sm btn--ghost">{{ 'Restore' if row.get('dropped') else 'Drop' }}</button>
+                  <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
                 </form>
               </div>
             </td>
