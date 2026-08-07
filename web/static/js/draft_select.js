@@ -299,7 +299,13 @@
     });
   });
 
-  // Mobile collapsed rows — tap summary bar to expand/collapse
+  // Collapsed rows — tap/click summary bar to expand/collapse on any screen size.
+  // Default: expanded on desktop (≥ 48 rem), collapsed on mobile.
+  var isDesktop = window.matchMedia('(min-width: 48rem)').matches;
+  document.querySelectorAll('.draft-row').forEach(function(row) {
+    if (isDesktop) row.classList.add('draft-row--expanded');
+  });
+
   document.querySelectorAll('.draft-row-summary-toggle').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var row = btn.closest('.draft-row');
