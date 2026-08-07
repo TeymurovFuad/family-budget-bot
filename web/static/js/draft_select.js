@@ -59,8 +59,36 @@
     categorySelect.disabled = allowed.length === 0;
   }
 
+  // submitBulkAction — sets the hidden action field and submits the bulk form.
+  // Replaces type="submit" button values, which iOS Safari can silently drop.
+  var bulkFormRef = null; // assigned after DOM ready below
+  function submitBulkAction(actionValue) {
+    var form = bulkFormRef || document.getElementById('draft-bulk-form');
+    if (!form) return;
+    var hidden = document.getElementById('draft-action-input');
+    if (hidden) hidden.value = actionValue;
+    appendSelectedToActionUrl(form);
+    form.submit();
+  }
+  // Expose globally so onclick="submitBulkAction(...)" in the template works.
+  window.submitBulkAction = submitBulkAction;
+
+  // Sync all checkboxes that share the same row_idx value (summary + pick cells).
+  function syncCheckboxPair(value, checked) {
+    document.querySelectorAll('.draft-row-cb[value="' + value + '"]').forEach(function(cb) {
+      cb.checked = checked;
+    });
+  }
+
+  // selectedBoxes — returns one representative checkbox per row (dedup by value).
   function selectedBoxes() {
-    return Array.prototype.slice.call(document.querySelectorAll('.draft-row-cb:checked'));
+    var seen = {};
+    return Array.prototype.slice.call(document.querySelectorAll('.draft-row-cb:checked')).filter(function(cb) {
+      var v = cb.value;
+      if (seen[v]) return false;
+      seen[v] = true;
+      return true;
+    });
   }
 
   function selectedRowTypes() {
@@ -97,20 +125,15 @@
     byId('draft-drop-btn').disabled = !enabled;
     byId('draft-restore-btn').disabled = !enabled;
 
-    // #5 — AI row limit counter
+    // AI re-analyze button — enabled whenever any rows are selected (no row cap; server batches by 20)
     var previewBtn = byId('draft-preview-ai-btn');
     if (previewBtn) {
-      var overLimit = count > REANALYZE_MAX_ROWS;
-      previewBtn.disabled = !enabled || overLimit;
-      if (overLimit) {
-        previewBtn.title = 'Maximum 20 rows';
-      } else {
-        previewBtn.title = '';
-      }
+      previewBtn.disabled = !enabled;
+      previewBtn.title = '';
     }
     var aiCounter = byId('draft-ai-row-counter');
     if (aiCounter) {
-      aiCounter.textContent = count + ' / ' + REANALYZE_MAX_ROWS + ' rows selected';
+      aiCounter.textContent = count + ' row' + (count === 1 ? '' : 's') + ' selected';
     }
 
     // #6 — Apply AI suggestion gating: only enable if at least one selected row has ai-changed
@@ -170,8 +193,7 @@
     var parts = raw.split(',');
     parts.forEach(function(part) {
       var idx = part.trim();
-      var cb = document.querySelector('.draft-row-cb[value="' + idx + '"]');
-      if (cb) cb.checked = true;
+      syncCheckboxPair(idx, true);
     });
     updateBulkBar();
   }
@@ -222,13 +244,21 @@
 
   document.addEventListener('change', function(e) {
     if (e.target.classList.contains('draft-row-cb')) {
+      // Sync all checkboxes for the same row (summary + pick cells share the same value).
+      syncCheckboxPair(e.target.value, e.target.checked);
       updateBulkBar();
       return;
     }
     if (e.target.id === 'draft-select-all') {
       var on = e.target.checked;
+      // Check only the first checkbox per value to avoid double-counting, then sync.
+      var seen = {};
       document.querySelectorAll('.draft-row-cb').forEach(function(cb) {
-        cb.checked = on;
+        if (!seen[cb.value]) {
+          seen[cb.value] = true;
+          cb.checked = on;
+          syncCheckboxPair(cb.value, on);
+        }
       });
       updateBulkBar();
       return;
@@ -331,8 +361,10 @@
     });
   });
 
-  // Persist checkbox selections into the form action URL on submit
+  // Persist checkbox selections into the form action URL on submit.
+  // Also used by submitBulkAction() above.
   var bulkForm = byId('draft-bulk-form');
+  bulkFormRef = bulkForm;
   if (bulkForm) {
     bulkForm.addEventListener('submit', function() {
       appendSelectedToActionUrl(bulkForm);

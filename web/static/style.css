@@ -914,12 +914,33 @@ dialog.modal::backdrop {
 /* Collapsed: hide all detail cells */
 .draft-row--collapsed .draft-cell:not(.draft-cell--summary) { display: none !important; }
 
+/* Summary bar — checkbox + toggle button side by side */
+.draft-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.draft-summary-cb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.5rem;
+  height: 100%;
+  min-height: 2.75rem;
+  cursor: pointer;
+  padding: 0 var(--space-1);
+}
+.draft-summary-cb-wrap .draft-row-cb {
+  pointer-events: none; /* label handles the click */
+}
+
 .draft-row-summary-toggle {
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
   background: none;
   border: none;
   cursor: pointer;
@@ -927,20 +948,22 @@ dialog.modal::backdrop {
   font: inherit;
   color: var(--ink);
 }
-.draft-summary-date     { color: var(--ink-soft); font-size: var(--fs-sm); flex: 0 0 auto; }
-.draft-summary-value    { font-weight: 600; flex: 0 0 auto; }
-.draft-summary-category { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
-.draft-summary-status   { flex: 0 0 auto; font-size: var(--fs-xs); font-weight: 700; }
-.draft-summary-status--invalid { color: var(--money-neg); }
-.draft-summary-status--dropped { color: var(--ink-soft); }
-.draft-summary-status--ai      { color: var(--accent); }
-.draft-summary-status--error   {
-  color: var(--money-neg);
-  max-width: 14rem;
+.draft-summary-date   { color: var(--ink-soft); font-size: var(--fs-sm); flex: 0 0 auto; }
+.draft-summary-value  { font-weight: 600; flex: 0 0 auto; }
+.draft-summary-status {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-align: right;
 }
+.draft-summary-status--invalid { color: var(--money-neg); }
+.draft-summary-status--dropped { color: var(--ink-soft); }
+.draft-summary-status--ai      { color: var(--accent); }
+.draft-summary-status--error   { color: var(--money-neg); }
 .draft-summary-chevron  {
   flex: 0 0 auto;
   display: inline-flex;
@@ -971,18 +994,42 @@ dialog.modal::backdrop {
     padding: var(--space-2);
   }
 
-  .draft-bulk-row {
+  /* Set-field section: two selects side by side, button full-width below */
+  .draft-bulk-section--field .draft-bulk-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+  .draft-bulk-section--field .draft-bulk-row select { width: 100%; }
+  .draft-bulk-section--field .draft-bulk-row .draft-mixed-type-warning { grid-column: 1 / -1; }
+  .draft-bulk-section--field .draft-bulk-row .btn { grid-column: 1 / -1; min-height: 2.75rem; }
+
+  /* AI section: instruction input + Re-analyze button side by side;
+     Apply AI / Clear stack below */
+  .draft-bulk-section--ai .draft-bulk-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--space-2);
+  }
+  .draft-bulk-section--ai .draft-bulk-row .draft-ai-instruction {
+    grid-column: 1; min-width: 0; width: 100%;
+  }
+  .draft-bulk-section--ai #draft-preview-ai-btn { grid-column: 2; white-space: nowrap; }
+  .draft-bulk-section--ai .draft-ai-row-counter  { grid-column: 1 / -1; font-size: var(--fs-xs); color: var(--ink-soft); }
+  .draft-bulk-section--ai #draft-apply-preview-btn,
+  .draft-bulk-section--ai #draft-clear-preview-btn {
+    grid-column: 1 / -1; min-height: 2.5rem;
+  }
+
+  /* Row mgmt and save: buttons full-width */
+  .draft-bulk-section--mgmt .draft-bulk-row,
+  .draft-bulk-section--save-all .draft-bulk-row {
     flex-direction: column;
     align-items: stretch;
   }
-  .draft-bulk-row select,
-  .draft-bulk-row input,
-  .draft-bulk-row .draft-input {
-    width: 100%;
-  }
-  .draft-bulk-row .btn {
-    width: 100%;
-    min-height: 2.75rem;
+  .draft-bulk-section--mgmt .draft-bulk-row .btn,
+  .draft-bulk-section--save-all .draft-bulk-row .btn {
+    width: 100%; min-height: 2.75rem;
   }
 
   .draft-ai-instruction { min-width: 0; }
@@ -1005,12 +1052,12 @@ dialog.modal::backdrop {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
-    padding: var(--space-2) var(--space-3);
+    padding: var(--space-1) var(--space-2);
     margin-bottom: var(--space-3);
   }
   .draft-table td {
     border-bottom: 1px solid var(--border-soft);
-    padding: var(--space-2) 0;
+    padding: var(--space-1) 0;
   }
   .draft-table td:last-child { border-bottom: none; }
   .draft-cell::before {
@@ -1031,6 +1078,19 @@ dialog.modal::backdrop {
     justify-content: flex-start;
     padding-top: var(--space-1);
   }
+
+  /* Expanded row: group date/value/currency on one line, type/category on one line */
+  .draft-cell--date,
+  .draft-cell--value,
+  .draft-cell--currency { display: inline-block; width: auto; border-bottom: none; padding-right: var(--space-2); vertical-align: top; }
+  .draft-cell--date { width: 100%; }
+  .draft-cell--value { width: 50%; }
+  .draft-cell--currency { width: calc(50% - var(--space-2)); }
+  .draft-cell--type,
+  .draft-cell--category { display: inline-block; width: calc(50% - var(--space-1)); border-bottom: none; padding-right: var(--space-1); vertical-align: top; }
+  /* Restore border under the category cell (last in pair) */
+  .draft-cell--category { border-bottom: 1px solid var(--border-soft) !important; padding-bottom: var(--space-1); }
+
   .draft-actions-col .btn { min-height: 2.75rem; }
   .draft-row-actions { flex-direction: column; }
   .draft-row-actions .btn { width: 100%; }
