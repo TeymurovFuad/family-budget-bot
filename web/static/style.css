@@ -891,9 +891,6 @@ dialog.modal::backdrop {
   align-self: center;
 }
 
-/* Short/full button labels — default: show full, hide short */
-.btn-short { display: none; }
-.btn-full  { display: inline; }
 
 @media (max-width: 47.99rem) {
   .bulk-bar--drafts {
@@ -977,10 +974,6 @@ dialog.modal::backdrop {
 }
 
 @media (max-width: 47.99rem) {
-  /* Short labels on mobile for AI buttons */
-  .btn-short { display: inline; }
-  .btn-full  { display: none; }
-
   /* Compact tip text on mobile */
   .draft-bulk-tip { font-size: var(--fs-xs); }
 }
