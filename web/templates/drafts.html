@@ -233,6 +233,11 @@
                 <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
                   <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
                 </form>
+                {% if _preview and _preview.get('status') == 'changed' %}
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
+                  <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
+                </form>
+                {% endif %}
               </div>
             </td>
           </tr>
