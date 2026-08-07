@@ -867,13 +867,33 @@ dialog.modal::backdrop {
 .draft-row--ai-changed { border-left: 3px solid var(--accent); }
 .draft-row--ai-error   { border-left: 3px solid var(--money-neg); }
 
-/* Bulk-bar tip (mobile only) */
+/* Bulk-bar tip — visible at all widths */
 .draft-bulk-tip {
   margin: 0;
   font-size: var(--fs-sm);
   color: var(--ink-soft);
   font-style: italic;
 }
+
+/* Mixed-type warning label */
+.draft-mixed-type-warning {
+  font-size: var(--fs-sm);
+  color: var(--money-neg, #c0392b);
+  font-style: italic;
+  align-self: center;
+}
+
+/* AI row counter */
+.draft-ai-row-counter {
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  white-space: nowrap;
+  align-self: center;
+}
+
+/* Short/full button labels — default: show full, hide short */
+.btn-short { display: none; }
+.btn-full  { display: inline; }
 
 @media (max-width: 47.99rem) {
   .bulk-bar--drafts {
@@ -953,5 +973,13 @@ dialog.modal::backdrop {
 @media (min-width: 48rem) {
   .draft-row-id { display: none; }
   .draft-table-wrap { overflow-x: auto; }
-  .draft-bulk-tip { display: none; }
+}
+
+@media (max-width: 47.99rem) {
+  /* Short labels on mobile for AI buttons */
+  .btn-short { display: inline; }
+  .btn-full  { display: none; }
+
+  /* Compact tip text on mobile */
+  .draft-bulk-tip { font-size: var(--fs-xs); }
 }

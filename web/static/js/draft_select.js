@@ -75,6 +75,8 @@
     return types;
   }
 
+  var REANALYZE_MAX_ROWS = 20;
+
   function updateBulkBar() {
     var boxes = document.querySelectorAll('.draft-row-cb');
     var count = selectedBoxes().length;
@@ -94,12 +96,48 @@
     var enabled = count > 0;
     byId('draft-drop-btn').disabled = !enabled;
     byId('draft-restore-btn').disabled = !enabled;
-    if (byId('draft-preview-ai-btn')) byId('draft-preview-ai-btn').disabled = !enabled;
-    if (byId('draft-apply-preview-btn')) byId('draft-apply-preview-btn').disabled = !enabled;
+
+    // #5 — AI row limit counter
+    var previewBtn = byId('draft-preview-ai-btn');
+    if (previewBtn) {
+      var overLimit = count > REANALYZE_MAX_ROWS;
+      previewBtn.disabled = !enabled || overLimit;
+      if (overLimit) {
+        previewBtn.title = 'Maximum 20 rows';
+      } else {
+        previewBtn.title = '';
+      }
+    }
+    var aiCounter = byId('draft-ai-row-counter');
+    if (aiCounter) {
+      aiCounter.textContent = count + ' / ' + REANALYZE_MAX_ROWS + ' rows selected';
+    }
+
+    // #6 — Apply AI suggestion gating: only enable if at least one selected row has ai-changed
+    var applyPreviewBtn = byId('draft-apply-preview-btn');
+    if (applyPreviewBtn) {
+      var hasAiChanged = selectedBoxes().some(function(cb) {
+        var row = cb.closest('tr') || cb.closest('.draft-row');
+        return row && row.classList.contains('draft-row--ai-changed');
+      });
+      applyPreviewBtn.disabled = !enabled || !hasAiChanged;
+    }
+
     if (byId('draft-clear-preview-btn')) byId('draft-clear-preview-btn').disabled = !enabled;
 
+    // #2 — Mixed-type inline warning for category field
     var field = byId('draft-bulk-field');
     var value = byId('draft-bulk-value');
+    var mixedWarning = byId('draft-mixed-type-warning');
+    if (field && field.value === 'category') {
+      var types = selectedRowTypes();
+      if (mixedWarning) {
+        mixedWarning.style.display = types.size > 1 ? '' : 'none';
+      }
+    } else {
+      if (mixedWarning) mixedWarning.style.display = 'none';
+    }
+
     byId('draft-apply-btn').disabled = !enabled || !field || !value || !value.value;
   }
 
@@ -159,6 +197,8 @@
   });
 
   if (byId('draft-bulk-field')) {
+    // #7 — load refData first, then populate values so the category
+    // dropdown is filled on initial render without requiring a field change.
     refData = parseRefData();
     document.querySelectorAll('.draft-type-select').forEach(function(sel) {
       var idx = sel.getAttribute('data-row-idx');

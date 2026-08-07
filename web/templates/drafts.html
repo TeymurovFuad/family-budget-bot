@@ -31,9 +31,9 @@
           {% endfor %}
         </select>
         {% if selected_user_id is not none %}
-        <button type="submit" formaction="/drafts/{{ selected_user_id }}/archive" formmethod="post" class="btn btn--ghost">
-          Archive draft
-        </button>
+        <form method="post" action="/drafts/{{ selected_user_id }}/archive" style="display:inline" onsubmit="return confirm('Archive this draft? This cannot be undone.')">
+          <button type="submit" class="btn btn--ghost">Archive draft</button>
+        </form>
         {% endif %}
       </div>
     </form>
@@ -52,7 +52,7 @@
           </label>
           <span class="bulk-count" id="draft-selected-count">0 selected</span>
         </div>
-        <p class="draft-bulk-tip">☝️ Tick one or more rows below, then use the actions here.</p>
+        <p class="draft-bulk-tip">☝️ Tick rows below to use bulk actions.</p>
 
         {# ── Set field section ── #}
         <div class="draft-bulk-section draft-bulk-section--field">
@@ -67,6 +67,7 @@
             <select id="draft-bulk-value" name="bulk_value" aria-label="Bulk value" disabled>
               <option value="">Choose value</option>
             </select>
+            <span id="draft-mixed-type-warning" class="draft-mixed-type-warning" style="display:none">Select rows with the same type first</span>
             <button type="submit" name="action" value="set_field" class="btn btn--primary" id="draft-apply-btn" disabled>
               ✓ Apply to selected
             </button>
@@ -79,13 +80,14 @@
           <div class="draft-bulk-row">
             <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional instruction…">
             <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
-              🔍 Re-analyze with AI
+              <span class="btn-full">🔍 Re-analyze with AI</span><span class="btn-short" aria-hidden="true">Re-analyze</span>
             </button>
+            <span id="draft-ai-row-counter" class="draft-ai-row-counter">0 / 20 rows selected</span>
             <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled>
-              ✓ Apply AI suggestion
+              <span class="btn-full">✓ Apply AI suggestion</span><span class="btn-short" aria-hidden="true">Apply AI</span>
             </button>
             <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
-              ✕ Clear preview
+              <span class="btn-full">✕ Clear preview</span><span class="btn-short" aria-hidden="true">Clear</span>
             </button>
           </div>
         </div>
