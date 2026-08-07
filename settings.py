@@ -32,6 +32,12 @@ REPORT_TYPE = os.getenv("REPORT_TYPE", "weekly")
 AI_PROVIDER = os.getenv("AI_PROVIDER", "deepseek").lower()
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+# Comma-separated UTC peak windows in HH:MM-HH:MM format.
+# Default mirrors public reporting: 09:00-12:00 and 14:00-18:00 Beijing (UTC+8)
+# => 01:00-04:00 and 06:00-10:00 UTC.
+DEEPSEEK_PEAK_WINDOWS_UTC = os.getenv(
+    "DEEPSEEK_PEAK_WINDOWS_UTC", "01:00-04:00,06:00-10:00"
+)
 
 if "SAVINGS_TARGET_PCT" in os.environ:
     SAVINGS_RATE_TARGET = float(os.getenv("SAVINGS_TARGET_PCT", "20")) / 100

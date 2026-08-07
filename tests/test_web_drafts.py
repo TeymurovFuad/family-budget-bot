@@ -1,5 +1,7 @@
 """test_web_drafts.py - route tests for Drafts web UI flows."""
 
+from unittest.mock import patch
+
 import settings
 import sqlite_ops
 
@@ -119,3 +121,64 @@ def test_archive_moves_draft(monkeypatch, tmp_path):
     resp = client.post(f"/drafts/{uid}/archive", follow_redirects=False)
     assert resp.status_code == 303
     assert load_user_draft(uid) == []
+
+
+def test_bulk_reanalyze_preview_and_apply(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1006
+    save_user_draft(uid, [_draft_row(description="lidl"), _draft_row(description="fuel")])
+
+    ai_row = {
+        "date": "2024-06-15",
+        "value": 10.0,
+        "currency": "PLN",
+        "type": "Expense",
+        "category": "Transport",
+        "description": "fuel",
+    }
+    with patch("web.routes.drafts.parse_quick", return_value=ai_row):
+        preview_resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+                "ai_instruction": "Map unknown categories to nearest",
+            },
+            follow_redirects=False,
+        )
+    assert preview_resp.status_code == 303
+
+    rows = load_user_draft(uid)
+    assert "_ai_preview" in rows[0]
+    assert rows[0]["_ai_preview"]["status"] == "changed"
+
+    apply_resp = client.post(
+        f"/drafts/{uid}/bulk-update",
+        data={
+            "action": "apply_ai_preview",
+            "row_idx": ["0"],
+        },
+        follow_redirects=False,
+    )
+    assert apply_resp.status_code == 303
+    rows_after = load_user_draft(uid)
+    assert rows_after[0]["category"] == "Transport"
+    assert "_ai_preview" not in rows_after[0]
+
+
+def test_bulk_reanalyze_preview_enforces_selection_cap(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1007
+    save_user_draft(uid, [_draft_row(description=f"row {i}") for i in range(21)])
+
+    idxs = [str(i) for i in range(21)]
+    resp = client.post(
+        f"/drafts/{uid}/bulk-update",
+        data={
+            "action": "preview_ai",
+            "row_idx": idxs,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "Select at most 20 rows" in resp.headers.get("location", "")
