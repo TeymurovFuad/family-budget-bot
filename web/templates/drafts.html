@@ -170,6 +170,19 @@
           {% set _ps = _preview.get('status') if _preview else '' %}
           {% set _proposed = _preview.get('proposed', {}) if (_preview and _ps == 'changed') else {} %}
           <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }} {{ 'draft-row--ai-changed' if _ps == 'changed' else '' }} {{ 'draft-row--ai-error' if _ps in ('error','timeout') else '' }}" data-row-idx="{{ loop.index0 }}">
+            <td class="draft-cell draft-cell--summary" colspan="11">
+              <button type="button" class="draft-row-summary-toggle">
+                <span class="draft-summary-date">{{ _proposed.get('date') or row.get('date', '—') }}</span>
+                <span class="draft-summary-value">{{ _proposed.get('value') or row.get('value', '—') }} {{ _proposed.get('currency') or row.get('currency', '') }}</span>
+                <span class="draft-summary-category">{{ _proposed.get('category') or row.get('category', '—') }}</span>
+                {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
+                {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">Invalid</span>
+                {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI</span>
+                {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ AI error</span>
+                {% else %}<span class="draft-summary-status">OK</span>{% endif %}
+                <span class="draft-summary-chevron">▸</span>
+              </button>
+            </td>
             <td class="draft-cell draft-cell--pick" data-label="Select">
               <label class="draft-row-select" for="draft-row-cb-{{ loop.index0 }}">
                 <input id="draft-row-cb-{{ loop.index0 }}" type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">

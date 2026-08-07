@@ -892,6 +892,49 @@ dialog.modal::backdrop {
 }
 
 
+/* ── Mobile collapsed rows ─────────────────────────────────────────────────── */
+.draft-cell--summary { display: none; }
+
+@media (max-width: 47.99rem) {
+  /* Summary bar — shown collapsed */
+  .draft-cell--summary {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+  }
+  .draft-cell--summary::before { display: none; }
+
+  .draft-row-summary-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: var(--ink);
+  }
+  .draft-summary-date   { color: var(--ink-soft); font-size: var(--fs-sm); flex: 0 0 auto; }
+  .draft-summary-value  { font-weight: 600; flex: 0 0 auto; }
+  .draft-summary-category { flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); }
+  .draft-summary-status { flex: 0 0 auto; font-size: var(--fs-xs); font-weight: 700; }
+  .draft-summary-status--invalid { color: var(--money-neg); }
+  .draft-summary-status--dropped { color: var(--ink-soft); }
+  .draft-summary-status--ai      { color: var(--accent); }
+  .draft-summary-status--error   { color: var(--money-neg); }
+  .draft-summary-chevron { flex: 0 0 auto; color: var(--ink-soft); font-size: var(--fs-sm); transition: transform .15s; }
+
+  /* Collapsed: hide all detail cells */
+  .draft-row:not(.draft-row--expanded) .draft-cell:not(.draft-cell--summary) { display: none !important; }
+
+  /* Expanded: hide summary bar, show detail cells */
+  .draft-row--expanded .draft-cell--summary { display: none; }
+  .draft-row--expanded .draft-summary-chevron { transform: rotate(90deg); }
+}
+
 @media (max-width: 47.99rem) {
   .bulk-bar--drafts {
     position: static;  /* don't sticky on mobile — takes too much space */
