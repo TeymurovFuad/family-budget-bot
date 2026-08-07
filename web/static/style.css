@@ -837,6 +837,7 @@ dialog.modal::backdrop {
 .draft-preview--unchanged { opacity: .7; }
 .draft-preview-title { font-weight: 700; margin-bottom: var(--space-1); }
 .draft-preview-reason { color: var(--ink-soft); font-size: var(--fs-xs); margin-top: var(--space-1); }
+.draft-preview-reason--inline { display: block; margin-top: var(--space-1); }
 .draft-diff {
   width: 100%;
   border-collapse: collapse;
