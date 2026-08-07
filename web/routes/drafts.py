@@ -29,7 +29,7 @@ _BULK_ACTIONS = (
 )
 _REANALYZE_MAX_ROWS = 20
 _REANALYZE_MAX_PARALLEL = 4
-_REANALYZE_TIMEOUT_S = 20.0
+_REANALYZE_TIMEOUT_S = 90.0  # DeepSeek can be slow during peak hours
 
 
 def _build_categories_by_type(ref: dict, category_types: dict[str, str]) -> dict[str, list[str]]:
@@ -209,8 +209,18 @@ def _revalidate_draft_row(row: dict, lists: dict) -> None:
 
 
 def _preview_error_reason(exc: Exception) -> str:
-    """Return a short, user-visible error reason for AI preview failures."""
+    """Return a short, user-visible error reason for AI preview failures.
+
+    Auth/connection exception types are returned by class name only — their
+    message bodies can embed API keys or internal URLs from the SDK.
+    """
     kind = exc.__class__.__name__
+    _OPAQUE_KINDS = {
+        "AuthenticationError", "PermissionDeniedError",
+        "APIConnectionError", "APIStatusError", "RateLimitError",
+    }
+    if kind in _OPAQUE_KINDS:
+        return kind  # no message body — could contain API key or internal URL
     raw = str(exc or "").strip()
     if not raw:
         return kind
