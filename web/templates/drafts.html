@@ -81,14 +81,14 @@
           <div class="draft-bulk-row">
             <input type="text" id="draft-ai-instruction" name="ai_instruction" class="draft-input draft-ai-instruction" placeholder="Optional instruction…">
             <button type="submit" name="action" value="preview_ai" class="btn btn--ghost" id="draft-preview-ai-btn" disabled>
-              <span class="btn-full">🔍 Re-analyze with AI</span><span class="btn-short" aria-hidden="true">Re-analyze</span>
+              🔍 Re-analyze
             </button>
             <span id="draft-ai-row-counter" class="draft-ai-row-counter">0 / 20 rows selected</span>
             <button type="submit" name="action" value="apply_ai_preview" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled>
-              <span class="btn-full">✓ Apply AI suggestion</span><span class="btn-short" aria-hidden="true">Apply AI</span>
+              ✓ Apply AI
             </button>
             <button type="submit" name="action" value="clear_ai_preview" class="btn btn--ghost" id="draft-clear-preview-btn" disabled>
-              <span class="btn-full">✕ Clear preview</span><span class="btn-short" aria-hidden="true">Clear</span>
+              ✕ Clear
             </button>
           </div>
         </div>
@@ -170,6 +170,19 @@
           {% set _ps = _preview.get('status') if _preview else '' %}
           {% set _proposed = _preview.get('proposed', {}) if (_preview and _ps == 'changed') else {} %}
           <tr class="draft-row {{ 'draft-row--dropped' if row.get('dropped') else '' }} {{ 'draft-row--invalid' if row.get('invalid') else '' }} {{ 'draft-row--ai-changed' if _ps == 'changed' else '' }} {{ 'draft-row--ai-error' if _ps in ('error','timeout') else '' }}" data-row-idx="{{ loop.index0 }}">
+            <td class="draft-cell draft-cell--summary" colspan="11">
+              <button type="button" class="draft-row-summary-toggle">
+                <span class="draft-summary-date">{{ _proposed.get('date') or row.get('date', '—') }}</span>
+                <span class="draft-summary-value">{{ _proposed.get('value') or row.get('value', '—') }} {{ _proposed.get('currency') or row.get('currency', '') }}</span>
+                <span class="draft-summary-category">{{ _proposed.get('category') or row.get('category', '—') }}</span>
+                {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
+                {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">Invalid</span>
+                {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI</span>
+                {% elif _ps in ('error', 'timeout') %}<span class="draft-summary-status draft-summary-status--error">❌ AI error</span>
+                {% else %}<span class="draft-summary-status">OK</span>{% endif %}
+                <span class="draft-summary-chevron">▸</span>
+              </button>
+            </td>
             <td class="draft-cell draft-cell--pick" data-label="Select">
               <label class="draft-row-select" for="draft-row-cb-{{ loop.index0 }}">
                 <input id="draft-row-cb-{{ loop.index0 }}" type="checkbox" class="draft-row-cb" form="draft-bulk-form" name="row_idx" value="{{ loop.index0 }}" aria-label="Select row {{ loop.index }}">
@@ -234,15 +247,15 @@
             </td>
             <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
               <div class="draft-row-actions">
-                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
+                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--primary">✓ Save row</button>
                   {% if row_error == loop.index0 | string %}<span class="draft-row-save-error error-msg">{{ msg }}</span>{% endif %}
                 </form>
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
                 </form>
                 {% if row.get('_ai_preview') and row.get('_ai_preview').get('status') == 'changed' %}
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
                 </form>
                 {% endif %}
