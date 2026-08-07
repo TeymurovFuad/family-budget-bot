@@ -182,3 +182,56 @@ def test_bulk_reanalyze_preview_enforces_selection_cap(monkeypatch, tmp_path):
     )
     assert resp.status_code == 303
     assert "Select at most 20 rows" in resp.headers.get("location", "")
+
+
+def test_single_row_update_allows_unscoped_category_types(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1008
+    save_user_draft(uid, [_draft_row(type="Income", category="Groceries")])
+
+    # Categories in _seed_reference_db have no category_type metadata, so they
+    # must remain selectable for all txn types instead of being forced to Expense.
+    resp = client.post(
+        f"/drafts/{uid}/row/0/update",
+        data={
+            "date": "2024-06-15",
+            "value": "10",
+            "currency": "PLN",
+            "type": "Income",
+            "category": "Transport",
+            "person": "",
+            "description": "income row",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    rows = load_user_draft(uid)
+    assert rows[0]["category"] == "Transport"
+
+
+def test_reanalyze_preview_marks_invalid_signal(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1009
+    save_user_draft(uid, [_draft_row(type="Income", category="Groceries")])
+
+    ai_row = {
+        "date": "2024-06-15",
+        "value": 10.0,
+        "currency": "PLN",
+        "type": "Income",
+        "category": "Transport",
+        "description": "income mismatch",
+    }
+    with patch("web.routes.drafts.parse_quick", return_value=ai_row):
+        resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+    rows = load_user_draft(uid)
+    assert "_ai_preview" in rows[0]
+    assert isinstance(rows[0]["_ai_preview"].get("is_invalid"), bool)

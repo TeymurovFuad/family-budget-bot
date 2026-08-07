@@ -4,6 +4,7 @@ Shows all saved user draft files and allows bulk fixes before the user
 returns to Telegram to save/cancel the draft.
 """
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from urllib.parse import urlencode
@@ -33,11 +34,14 @@ def _build_categories_by_type(ref: dict, category_types: dict[str, str]) -> dict
     typed: dict[str, list[str]] = {txn_type: [] for txn_type in txn_types}
 
     for category in categories:
-        mapped_type = str(category_types.get(category) or "Expense").strip()
-        if mapped_type not in typed:
-            mapped_type = "Expense" if "Expense" in typed else (txn_types[0] if txn_types else "")
-        if mapped_type:
+        mapped_type = str(category_types.get(category) or "").strip()
+        if mapped_type in typed:
             typed[mapped_type].append(category)
+            continue
+        # Unscoped categories (missing/unknown type) remain selectable for all
+        # transaction types to avoid false blocks until metadata is curated.
+        for txn_type in typed:
+            typed[txn_type].append(category)
     return typed
 
 
@@ -74,6 +78,7 @@ def _compute_preview_for_row(
     ref: dict,
     categories_by_type: dict[str, list[str]],
     instruction: str,
+    parsed: dict | None = None,
 ) -> dict:
     if row.get("dropped"):
         return {
@@ -83,14 +88,16 @@ def _compute_preview_for_row(
             "proposed": {},
         }
 
-    text = _build_reanalyze_text(row, instruction)
-    parsed = parse_quick(text, ref)
+    if parsed is None:
+        text = _build_reanalyze_text(row, instruction)
+        parsed = parse_quick(text, ref)
     if not parsed:
         return {
             "status": "unchanged",
             "reason": "AI could not parse this row.",
             "changed_fields": [],
             "proposed": {},
+            "is_invalid": False,
         }
 
     candidate = _clone_row(row)
@@ -119,12 +126,14 @@ def _compute_preview_for_row(
             "reason": candidate.get("invalid") or "",
             "changed_fields": changed_fields,
             "proposed": proposed,
+            "is_invalid": bool(candidate.get("invalid")),
         }
     return {
         "status": "unchanged",
         "reason": candidate.get("invalid") or "No changes proposed.",
         "changed_fields": [],
         "proposed": proposed,
+        "is_invalid": bool(candidate.get("invalid")),
     }
 
 
@@ -242,6 +251,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 "error",
             )
         instruction = str(form.get("ai_instruction", "")).strip()
+        loop = asyncio.get_running_loop()
         changed = 0
         unchanged = 0
         invalid = 0
@@ -250,7 +260,11 @@ async def drafts_bulk_update(request: Request, user_id: int):
             if not isinstance(row, dict):
                 continue
             try:
-                preview = _compute_preview_for_row(row, ref, categories_by_type, instruction)
+                text = _build_reanalyze_text(row, instruction)
+                parsed = await loop.run_in_executor(None, lambda: parse_quick(text, ref))
+                preview = _compute_preview_for_row(
+                    row, ref, categories_by_type, instruction, parsed=parsed
+                )
             except Exception as exc:
                 log.warning("Draft AI preview failed for user=%s row=%s: %s", user_id, idx, exc)
                 preview = {
@@ -258,13 +272,14 @@ async def drafts_bulk_update(request: Request, user_id: int):
                     "reason": "AI preview failed for this row.",
                     "changed_fields": [],
                     "proposed": {},
+                    "is_invalid": False,
                 }
             row["_ai_preview"] = preview
             if preview.get("status") == "changed":
                 changed += 1
             else:
                 unchanged += 1
-            if preview.get("reason") and "invalid" in str(preview.get("reason")).lower():
+            if preview.get("is_invalid"):
                 invalid += 1
         save_user_draft(user_id, rows)
         log.info(
