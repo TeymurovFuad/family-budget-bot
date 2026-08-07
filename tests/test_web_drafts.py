@@ -1,5 +1,8 @@
 """test_web_drafts.py - route tests for Drafts web UI flows."""
 
+import time
+from unittest.mock import patch
+
 import settings
 import sqlite_ops
 
@@ -119,3 +122,145 @@ def test_archive_moves_draft(monkeypatch, tmp_path):
     resp = client.post(f"/drafts/{uid}/archive", follow_redirects=False)
     assert resp.status_code == 303
     assert load_user_draft(uid) == []
+
+
+def test_bulk_reanalyze_preview_and_apply(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1006
+    save_user_draft(uid, [_draft_row(description="lidl"), _draft_row(description="fuel")])
+
+    ai_row = {
+        "date": "2024-06-15",
+        "value": 10.0,
+        "currency": "PLN",
+        "type": "Expense",
+        "category": "Transport",
+        "description": "fuel",
+    }
+    with patch("web.routes.drafts.parse_quick", return_value=ai_row):
+        preview_resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+                "ai_instruction": "Map unknown categories to nearest",
+            },
+            follow_redirects=False,
+        )
+    assert preview_resp.status_code == 303
+
+    rows = load_user_draft(uid)
+    assert "_ai_preview" in rows[0]
+    assert rows[0]["_ai_preview"]["status"] == "changed"
+
+    apply_resp = client.post(
+        f"/drafts/{uid}/bulk-update",
+        data={
+            "action": "apply_ai_preview",
+            "row_idx": ["0"],
+        },
+        follow_redirects=False,
+    )
+    assert apply_resp.status_code == 303
+    rows_after = load_user_draft(uid)
+    assert rows_after[0]["category"] == "Transport"
+    assert "_ai_preview" not in rows_after[0]
+
+
+def test_bulk_reanalyze_preview_enforces_selection_cap(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1007
+    save_user_draft(uid, [_draft_row(description=f"row {i}") for i in range(21)])
+
+    idxs = [str(i) for i in range(21)]
+    resp = client.post(
+        f"/drafts/{uid}/bulk-update",
+        data={
+            "action": "preview_ai",
+            "row_idx": idxs,
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert "Select at most 20 rows" in resp.headers.get("location", "")
+
+
+def test_single_row_update_allows_unscoped_category_types(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1008
+    save_user_draft(uid, [_draft_row(type="Income", category="Groceries")])
+
+    # Categories in _seed_reference_db have no category_type metadata, so they
+    # must remain selectable for all txn types instead of being forced to Expense.
+    resp = client.post(
+        f"/drafts/{uid}/row/0/update",
+        data={
+            "date": "2024-06-15",
+            "value": "10",
+            "currency": "PLN",
+            "type": "Income",
+            "category": "Transport",
+            "person": "",
+            "description": "income row",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    rows = load_user_draft(uid)
+    assert rows[0]["category"] == "Transport"
+
+
+def test_reanalyze_preview_marks_invalid_signal(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1009
+    save_user_draft(uid, [_draft_row(type="Income", category="Groceries")])
+
+    ai_row = {
+        "date": "2024-06-15",
+        "value": 10.0,
+        "currency": "PLN",
+        "type": "Income",
+        "category": "Transport",
+        "description": "income mismatch",
+    }
+    with patch("web.routes.drafts.parse_quick", return_value=ai_row):
+        resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+            },
+            follow_redirects=False,
+        )
+    assert resp.status_code == 303
+    rows = load_user_draft(uid)
+    assert "_ai_preview" in rows[0]
+    assert isinstance(rows[0]["_ai_preview"].get("is_invalid"), bool)
+
+
+def test_reanalyze_preview_timeout_sets_row_reason(monkeypatch, tmp_path):
+    client = _client(monkeypatch, tmp_path)
+    uid = 1010
+    save_user_draft(uid, [_draft_row(description="slow ai")])
+
+    import web.routes.drafts as drafts_route
+    monkeypatch.setattr(drafts_route, "_REANALYZE_TIMEOUT_S", 0.01)
+
+    def _slow_parse(*_args, **_kwargs):
+        time.sleep(0.05)
+        return {"type": "Expense", "category": "Groceries"}
+
+    with patch("web.routes.drafts.parse_quick", side_effect=_slow_parse):
+        resp = client.post(
+            f"/drafts/{uid}/bulk-update",
+            data={
+                "action": "preview_ai",
+                "row_idx": ["0"],
+            },
+            follow_redirects=False,
+        )
+
+    assert resp.status_code == 303
+    rows = load_user_draft(uid)
+    assert rows[0]["_ai_preview"]["status"] == "unchanged"
+    assert "timed out" in rows[0]["_ai_preview"]["reason"].lower()

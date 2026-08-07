@@ -24,13 +24,72 @@ from validators import resolve_fallback_category
 log = logging.getLogger(__name__)
 
 
+def _parse_time_hhmm(raw: str) -> time:
+    text = str(raw or "").strip()
+    hh, mm = text.split(":", 1)
+    return time(int(hh), int(mm))
+
+
+def _parse_peak_windows_utc(raw: str) -> list[tuple[time, time]]:
+    windows: list[tuple[time, time]] = []
+    for chunk in str(raw or "").split(","):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        if "-" not in piece:
+            continue
+        start_raw, end_raw = piece.split("-", 1)
+        try:
+            windows.append((_parse_time_hhmm(start_raw), _parse_time_hhmm(end_raw)))
+        except Exception:
+            continue
+    return windows
+
+
+def _in_window(now_utc: time, start: time, end: time) -> bool:
+    if start < end:
+        return start <= now_utc < end
+    # Cross-midnight window.
+    return now_utc >= start or now_utc < end
+
+
+def get_peak_hours_status(provider_name: str | None = None) -> dict:
+    """Return provider peak-hour status and user-facing message."""
+    provider = str(provider_name or settings.AI_PROVIDER or "").strip().lower()
+    now_utc = datetime.utcnow().time()
+
+    if provider != "deepseek":
+        return {
+            "provider": provider or "unknown",
+            "known": False,
+            "is_peak": None,
+            "message": (
+                f"I can't detect peak hours for {provider or 'unknown provider'}; "
+                "please check manually to avoid overusage."
+            ),
+        }
+
+    windows = _parse_peak_windows_utc(settings.DEEPSEEK_PEAK_WINDOWS_UTC)
+    is_peak = any(_in_window(now_utc, start, end) for start, end in windows)
+    label = settings.DEEPSEEK_PEAK_WINDOWS_UTC
+    return {
+        "provider": provider,
+        "known": True,
+        "is_peak": is_peak,
+        "message": (
+            f"DeepSeek peak hours now (UTC windows: {label})."
+            if is_peak else
+            f"DeepSeek off-peak now (UTC windows: {label})."
+        ),
+    }
+
+
 def is_off_peak() -> bool:
-    """Return True if current UTC time is in the DeepSeek off-peak window (16:30–00:30 UTC)."""
-    now = datetime.utcnow().time()
-    start = time(16, 30)
-    end = time(0, 30)
-    # Window crosses midnight: 16:30–23:59 OR 00:00–00:30
-    return now >= start or now < end
+    """Compatibility helper: True when provider is currently outside known peak windows."""
+    status = get_peak_hours_status()
+    if not status.get("known"):
+        return True
+    return not bool(status.get("is_peak"))
 
 
 def _strip_fences(raw: str) -> str:

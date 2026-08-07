@@ -19,6 +19,7 @@ from ai_parser import (
     _salvage_rows,
     _PARSE_SYSTEM_PROMPT,
     _QUICK_SYSTEM_PROMPT,
+    get_peak_hours_status,
     is_off_peak,
     ParsedTransaction,
 )
@@ -547,14 +548,20 @@ def _mock_utcnow(h: int, m: int):
 
 
 @pytest.mark.parametrize("h,m,expected", [
-    (17, 0,  True),   # 17:00 UTC — inside window
-    (0,  15, True),   # 00:15 UTC — inside window (after-midnight segment)
-    (12, 0,  False),  # 12:00 UTC — outside window
-    (0,  31, False),  # 00:31 UTC — just past the window end
+    (2, 30,  False),  # 01:00-04:00 peak window
+    (7, 0,   False),  # 06:00-10:00 peak window
+    (12, 0,  True),   # off-peak
+    (0, 30,  True),   # off-peak before first peak window
 ])
 def test_is_off_peak(h, m, expected):
-    with _mock_utcnow(h, m):
+    with _mock_utcnow(h, m), patch("ai_parser.settings.DEEPSEEK_PEAK_WINDOWS_UTC", "01:00-04:00,06:00-10:00"):
         assert is_off_peak() == expected
+
+
+def test_get_peak_hours_status_unknown_provider_returns_guidance():
+    status = get_peak_hours_status("openai")
+    assert status["known"] is False
+    assert "can't detect peak hours" in status["message"]
 
 
 # ── ParsedTransaction Pydantic model ─────────────────────────────────────────
