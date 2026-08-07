@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 
 _BULK_FIELDS = ("category", "person", "type", "currency")
 _BULK_ACTIONS = (
-    "set_field", "drop", "restore", "preview_ai", "apply_ai_preview", "clear_ai_preview"
+    "set_field", "drop", "restore", "preview_ai", "apply_ai_preview", "clear_ai_preview",
+    "save_all_valid",
 )
 _REANALYZE_MAX_ROWS = 20
 _REANALYZE_MAX_PARALLEL = 4
@@ -156,6 +157,7 @@ def _redirect(
     msg: str,
     level: str = "success",
     row_error: int | None = None,
+    selected: str = "",
 ) -> RedirectResponse:
     params = {}
     if user_id is not None:
@@ -165,6 +167,8 @@ def _redirect(
         params["level"] = level
     if row_error is not None:
         params["row_error"] = int(row_error)
+    if selected:
+        params["selected"] = selected
     url = "/drafts"
     if params:
         url = f"/drafts?{urlencode(params)}"
@@ -316,12 +320,57 @@ async def drafts_bulk_update(request: Request, user_id: int):
     category_types = load_category_types()
     categories_by_type = _build_categories_by_type(ref, category_types)
     action = str(form.get("action", "")).strip()
+    selected = str(request.query_params.get("selected", "")).strip()
     if action not in _BULK_ACTIONS:
-        return _redirect(user_id, "Unknown action.", "error")
+        return _redirect(user_id, "Unknown action.", "error", selected)
+
+    if action == "save_all_valid":
+        import datetime
+        from models import Transaction
+        from file_storage import append_transactions_batch
+
+        to_save: list[Transaction] = []
+        to_save_indices: list[int] = []
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            if row.get("dropped") or row.get("invalid"):
+                continue
+            try:
+                txn = Transaction(
+                    date=datetime.date.fromisoformat(str(row.get("date", ""))),
+                    value=float(row.get("value", 0)),
+                    currency=str(row.get("currency", "") or ""),
+                    transaction_type=str(row.get("type", "Expense") or "Expense"),
+                    category=str(row.get("category", "") or ""),
+                    person=str(row.get("person", "") or ""),
+                    description=str(row.get("description", "") or ""),
+                )
+                to_save.append(txn)
+                to_save_indices.append(i)
+            except Exception as exc:
+                log.warning("save_all_valid: skipping row %d due to error: %s", i, exc)
+
+        if not to_save:
+            return _redirect(user_id, "No valid rows to save.", "error", selected)
+
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, append_transactions_batch, to_save)
+        except Exception as exc:
+            log.error("save_all_valid: batch write failed: %s", exc, exc_info=True)
+            return _redirect(user_id, f"Save failed: {exc}", "error", selected)
+
+        # Remove saved rows (in reverse order to preserve indices)
+        for i in sorted(to_save_indices, reverse=True):
+            rows.pop(i)
+        save_user_draft(user_id, rows)
+        log.info("save_all_valid: user=%s saved=%d remaining=%d", user_id, len(to_save), len(rows))
+        return _redirect(user_id, f"Saved {len(to_save)} row(s).", selected=selected)
 
     idxs = _parse_selected_indices(list(form.getlist("row_idx")), len(rows))
     if not idxs:
-        return _redirect(user_id, "Select at least one row first.", "error")
+        return _redirect(user_id, "Select at least one row first.", "error", selected)
 
     if action == "preview_ai":
         if len(idxs) > _REANALYZE_MAX_ROWS:
@@ -329,6 +378,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 user_id,
                 f"Select at most {_REANALYZE_MAX_ROWS} rows for AI preview.",
                 "error",
+                selected,
             )
         instruction = str(form.get("ai_instruction", "")).strip()
         loop = asyncio.get_running_loop()
@@ -438,6 +488,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 f"{reason_suffix}"
             ),
             level,
+            selected,
         )
 
     if action == "apply_ai_preview":
@@ -464,7 +515,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
             row.pop("_ai_preview", None)
             applied += 1
         save_user_draft(user_id, rows)
-        return _redirect(user_id, f"Applied AI preview to {applied} row(s).")
+        return _redirect(user_id, f"Applied AI preview to {applied} row(s).", selected=selected)
 
     if action == "clear_ai_preview":
         cleared = 0
@@ -475,15 +526,15 @@ async def drafts_bulk_update(request: Request, user_id: int):
             if row.pop("_ai_preview", None) is not None:
                 cleared += 1
         save_user_draft(user_id, rows)
-        return _redirect(user_id, f"Cleared AI preview on {cleared} row(s).")
+        return _redirect(user_id, f"Cleared AI preview on {cleared} row(s).", selected=selected)
 
     if action == "set_field":
         field = str(form.get("bulk_field", "")).strip()
         value = str(form.get("bulk_value", "")).strip()
         if field not in _BULK_FIELDS:
-            return _redirect(user_id, "Choose a valid field.", "error")
+            return _redirect(user_id, "Choose a valid field.", "error", selected)
         if not value:
-            return _redirect(user_id, "Choose a value.", "error")
+            return _redirect(user_id, "Choose a value.", "error", selected)
 
         allowed = {
             "category": set(ref["categories"]),
@@ -492,7 +543,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
             "currency": set(ref.get("currencies") or []),
         }[field]
         if value not in allowed:
-            return _redirect(user_id, f"Invalid {field}: {value}", "error")
+            return _redirect(user_id, f"Invalid {field}: {value}", "error", selected)
 
         if field == "category":
             mismatched_rows = 0
@@ -509,6 +560,7 @@ async def drafts_bulk_update(request: Request, user_id: int):
                     user_id,
                     f"Category '{value}' does not match transaction type for {mismatched_rows} selected row(s).",
                     "error",
+                    selected,
                 )
 
         for idx in idxs:
@@ -516,14 +568,14 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 rows[idx][field] = value
                 _revalidate_draft_row(rows[idx], ref)
         save_user_draft(user_id, rows)
-        return _redirect(user_id, f"Updated {len(idxs)} row(s): set {field} = {value}.")
+        return _redirect(user_id, f"Updated {len(idxs)} row(s): set {field} = {value}.", selected=selected)
 
     if action == "drop":
         for idx in idxs:
             if isinstance(rows[idx], dict):
                 rows[idx]["dropped"] = True
         save_user_draft(user_id, rows)
-        return _redirect(user_id, f"Dropped {len(idxs)} row(s).")
+        return _redirect(user_id, f"Dropped {len(idxs)} row(s).", selected=selected)
 
     # action == "restore"
     restored = 0
@@ -533,17 +585,18 @@ async def drafts_bulk_update(request: Request, user_id: int):
                 restored += 1
             _revalidate_draft_row(rows[idx], ref)
     save_user_draft(user_id, rows)
-    return _redirect(user_id, f"Restored {restored} row(s).")
+    return _redirect(user_id, f"Restored {restored} row(s).", selected=selected)
 
 
 @router.post("/drafts/{user_id}/row/{row_idx}/update", dependencies=[Depends(require_session)])
 async def drafts_row_update(request: Request, user_id: int, row_idx: int):
     """Single-row edit path for Drafts UI."""
     rows = load_user_draft(user_id)
+    selected = str(request.query_params.get("selected", "")).strip()
     if not rows:
-        return _redirect(user_id, "Draft not found.", "error")
+        return _redirect(user_id, "Draft not found.", "error", selected)
     if row_idx < 0 or row_idx >= len(rows) or not isinstance(rows[row_idx], dict):
-        return _redirect(user_id, "Row not found.", "error")
+        return _redirect(user_id, "Row not found.", "error", selected)
 
     form = await request.form()
     row = rows[row_idx]
@@ -567,22 +620,24 @@ async def drafts_row_update(request: Request, user_id: int, row_idx: int):
             f"Category '{updated['category']}' does not match type '{updated['type']}'.",
             "error",
             row_error=row_idx,
+            selected=selected,
         )
 
     row.update(updated)
     _revalidate_draft_row(row, ref)
     save_user_draft(user_id, rows)
-    return _redirect(user_id, f"Updated row {row_idx + 1}.")
+    return _redirect(user_id, f"Updated row {row_idx + 1}.", selected=selected)
 
 
 @router.post("/drafts/{user_id}/row/{row_idx}/toggle-drop", dependencies=[Depends(require_session)])
-async def drafts_row_toggle_drop(user_id: int, row_idx: int):
+async def drafts_row_toggle_drop(request: Request, user_id: int, row_idx: int):
     """Single-row drop/restore toggle."""
+    selected = str(request.query_params.get("selected", "")).strip()
     rows = load_user_draft(user_id)
     if not rows:
-        return _redirect(user_id, "Draft not found.", "error")
+        return _redirect(user_id, "Draft not found.", "error", selected)
     if row_idx < 0 or row_idx >= len(rows) or not isinstance(rows[row_idx], dict):
-        return _redirect(user_id, "Row not found.", "error")
+        return _redirect(user_id, "Row not found.", "error", selected)
 
     row = rows[row_idx]
     if row.get("dropped"):
@@ -592,7 +647,7 @@ async def drafts_row_toggle_drop(user_id: int, row_idx: int):
         row["dropped"] = True
         action = "dropped"
     save_user_draft(user_id, rows)
-    return _redirect(user_id, f"Row {row_idx + 1} {action}.")
+    return _redirect(user_id, f"Row {row_idx + 1} {action}.", selected=selected)
 
 
 @router.post("/drafts/{user_id}/row/{row_idx}/apply-ai-preview", dependencies=[Depends(require_session)])
