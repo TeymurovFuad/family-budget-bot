@@ -292,6 +292,13 @@
     restoreSelectionsFromUrl();
   }
 
+  // Single-row forms: append ?selected= so server preserves selection state
+  document.querySelectorAll('.draft-row-single-form').forEach(function(form) {
+    form.addEventListener('submit', function() {
+      appendSelectedToActionUrl(form);
+    });
+  });
+
   // Mobile collapsed rows — tap summary bar to expand/collapse
   document.querySelectorAll('.draft-row-summary-toggle').forEach(function(btn) {
     btn.addEventListener('click', function() {

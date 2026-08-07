@@ -247,15 +247,15 @@
             </td>
             <td class="draft-cell draft-cell--actions draft-actions-col" data-label="Actions">
               <div class="draft-row-actions">
-                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update">
+                <form id="draft-row-{{ loop.index0 }}" method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/update" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--primary">✓ Save row</button>
                   {% if row_error == loop.index0 | string %}<span class="draft-row-save-error error-msg">{{ msg }}</span>{% endif %}
                 </form>
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop">
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/toggle-drop" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--ghost">{{ '↩ Restore' if row.get('dropped') else '🗑 Drop' }}</button>
                 </form>
                 {% if row.get('_ai_preview') and row.get('_ai_preview').get('status') == 'changed' %}
-                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview">
+                <form method="post" action="/drafts/{{ selected_user_id }}/row/{{ loop.index0 }}/apply-ai-preview" class="draft-row-single-form">
                   <button type="submit" class="btn btn--sm btn--accent">✓ Apply AI</button>
                 </form>
                 {% endif %}
