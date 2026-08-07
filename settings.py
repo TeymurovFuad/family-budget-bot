@@ -6,7 +6,9 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True lets .env values win over any stale system/service env vars
+# (the default override=False silently ignores .env when the var is already set).
+load_dotenv(override=True)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_ROOT / "data"
