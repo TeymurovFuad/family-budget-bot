@@ -908,8 +908,10 @@ dialog.modal::backdrop {
   }
   .draft-bulk-row select,
   .draft-bulk-row input,
-  .draft-bulk-row .btn,
   .draft-bulk-row .draft-input {
+    width: 100%;
+  }
+  .draft-bulk-row .btn {
     width: 100%;
     min-height: 2.75rem;
   }
@@ -960,7 +962,6 @@ dialog.modal::backdrop {
     justify-content: flex-start;
     padding-top: var(--space-1);
   }
-  .draft-input,
   .draft-actions-col .btn { min-height: 2.75rem; }
   .draft-row-actions { flex-direction: column; }
   .draft-row-actions .btn { width: 100%; }
