@@ -1187,6 +1187,7 @@ dialog.modal::backdrop {
   /* Compact tip text on mobile */
   .draft-bulk-tip { font-size: var(--fs-xs); }
 }
+HEAD
 
 /* ── Summary page redesign ───────────────────────────────────────────────── */
 
@@ -1437,4 +1438,40 @@ dialog.modal::backdrop {
 @media (max-width: 48rem) {
   .report-cat-count { display: none; }
   .report-person-col { display: none; }
+
+/* ── Logs page ── */
+.logs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+.logs-summary { margin-bottom: var(--space-2); font-size: var(--fs-sm); }
+.log-list { display: flex; flex-direction: column; gap: var(--space-1); }
+.log-entry {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 0 var(--space-2);
+  align-items: baseline;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  border-left: 3px solid transparent;
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+.log-entry.log-error  { border-left-color: var(--money-neg); }
+.log-entry.log-warning{ border-left-color: var(--warn); }
+.log-ts     { color: var(--muted, #888); white-space: nowrap; font-size: var(--fs-xs, 0.7rem); }
+.log-level  { font-weight: 600; white-space: nowrap; }
+.log-entry.log-error  .log-level { color: var(--money-neg); }
+.log-entry.log-warning .log-level { color: var(--warn); }
+.log-logger { color: var(--muted, #888); font-size: var(--fs-xs, 0.7rem); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 14rem; }
+.log-msg    { margin: 0; grid-column: 1 / -1; overflow-wrap: break-word; word-break: break-word; white-space: pre-wrap; }
+.logs-page-nav { display: flex; gap: var(--space-2); align-items: center; margin-top: var(--space-3); }
+.logs-cap-note { font-size: var(--fs-xs, 0.7rem); opacity: 0.7; }
+
+@media (max-width: 48rem) {
+  .log-entry { grid-template-columns: 1fr; }
+  .log-ts, .log-level, .log-logger { display: inline; }
 }

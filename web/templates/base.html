@@ -19,6 +19,7 @@
   <a href="/drafts"{% if request.url.path.startswith('/drafts') %} class="nav-active"{% endif %}>Drafts</a>
   <a href="/cycles"{% if request.url.path.startswith('/cycles') %} class="nav-active"{% endif %}>Cycles</a>
   <a href="/settings"{% if request.url.path.startswith('/settings') %} class="nav-active"{% endif %}>Settings</a>
+  <a href="/logs"{% if request.url.path.startswith('/logs') %} class="nav-active"{% endif %}>Logs</a>
   <div class="nav-actions">
     {% set active_currency = session_currency(request) %}
     <form method="post" action="/currency" class="currency-switcher">
