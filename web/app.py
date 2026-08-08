@@ -47,6 +47,17 @@ def create_app() -> FastAPI:
     init_logging()
     validate_web_settings()  # fail closed — no password/secret, no app
 
+    # One-time DB schema init at startup — avoids re-running CREATE TABLE IF
+    # NOT EXISTS DDL on every _conn() call (8 statements × 4-5 calls/request).
+    import settings as _settings
+    import sqlite_ops as _sqlite_ops
+    import storage_facade as _sf
+    try:
+        _sqlite_ops.init_db(_settings.SQLITE_DB_PATH)
+        _sf._db_initialized = True
+    except Exception:
+        pass  # DB may not exist yet on first boot; _conn() falls back to init_db
+
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.templates = Jinja2Templates(directory=str(_WEB_DIR / "templates"))
     # Nav-level currency switcher (base.html) — resolved per request without
