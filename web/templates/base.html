@@ -29,8 +29,8 @@
       </select>
       <noscript><button type="submit">Set</button></noscript>
     </form>
-    {# Theme toggle: plain POST + full-page reload, like the currency
-       switcher. No preference set ⇒ button targets "dark". #}
+    {# Theme toggle — JS intercepts and switches instantly (no reload).
+       Falls back to plain POST on no-JS. #}
     <form method="post" action="/theme" class="theme-toggle">
       <button type="submit" name="theme" value="{{ 'light' if session_theme(request) == 'dark' else 'dark' }}"
               aria-label="Switch to {{ 'light' if session_theme(request) == 'dark' else 'dark' }} theme"
@@ -41,6 +41,32 @@
         </svg>
       </button>
     </form>
+    <script>
+    (function () {
+      var form = document.querySelector('.theme-toggle');
+      if (!form) return;
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var btn = form.querySelector('[name="theme"]');
+        if (!btn) return;
+        var next = btn.value; // the theme we are switching TO
+        // Apply instantly — CSS responds to data-theme on <html>.
+        document.documentElement.setAttribute('data-theme', next);
+        // Flip button so next click goes the other way.
+        var after = next === 'dark' ? 'light' : 'dark';
+        btn.value = after;
+        btn.setAttribute('aria-label', 'Switch to ' + after + ' theme');
+        // Persist preference in the session cookie without reloading the page.
+        var params = new URLSearchParams();
+        params.append('theme', next);
+        fetch('/theme', {
+          method: 'POST',
+          body: params,
+          credentials: 'same-origin',
+        }).catch(function () { /* ignore — visual toggle already applied */ });
+      });
+    })();
+    </script>
     <form method="post" action="/logout"><button type="submit">Log out</button></form>
   </div>
 </nav>
