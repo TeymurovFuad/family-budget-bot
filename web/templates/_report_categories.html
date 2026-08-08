@@ -10,7 +10,8 @@
   <div class="cat-bar-track">
     <div class="cat-bar-fill"
          style="width: {{ (cat.pct_of_expense * 100) | round(1) }}%;
-                background: var(--cat-{{ cat.color_idx }})"></div>
+                background: {% if cat.pct_of_budget is not none and cat.pct_of_budget > 1.0 %}var(--money-neg){% else %}var(--cat-{{ cat.color_idx }}){% endif %}"
+         title="{{ cat.name }}: {{ '%.2f'|format(cat.spend) }} {{ currency }} ({{ (cat.pct_of_expense * 100)|round(1) }}% of expenses)"></div>
     {# Budget tick marker #}
     {% if cat.budget and cat.budget > 0 and cat.spend > 0 %}
     {% set tick_pos = [(cat.budget / (cat.spend / cat.pct_of_expense) * 100) | round(1), 100] | min %}

@@ -45,7 +45,25 @@
       {% endfor %}
     </select>
 
-    <button type="submit" class="btn btn--primary">Apply</button>
+    <div class="filter-group">
+      <label>Category</label>
+      <select name="category" multiple size="4" aria-label="Filter by category">
+        {% for cat in categories_list %}
+        <option value="{{ cat }}" {% if cat in active_filters.categories %}selected{% endif %}>{{ cat }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label for="rpt-date-from">From</label>
+      <input type="date" id="rpt-date-from" name="date_from" value="{{ active_filters.date_from or '' }}">
+    </div>
+    <div class="filter-group">
+      <label for="rpt-date-to">To</label>
+      <input type="date" id="rpt-date-to" name="date_to" value="{{ active_filters.date_to or '' }}">
+    </div>
+
+    <button type="submit" class="btn btn--primary">Apply filters</button>
   </div>
 
   {# Period prev/next nav #}
@@ -78,8 +96,13 @@
   {{ chip(active_filters.person, clear_url="/report?type=" ~ active_filters.type) }}
   {% endif %}
   {% for cat in active_filters.categories %}
-  {% set remaining_cats = active_filters.categories | reject("equalto", cat) | list %}
-  {{ chip(cat, clear_url="/report?type=" ~ active_filters.type ~ "&person=" ~ active_filters.person) }}
+  {% set ns = namespace(cat_params='') %}
+  {% for other_cat in active_filters.categories %}
+    {% if other_cat != cat %}
+      {% set ns.cat_params = ns.cat_params ~ '&category=' ~ other_cat %}
+    {% endif %}
+  {% endfor %}
+  {{ chip(cat, clear_url="/report?type=" ~ active_filters.type ~ "&person=" ~ active_filters.person ~ ns.cat_params) }}
   {% endfor %}
   <a class="chip chip--filter" href="/report">Clear all &times;</a>
 </div>

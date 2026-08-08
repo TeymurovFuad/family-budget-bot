@@ -1351,7 +1351,7 @@ dialog.modal::backdrop {
 
 /* ── Report page ─────────────────────────────────────────────────────────── */
 
-.toolbar--report { flex-wrap: wrap; gap: var(--space-2); }
+.toolbar--report { flex-wrap: wrap; gap: var(--space-2); position: sticky; top: 0; z-index: 10; background: var(--surface); }
 .report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
 @media (max-width: 48rem) { .report-grid { grid-template-columns: 1fr; } }
 

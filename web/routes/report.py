@@ -17,13 +17,16 @@ Provides a comprehensive analytics view for a selected period with:
 HTMX: full page on direct request, _report_content.html fragment on HX-Request.
 """
 
+import logging
 import zlib
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
+
+log = logging.getLogger(__name__)
 
 import settings
 from cycles import cycle_periods, salary_mask
@@ -162,6 +165,7 @@ def build_report_context(
     try:
         cat_budgets: dict[str, float] = load_category_budgets()
     except Exception:
+        log.warning("Failed to load category budgets", exc_info=True)
         cat_budgets = {}
 
     exp_sub = sub[sub["Type"] == "Expense"]
@@ -491,7 +495,7 @@ async def report(
     period: str = "",
     date_from: str = "",
     date_to: str = "",
-    type: str = "all",
+    txn_type: str = Query(default="all", alias="type"),
     person: str = "all",
     category: list[str] | None = None,
 ):
@@ -506,11 +510,13 @@ async def report(
             kwargs["date_to_param"] = jt
 
     ctx = build_report_context(
-        txn_type=type or "all",
+        txn_type=txn_type or "all",
         person=person or "all",
         categories=list(category) if category else [],
         **kwargs,
     )
+    ctx["active_filters"]["date_from"] = date_from
+    ctx["active_filters"]["date_to"] = date_to
     ctx = _apply_display_currency(ctx, get_session_currency(request))
 
     is_htmx = request.headers.get("HX-Request") == "true"
@@ -528,7 +534,7 @@ async def report_categories(
     period: str = "",
     date_from: str = "",
     date_to: str = "",
-    type: str = "all",
+    txn_type: str = Query(default="all", alias="type"),
     person: str = "all",
     category: list[str] | None = None,
 ):
@@ -543,7 +549,7 @@ async def report_categories(
             kwargs["date_to_param"] = jt
 
     ctx = build_report_context(
-        txn_type=type or "all",
+        txn_type=txn_type or "all",
         person=person or "all",
         categories=list(category) if category else [],
         **kwargs,
