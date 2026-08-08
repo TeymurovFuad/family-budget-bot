@@ -106,7 +106,7 @@
           <td>
             <span class="chip chip--cat" style="--cat: var(--cat-{{ row.color_idx }})">{{ row.name }}</span>
           </td>
-          {% for v in row.values %}
+          {% for v in row["values"] %}
           <td class="num">{% if v > 0 %}{{ amount(v, 'neg', ccy=currency, signed=false) }}{% else %}<span class="muted">—</span>{% endif %}</td>
           {% endfor %}
           <td class="num">
