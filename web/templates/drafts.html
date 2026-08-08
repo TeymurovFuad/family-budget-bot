@@ -43,7 +43,7 @@
 {% if selected_user_id is not none %}
   <div class="drafts-content">
     <form id="draft-bulk-form" class="draft-actions" method="post" action="/drafts/{{ selected_user_id }}/bulk-update" data-user-id="{{ selected_user_id }}">
-      <div class="bulk-bar bulk-bar--drafts" id="draft-bulk-bar" aria-live="polite">
+      <div class="bulk-bar bulk-bar--drafts" id="draft-bulk-bar">
 
         {# ── Selection header ── #}
         <div class="draft-bulk-header">
@@ -83,7 +83,7 @@
             <button type="button" class="btn btn--ghost" id="draft-preview-ai-btn" disabled onclick="submitBulkAction('preview_ai')">
               🔍 Re-analyze
             </button>
-            <span id="draft-ai-row-counter" class="draft-ai-row-counter">0 rows selected</span>
+            <span id="draft-ai-row-counter" class="draft-ai-row-counter" aria-live="off" aria-atomic="true">0 rows selected</span>
             <button type="button" class="btn btn--ghost btn--accent" id="draft-apply-preview-btn" disabled onclick="submitBulkAction('apply_ai_preview')">
               ✓ Apply AI
             </button>
@@ -182,6 +182,8 @@
                 <button type="button" class="draft-row-summary-toggle">
                   <span class="draft-summary-date">{{ _proposed.get('date') or row.get('date', '—') }}</span>
                   <span class="draft-summary-value">{{ _proposed.get('value') or row.get('value', '—') }} {{ _proposed.get('currency') or row.get('currency', '') }}</span>
+                  {% set _type = (_proposed.get('type') or row.get('type', '')) | lower %}
+                  <span class="draft-summary-type draft-summary-type--{{ _type }}">{{ (_proposed.get('type') or row.get('type', '')) }}</span>
                   {% if row.get('dropped') %}<span class="draft-summary-status draft-summary-status--dropped">Dropped</span>
                   {% elif row.get('invalid') %}<span class="draft-summary-status draft-summary-status--invalid">⚠ {{ row.get('invalid') }}</span>
                   {% elif _ps == 'changed' %}<span class="draft-summary-status draft-summary-status--ai">✏️ AI ready</span>

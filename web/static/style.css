@@ -869,12 +869,13 @@ dialog.modal::backdrop {
 .draft-row--ai-error   { border-left: 3px solid var(--money-neg); }
 
 /* ── SSE stream status badges ───────────────────────────────────────────────── */
-@keyframes draft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes draft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
 
 .draft-stream-badge {
   display: inline-block;
   font-size: var(--fs-xs);
   font-weight: 700;
+  transition: opacity 0.15s;
   padding: 1px var(--space-1);
   border-radius: var(--radius-sm);
   vertical-align: middle;
@@ -907,12 +908,13 @@ dialog.modal::backdrop {
   align-self: center;
 }
 
-/* AI row counter */
+/* AI row counter — fade-out transition when resetting after stream */
 .draft-ai-row-counter {
   font-size: var(--fs-sm);
   color: var(--ink-soft);
   white-space: nowrap;
   align-self: center;
+  transition: opacity 0.8s;
 }
 
 
@@ -989,6 +991,24 @@ dialog.modal::backdrop {
 .draft-summary-status--dropped { color: var(--ink-soft); }
 .draft-summary-status--ai      { color: var(--accent); }
 .draft-summary-status--error   { color: var(--money-neg); }
+
+/* Counter fade-out helper */
+.draft-ai-counter--fading { opacity: 0; }
+
+/* Type badge in collapsed summary bar */
+.draft-summary-type {
+  flex: 0 0 auto;
+  font-size: var(--fs-xs);
+  padding: 0 .3rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.draft-summary-type--income   { background: var(--accent-soft); color: var(--accent); }
+.draft-summary-type--expense  { background: light-dark(#fde8e6, #2a1a19); color: var(--money-neg); }
+.draft-summary-type--saving   { background: light-dark(#dbeafe, #172036); color: var(--money-save); }
 .draft-summary-chevron  {
   flex: 0 0 auto;
   display: inline-flex;

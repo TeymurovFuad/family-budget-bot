@@ -377,6 +377,9 @@
   }
 
   // ── SSE re-analyze stream ────────────────────────────────────────────────────
+  // Tracks the open EventSource so a second click closes the first stream before
+  // opening a new one — prevents concurrent save_user_draft races (Tester #5).
+  var _activeStream = null;
 
   // Map SSE status → text shown inside the status cell (expanded row view).
   function _streamBadgeText(status) {
@@ -482,6 +485,7 @@
         applyBtn.type = 'submit';
         applyBtn.className = 'btn btn--sm btn--accent';
         applyBtn.textContent = '✓ Apply AI';
+        applyBtn.setAttribute('aria-label', 'Apply AI changes');
         applyForm.appendChild(applyBtn);
         actionsDiv.appendChild(applyForm);
         // Register ?selected= appender so server preserves selection state.
@@ -522,9 +526,22 @@
       previewBtn.textContent = '⏳ Analysing…';
     }
     var counter = byId('draft-ai-row-counter');
-    if (counter) counter.textContent = 'Analysing… 0 / ' + total;
+    // Silence aria-live during high-frequency stream updates to avoid flooding
+    // screen readers (Designer #6a). Flip back to polite at stream end.
+    if (counter) {
+      counter.setAttribute('aria-live', 'off');
+      counter.textContent = 'Analysing… 0 / ' + total;
+    }
+
+    // Close any prior stream before opening a new one (prevents duplicate
+    // concurrent streams and save_user_draft races on double-click).
+    if (_activeStream) {
+      _activeStream.close();
+      _activeStream = null;
+    }
 
     var es = new EventSource(url);
+    _activeStream = es;
 
     es.addEventListener('analyzing', function(e) {
       try {
@@ -546,6 +563,7 @@
 
     es.addEventListener('done', function(e) {
       es.close();
+      _activeStream = null;
       _onStreamFinished(previewBtn, counter, total, e.data);
     });
 
@@ -560,6 +578,7 @@
         }
       }
       es.close();
+      _activeStream = null;
       _onStreamError(idxs, previewBtn, counter);
     });
 
@@ -567,6 +586,7 @@
     es.onerror = function() {
       if (es.readyState === EventSource.CLOSED) return;
       es.close();
+      _activeStream = null;
       _onStreamError(idxs, previewBtn, counter);
     };
   }
@@ -588,10 +608,22 @@
       if (parts.length) summary = 'Done — ' + parts.join(' · ');
     } catch (_) {}
     if (counter) {
+      // Re-enable aria-live now that the stream is done — screen reader announces
+      // the final summary once (Designer #6a).
+      counter.setAttribute('aria-live', 'polite');
+      counter.setAttribute('aria-atomic', 'true');
       counter.textContent = summary;
+      // Fade out after 6s, then reset to selection count.
       setTimeout(function() {
-        if (counter) counter.textContent = selectedIndices().length + ' row' + (selectedIndices().length === 1 ? '' : 's') + ' selected';
-      }, 4000);
+        counter.classList.add('draft-ai-counter--fading');
+        setTimeout(function() {
+          counter.classList.remove('draft-ai-counter--fading');
+          counter.setAttribute('aria-live', 'off');
+          counter.removeAttribute('aria-atomic');
+          var n = selectedIndices().length;
+          counter.textContent = n + ' row' + (n === 1 ? '' : 's') + ' selected';
+        }, 800); // match CSS fade duration
+      }, 6000);
     }
     updateBulkBar();
   }

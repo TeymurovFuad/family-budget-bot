@@ -322,7 +322,7 @@ async def drafts_reanalyze_stream(request: Request, user_id: int):
     if not rows:
         async def _err():
             yield f'event: error\ndata: {json.dumps({"message": "Draft not found."})}\n\n'
-        return StreamingResponse(_err(), media_type="text/event-stream",
+        return StreamingResponse(_err(), media_type="text/event-stream; charset=utf-8",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     ref = load_reference_data()
@@ -335,7 +335,7 @@ async def drafts_reanalyze_stream(request: Request, user_id: int):
     if not idxs:
         async def _no_rows():
             yield f'event: error\ndata: {json.dumps({"message": "No rows selected."})}\n\n'
-        return StreamingResponse(_no_rows(), media_type="text/event-stream",
+        return StreamingResponse(_no_rows(), media_type="text/event-stream; charset=utf-8",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     async def generate():
@@ -439,7 +439,7 @@ async def drafts_reanalyze_stream(request: Request, user_id: int):
 
     return StreamingResponse(
         generate(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
