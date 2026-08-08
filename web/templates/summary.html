@@ -138,13 +138,16 @@
   <h3 class="section-heading">📊 Income Allocation</h3>
   <div class="income-bar" role="img"
        aria-label="Of income: {{ exp_pct2 }}% spent, {{ sav_pct2 }}% saved, {{ free_pct }}% free">
-    <span class="seg seg-expense" style="width: {{ [exp_pct2, 100]|min }}%">
+    <span class="seg seg-expense" style="width: {{ [exp_pct2, 100]|min }}%"
+          title="Expenses: {{ exp_pct2 }}% ({{ '%.2f'|format(sel.expense) }} {{ currency }})">
       {% if exp_pct2 >= 12 %}<span class="seg-label">{{ exp_pct2 }}%</span>{% endif %}
     </span>
-    <span class="seg seg-savings" style="width: {{ [sav_pct2, [100 - exp_pct2, 0]|max]|min }}%">
+    <span class="seg seg-savings" style="width: {{ [sav_pct2, [100 - exp_pct2, 0]|max]|min }}%"
+          title="Savings: {{ sav_pct2 }}% ({{ '%.2f'|format(sel.savings) }} {{ currency }})">
       {% if sav_pct2 >= 10 %}<span class="seg-label">{{ sav_pct2 }}%</span>{% endif %}
     </span>
-    <span class="seg seg-free" style="width: {{ [free_pct, [100 - exp_pct2 - sav_pct2, 0]|max]|min }}%">
+    <span class="seg seg-free" style="width: {{ [free_pct, [100 - exp_pct2 - sav_pct2, 0]|max]|min }}%"
+          title="Free: {{ free_pct }}% ({{ '%.2f'|format(sel.income - sel.expense - sel.savings) }} {{ currency }})">
       {% if free_pct >= 8 %}<span class="seg-label">{{ free_pct }}%</span>{% endif %}
     </span>
   </div>
@@ -212,9 +215,10 @@
       <span class="cat-name">{{ row.category }}</span>
       <span class="cat-amount">{{ amount(row.amount, 'neg' if row.over else 'neutral', ccy=currency, signed=false) }}</span>
     </div>
-    <div class="cat-bar-track" role="img" aria-label="{{ row.category }}: {{ row.pct_of_exp|round(0)|int }}% of expenses">
+    <div class="cat-bar-track" role="img" aria-label="{{ row.category }}: {{ '%.2f'|format(row.amount) }} {{ currency }} — {{ row.pct_of_exp|round(0)|int }}% of expenses">
       <span class="cat-bar-fill {{ 'cat-bar-over' if row.over else '' }}"
-            style="width: {{ bar_pct }}%; --cat-clr: var(--cat-{{ row.color_idx }})"></span>
+            style="width: {{ bar_pct }}%; --cat-clr: var(--cat-{{ row.color_idx }})"
+            title="{{ row.category }}: {{ '%.2f'|format(row.amount) }} {{ currency }} ({{ row.pct_of_exp|round(1) }}% of expenses)"></span>
       {% if bgt_pct is not none %}
       <span class="cat-budget-tick" style="left: {{ [bgt_pct, 100]|min }}%"
             title="Budget: {{ row.budget|round(2) }} {{ currency }}"></span>
@@ -268,13 +272,13 @@
     <text x="{{ xi|round(1) }}" y="{{ H - 1 }}" text-anchor="middle" font-size="7" fill="var(--ink-soft)">{{ p.label[:3] }}</text>
     {% endfor %}
     <circle cx="{{ lx|round(1) }}" cy="{{ ly_inc|round(1) }}" r="4" fill="var(--money-pos)">
-      <title>Income {{ last.income|round(2) }}</title>
+      <title>Income {{ '%.2f'|format(last.income) }} {{ currency }}</title>
     </circle>
     <circle cx="{{ lx|round(1) }}" cy="{{ ly_exp|round(1) }}" r="4" fill="var(--money-neg)">
-      <title>Expense {{ last.expense|round(2) }}</title>
+      <title>Expense {{ '%.2f'|format(last.expense) }} {{ currency }}</title>
     </circle>
     <circle cx="{{ lx|round(1) }}" cy="{{ ly_sav|round(1) }}" r="4" fill="var(--money-save)">
-      <title>Savings {{ last.savings|round(2) }}</title>
+      <title>Savings {{ '%.2f'|format(last.savings) }} {{ currency }}</title>
     </circle>
   </svg>
   <div class="spark-legend">

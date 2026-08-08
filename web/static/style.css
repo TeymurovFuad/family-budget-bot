@@ -1310,7 +1310,7 @@ dialog.modal::backdrop {
 .cat-amount { font-size: var(--fs-sm); font-family: var(--font-num); white-space: nowrap; }
 .cat-row--over .cat-name   { color: var(--money-neg); }
 .cat-row--over .cat-amount { color: var(--money-neg); }
-.cat-bar-track { position: relative; height: 8px; border-radius: 99px; background: var(--surface-2); overflow: visible; }
+.cat-bar-track { position: relative; height: 8px; border-radius: 99px; background: var(--surface-2); overflow: visible; min-width: 0; }
 .cat-bar-fill  { display: block; height: 100%; border-radius: 99px; background: var(--cat-clr, var(--accent)); transition: width .3s ease; }
 .cat-bar-over  { background: var(--money-neg); }
 .cat-budget-tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--ink); opacity: 0.45; border-radius: 1px; transform: translateX(-50%); }

@@ -20,6 +20,7 @@ v2 additions (Ledger redesign):
 
 from datetime import date, datetime
 
+import pandas as pd
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
@@ -120,23 +121,20 @@ def apply_display_currency(ctx: dict, target: str) -> dict:
     return ctx
 
 
-def _category_breakdown(sel: dict, currency: str, top_n: int = 6) -> list[dict]:
+def _category_breakdown(sel: dict, df, currency: str, top_n: int = 6) -> list[dict]:
     """Top spending categories for the selected period."""
-    import pandas as pd
     from storage_facade import load_budgets
-    from web.currency import convert_from_base, load_rates
 
-    df = load_transactions()
     # Normalise date column to date objects
-    dates = pd.to_datetime(df["date"]).dt.date
+    dates = pd.to_datetime(df["Date"]).dt.date
     mask = (dates >= sel["start"]) & (dates <= sel["end"])
     period_df = df[mask]
     # Expense rows only — match however type is stored (capitalisation)
-    exp_df = period_df[period_df["type"].str.lower() == "expense"]
+    exp_df = period_df[period_df["Type"].str.lower() == "expense"]
     if exp_df.empty:
         return []
     grouped = (
-        exp_df.groupby("category")["value_base"]
+        exp_df.groupby("Category")["_base"]
         .sum()
         .sort_values(ascending=False)
         .head(top_n)
@@ -206,16 +204,15 @@ async def summary(request: Request, period: str = "",
     ctx = build_summary_context(**kwargs) if kwargs else build_summary_context()
     ctx = apply_display_currency(ctx, get_session_currency(request))
 
-    import pandas as pd
     sel = ctx["cards"][ctx["selected_index"]]
     prev = ctx["cards"][ctx["selected_index"] + 1] if ctx["selected_index"] + 1 < len(ctx["cards"]) else None
 
-    cat_rows = _category_breakdown(sel, ctx["currency"])
+    df_all = load_transactions()
+    cat_rows = _category_breakdown(sel, df_all, ctx["currency"])
     ctx["cat_rows"] = cat_rows
     ctx["warnings"] = _compute_warnings(sel, prev, cat_rows)
 
-    df_all = load_transactions()
-    dates_all = pd.to_datetime(df_all["date"]).dt.date
+    dates_all = pd.to_datetime(df_all["Date"]).dt.date
     ctx["txn_count"] = int(((dates_all >= sel["start"]) & (dates_all <= sel["end"])).sum())
 
     period_len = (sel["end"] - sel["start"]).days + 1

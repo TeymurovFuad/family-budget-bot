@@ -13,10 +13,10 @@
 </head>
 <body>
 <nav>
-  <a href="/">Summary</a>
-  <a href="/transactions">Transactions</a>
+  <a href="/"{% if request.url.path == '/' %} class="nav-active"{% endif %}>Summary</a>
+  <a href="/transactions"{% if request.url.path.startswith('/transactions') %} class="nav-active"{% endif %}>Transactions</a>
   <a href="/drafts"{% if request.url.path.startswith('/drafts') %} class="nav-active"{% endif %}>Drafts</a>
-  <a href="/cycles">Cycles</a>
+  <a href="/cycles"{% if request.url.path.startswith('/cycles') %} class="nav-active"{% endif %}>Cycles</a>
   <a href="/settings"{% if request.url.path.startswith('/settings') %} class="nav-active"{% endif %}>Settings</a>
   <div class="nav-actions">
     {% set active_currency = session_currency(request) %}
