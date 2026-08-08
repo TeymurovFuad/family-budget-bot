@@ -85,6 +85,9 @@ def _parse_and_filter(
     for line in lines:
         m = _LOG_RE.match(line.rstrip())
         if not m:
+            # Continuation line (e.g. traceback frame) — append to last entry.
+            if results:
+                results[-1]["message"] += "\n" + line.rstrip()
             continue
         ts, lvl, logger, message = m.group(1), m.group(2), m.group(3).strip(), m.group(4).strip()
         if keep_levels and lvl not in keep_levels:
@@ -110,7 +113,11 @@ async def logs_page(
     page: int = 1,
 ):
     today = _date.today().isoformat()
-    selected_date = date if date else today
+    # Validate date to prevent path traversal — only accept YYYY-MM-DD format.
+    if date and re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        selected_date = date
+    else:
+        selected_date = today
     if level not in ("WARNING", "ERROR", "ALL"):
         level = "WARNING"
     if page < 1:

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Logs{% endblock %}
+{% block title %}Application Logs{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Logs</h1>
+  <h1>Application Logs</h1>
 </div>
 
 <!-- Filter bar -->
@@ -16,14 +16,16 @@
   </div>
 
   <!-- Date selector -->
-  <select name="date" aria-label="Log date" onchange="this.form.submit()">
+  <select name="date" aria-label="Log date (most recent first)" onchange="this.form.submit()">
     {% for d in available_dates %}
-    <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
+    <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>
+      {{ d }}{% if loop.first %} (today){% endif %}
+    </option>
     {% endfor %}
   </select>
 
   <!-- Logger selector -->
-  <select name="logger_filter" aria-label="Logger" onchange="this.form.submit()">
+  <select name="logger_filter" aria-label="Filter by logger" onchange="this.form.submit()">
     <option value="" {% if not logger_filter %}selected{% endif %}>All loggers</option>
     {% for lg in loggers %}
     <option value="{{ lg }}" {% if logger_filter == lg %}selected{% endif %}>{{ lg }}</option>
@@ -31,20 +33,23 @@
   </select>
 
   <!-- Search input -->
-  <input type="search" name="q" value="{{ q }}" placeholder="Search messages…" aria-label="Search log messages">
+  <label class="sr-only" for="logs-q">Search</label>
+  <input type="search" id="logs-q" name="q" value="{{ q }}" placeholder="Search messages…" aria-label="Search log messages">
 
-  <!-- Preserve current level when date/logger changes -->
+  {# Level is carried by the chip buttons on click; for date/logger onchange submits,
+     preserve the current level via this hidden field. Since button values always
+     appear before hidden inputs in DOM serialisation order and FastAPI reads the
+     first occurrence, chip clicks shadow this field correctly. #}
   <input type="hidden" name="level" value="{{ level }}">
 </form>
 
 <!-- Count summary -->
 {% if file_missing %}
-<p class="muted">No log file for {{ selected_date }}.</p>
+<p class="muted">No log file found for {{ selected_date }}. The application may not have logged anything on this date, or the file may have been rotated. Try selecting a different date above.</p>
 {% else %}
-<p class="muted logs-summary">
-  {{ total_entries }} {{ level }} entr{{ 'y' if total_entries == 1 else 'ies' }}
-  {% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
-  {% if q %} matching <em>{{ q }}</em>{% endif %}
+<p class="muted logs-summary" aria-live="polite">
+  {{ total_entries }} {{ level }} entr{{ 'y' if total_entries == 1 else 'ies' }}{% if q %} matching <em>{{ q }}</em>{% endif %}{% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
+  <span class="logs-cap-note">(searched last 10,000 lines)</span>
 </p>
 
 <!-- Log table -->
@@ -61,10 +66,11 @@
 </div>
 
 <!-- Pagination -->
+{% set _pbase = "?level=" ~ level ~ "&date=" ~ selected_date ~ "&q=" ~ (q | urlencode) ~ "&logger_filter=" ~ (logger_filter | urlencode) %}
 <nav class="logs-page-nav">
-  {% if has_prev %}<a class="btn" href="?level={{ level }}&date={{ selected_date }}&q={{ q }}&logger_filter={{ logger_filter }}&page={{ page - 1 }}">← Newer</a>{% endif %}
-  <span class="muted">Page {{ page }} of {{ total_pages }}</span>
-  {% if has_next %}<a class="btn" href="?level={{ level }}&date={{ selected_date }}&q={{ q }}&logger_filter={{ logger_filter }}&page={{ page + 1 }}">Older →</a>{% endif %}
+  {% if has_prev %}<a class="btn" href="{{ _pbase }}&page={{ page - 1 }}" aria-label="Newer log entries, page {{ page - 1 }}">← Newer</a>{% endif %}
+  <span class="muted" aria-live="polite">Page {{ page }} of {{ total_pages }}</span>
+  {% if has_next %}<a class="btn" href="{{ _pbase }}&page={{ page + 1 }}" aria-label="Older log entries, page {{ page + 1 }}">Older →</a>{% endif %}
 </nav>
 {% else %}
 <p class="muted">No {{ level }} entries{% if q %} matching <em>{{ q }}</em>{% endif %} in this log file.</p>
