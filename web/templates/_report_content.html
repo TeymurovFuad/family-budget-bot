@@ -111,7 +111,7 @@
           {% endfor %}
           <td class="num">
             {# SVG sparkline #}
-            {% set pts = row.values %}
+            {% set pts = row["values"] %}
             {% set n = pts | length %}
             <svg width="80" height="24" viewBox="0 0 80 24" aria-hidden="true" style="overflow:visible">
               {% if n > 1 %}
