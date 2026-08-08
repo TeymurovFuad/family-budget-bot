@@ -973,6 +973,52 @@ def load_cycles() -> list[tuple]:
     return result
 
 
+def save_cycle_boundary(start_date, label: str) -> bool:
+    """
+    Add a new cycle boundary. start_date may be a date object or ISO string.
+    Returns True if inserted, False if that date already exists.
+    Invalidates the cycles cache.
+    """
+    iso = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    with _get_conn() as conn:
+        existing = {r["start_date"] for r in sqlite_ops.list_cycles(conn)}
+        if iso in existing:
+            return False
+        sqlite_ops.upsert_cycle(conn, iso, label)
+    global _CYCLES_CACHE
+    _CYCLES_CACHE = None
+    _schedule_excel_export()
+    return True
+
+
+def delete_cycle_boundary(start_date) -> bool:
+    """
+    Remove a cycle boundary by date. Returns True if a row was deleted.
+    Invalidates the cycles cache.
+    """
+    iso = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    with _get_conn() as conn:
+        result = sqlite_ops.delete_cycle(conn, iso)
+    global _CYCLES_CACHE
+    _CYCLES_CACHE = None
+    _schedule_excel_export()
+    return result
+
+
+def rename_cycle_boundary(start_date, new_label: str) -> bool:
+    """
+    Update the label of an existing cycle boundary. Returns True if updated.
+    Invalidates the cycles cache.
+    """
+    iso = start_date.isoformat() if hasattr(start_date, "isoformat") else str(start_date)
+    with _get_conn() as conn:
+        result = sqlite_ops.rename_cycle(conn, iso, new_label)
+    global _CYCLES_CACHE
+    _CYCLES_CACHE = None
+    _schedule_excel_export()
+    return result
+
+
 def load_salary_keywords() -> list[str]:
     with _get_conn() as conn:
         return sqlite_ops.list_salary_keywords(conn)

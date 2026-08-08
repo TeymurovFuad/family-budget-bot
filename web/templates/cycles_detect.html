@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Detect Cycles{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Detect missing cycles</h1>
+  <a href="/cycles" class="btn btn--ghost">← Back to cycles</a>
+</div>
+
+{% if detect_error %}
+<p class="error-msg">{{ detect_error }}</p>
+{% endif %}
+
+{% if detect_candidates %}
+<p class="muted">Found {{ detect_candidates | length }} unrecorded salary arrival(s).
+  Record the ones you want to keep as cycle boundaries.</p>
+
+<div class="table-scroll">
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Amount(s)</th>
+      <th>Proposed label</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for cand in detect_candidates %}
+    <tr>
+      <td class="date-num">{{ cand.date.isoformat() }}</td>
+      <td class="date-num">{{ cand.amounts_str }}</td>
+      <td>{{ cand.label }}</td>
+      <td>
+        <form method="post" action="/cycles/add">
+          <input type="hidden" name="start_date" value="{{ cand.date.isoformat() }}">
+          <input type="hidden" name="label" value="{{ cand.label }}">
+          <button type="submit" class="btn btn--primary btn--sm">Record</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if detect_candidates | length > 1 %}
+<p class="muted" style="margin-top: var(--space-3)">
+  To record all at once, use the individual Record buttons above (one per row).
+</p>
+{% endif %}
+
+{% elif not detect_error %}
+<p class="muted">No unrecorded salary arrivals found in transaction history.</p>
+<p class="muted">Try adding extra keywords below to widen the search, or add a boundary manually on the <a href="/cycles">Cycles</a> page.</p>
+{% endif %}
+
+<section class="cycle-add-section" style="margin-top: var(--space-5)">
+  <h2>Search again with extra keywords</h2>
+  <form method="post" action="/cycles/detect" class="cycle-add-form">
+    <label for="detect-keywords">
+      Extra keywords <span class="muted">(space or comma separated)</span>
+    </label>
+    <input id="detect-keywords" type="text" name="extra_keywords"
+           value="{{ detect_extra }}"
+           class="input-text" placeholder="e.g. payroll bonus freelance">
+    <button type="submit" class="btn btn--primary">Detect</button>
+  </form>
+</section>
+{% endblock %}

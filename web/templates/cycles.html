@@ -4,9 +4,16 @@
 <div class="page-head">
   <h1>Cycles</h1>
 </div>
+
+{% if msg %}
+<p class="{{ 'error-msg' if level == 'error' else 'success-msg' }}">{{ msg }}</p>
+{% endif %}
+
 {% if not enabled %}
 <p class="muted">Budget cycles are disabled (BUDGET_CYCLE=0) — reports use calendar months.</p>
-{% elif current %}
+{% else %}
+
+{% if current %}
 <div class="card card-primary">
   <h2>Current cycle: {{ current.label }}</h2>
   <p class="muted">Started <span class="date-num">{{ current.start.isoformat() }}</span></p>
@@ -23,18 +30,66 @@
   {% endif %}
 </div>
 {% else %}
-<p>No budget cycle recorded yet — use <code>/cycle started</code> in the bot.</p>
+<p class="muted">No budget cycle recorded yet.</p>
 {% endif %}
+
+<section class="cycle-add-section">
+  <div class="cycle-add-header">
+    <h2>Add cycle boundary</h2>
+    <form method="post" action="/cycles/detect" class="cycle-detect-form">
+      <button type="submit" class="btn btn--ghost">Detect missing cycles</button>
+    </form>
+  </div>
+  <form method="post" action="/cycles/add" class="cycle-add-form">
+    <label for="cycle-date">Start date</label>
+    <input id="cycle-date" type="date" name="start_date" required
+           class="input-text" placeholder="YYYY-MM-DD">
+    <label for="cycle-label">Label <span class="muted">(optional — auto-generated if blank)</span></label>
+    <input id="cycle-label" type="text" name="label" maxlength="64"
+           class="input-text" placeholder="e.g. Aug 2026">
+    <button type="submit" class="btn btn--primary">Add</button>
+  </form>
+</section>
+
+{% endif %}
+
 {% if rows %}
 <div class="table-scroll">
 <table>
-  <thead><tr><th>Cycle</th><th>Span</th><th></th></tr></thead>
+  <thead>
+    <tr>
+      <th>Cycle</th>
+      <th>Span</th>
+      <th></th>
+      <th></th>
+    </tr>
+  </thead>
   <tbody>
   {% for r in rows %}
     <tr{% if r.is_current %} class="current-row"{% endif %}>
       <td><a href="{{ r.txn_url }}">{{ r.label }}</a></td>
       <td class="date-num">{{ r.start.isoformat() }} → {{ r.end.isoformat() if r.end else "today" }}</td>
-      <td><a class="btn row-txn-link" href="{{ r.txn_url }}">Transactions</a></td>
+      <td>
+        <a class="btn row-txn-link" href="{{ r.txn_url }}">Transactions</a>
+      </td>
+      <td class="cycle-row-actions">
+        {# Rename inline form #}
+        <details class="cycle-rename-details">
+          <summary class="btn btn--ghost btn--sm">Rename</summary>
+          <form method="post" action="/cycles/{{ r.start.isoformat() }}/rename"
+                class="cycle-rename-form">
+            <input type="text" name="label" value="{{ r.label }}" maxlength="64"
+                   class="input-text input-text--sm" required>
+            <button type="submit" class="btn btn--sm">Save</button>
+          </form>
+        </details>
+        {# Delete form with JS confirm #}
+        <form method="post" action="/cycles/{{ r.start.isoformat() }}/delete"
+              class="cycle-delete-form"
+              onsubmit="return confirm('Delete cycle boundary {{ r.label }} ({{ r.start.isoformat() }})? This cannot be undone.')">
+          <button type="submit" class="btn btn--danger btn--sm">Delete</button>
+        </form>
+      </td>
     </tr>
   {% endfor %}
   </tbody>

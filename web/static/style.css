@@ -402,6 +402,35 @@ details[open] > summary .disclosure-chevron { transform: rotate(180deg); }
 tr.current-row td { background: var(--surface); font-weight: 600; }
 .row-txn-link { font-size: var(--fs-xs); padding: .15rem .5rem; min-height: 0; }
 
+/* Cycle CRUD controls */
+.cycle-add-section { margin: var(--space-5) 0; }
+.cycle-add-section h2 { font-size: var(--fs-base); margin-bottom: var(--space-3); }
+.cycle-add-header { display: flex; align-items: center; gap: var(--space-3);
+                    margin-bottom: var(--space-3); }
+.cycle-add-header h2 { margin-bottom: 0; }
+.cycle-detect-form { display: inline; }
+.cycle-add-form { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3);
+                  align-items: flex-end; }
+.cycle-add-form label { display: block; font-size: var(--fs-sm); color: var(--text-muted);
+                         margin-bottom: var(--space-1); }
+.cycle-add-form .input-text { min-width: 9rem; }
+
+.cycle-row-actions { display: flex; gap: var(--space-2); align-items: center;
+                     white-space: nowrap; }
+.cycle-rename-details { position: relative; }
+.cycle-rename-details summary { list-style: none; cursor: pointer; }
+.cycle-rename-details summary::-webkit-details-marker { display: none; }
+.cycle-rename-form { display: flex; gap: var(--space-2); align-items: center;
+                     margin-top: var(--space-2); position: absolute; right: 0; z-index: 10;
+                     background: var(--surface); border: 1px solid var(--border);
+                     border-radius: var(--radius); padding: var(--space-2); min-width: 16rem; }
+.cycle-rename-form .input-text--sm { font-size: var(--fs-sm); padding: .2rem .5rem;
+                                      flex: 1; min-width: 0; }
+.cycle-delete-form { display: inline; }
+.btn--sm { font-size: var(--fs-xs); padding: .15rem .5rem; min-height: 0; }
+.btn--danger { background: var(--money-neg); color: #fff; border-color: var(--money-neg); }
+.btn--danger:hover { opacity: .85; }
+
 /* ═══════════════════════════════════════════════════════════════════════════
    S3 Write Path — Add / Edit / Delete transactions
    ═══════════════════════════════════════════════════════════════════════════ */
