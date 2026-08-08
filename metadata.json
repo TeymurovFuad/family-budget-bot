@@ -1,0 +1,6 @@
+{
+  "name": "Family Budget",
+  "description": "Family budget tracking system ported from family-budget-bot with transactions ledger, salary budget cycles, bulk AI import, multi-currency conversion, and summary analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
