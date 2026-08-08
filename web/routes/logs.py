@@ -144,9 +144,9 @@ async def logs_page(
 
     templates = request.app.state.templates
     return templates.TemplateResponse(
+        request,
         "logs.html",
         {
-            request,
             "entries": page_entries,
             "level": level,
             "selected_date": selected_date,
