@@ -1,90 +1,32 @@
-# ── Python ────────────────────────────────────────────────────────────────────
+# Node & Web App
+node_modules/
+build/
+dist/
+coverage/
+.env*
+!.env.example
+
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-MANIFEST
-
-# ── Type checking / linting ───────────────────────────────────────────────────
-.mypy_cache/
-.dmypy.json
-dmypy.json
-.ruff_cache/
-
-# ── Test artifacts ────────────────────────────────────────────────────────────
-.pytest_cache/
-.coverage
-coverage.xml
-htmlcov/
-tests/data/
-
-# ── Virtual environments ──────────────────────────────────────────────────────
-.venv*/
-venv*/
+.venv/
+venv/
 env/
 ENV/
-.Python
 
-# ── Environment / secrets ─────────────────────────────────────────────────────
-.env
-# .env.example is intentionally NOT ignored — it should be committed
-
-# ── AI config — local settings contain machine-specific paths ────────────────
-# settings.local.json is gitignored; use settings.template.json as reference
-.claude/settings.local.json
-
-# ── Project data files (real data — never commit) ─────────────────────────────
+# Data & Secrets
 data/*.xlsx
 data/*.json
 data/*.db
-data/*.db-wal
-data/*.db-shm
-
-data/bulk_drafts/
-
-# Statement profiles — user-created format configs (may contain local paths)
-# Only the example and the directory anchor are committed.
-data/statement_profiles/*.json
+!data/Expenses_Template.xlsx
 !data/statement_profiles/example.json
 !data/statement_profiles/.gitkeep
 
-# Template is safe to commit — contains no personal data
-!data/Expenses_Template.xlsx
-
-# ── IDE ───────────────────────────────────────────────────────────────────────
+# IDE & OS & Logs
 .vscode/
 .idea/
-*.iml
-*.suo
-*.user
-*.sln.docstates
-
-# ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-desktop.ini
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
-
-# ── Temporary files ───────────────────────────────────────────────────────────
-*.tmp
-*.bak
-*.swp
-*~
-
-# Scratchpad path artifacts (tool-generated temp path strings accidentally
-# materialized as filenames in repo root)
-C:Users*AppDataLocalTempclaudeC--repos-budget-bot*scratchpad*
