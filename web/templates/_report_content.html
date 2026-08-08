@@ -1,0 +1,313 @@
+{% from "_macros.html" import amount, chip %}
+{# Fragment returned on HTMX requests; also included by report.html for full-page renders. #}
+<div id="report-content">
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 1 — Period Summary
+   ══════════════════════════════════════════════════════════════════════════ #}
+<div class="card card-primary">
+  <h2>{{ period_label }}</h2>
+  <p class="muted period-range">{{ date_from.isoformat() }} → {{ date_to.isoformat() }} · {{ days_elapsed }} day{% if days_elapsed != 1 %}s{% endif %}</p>
+
+  {# stat-hero: Net #}
+  <div class="stat-hero">
+    <span class="stat-label">Net</span>
+    {{ amount(summary.net, 'pos' if summary.net >= 0 else 'neg', ccy=currency) }}
+  </div>
+
+  {# stat-grid 2×3 #}
+  <div class="stat-grid">
+    <div class="stat-tile">
+      <span class="stat-label">💰 Income</span>
+      <span class="stat-value">{{ amount(summary.income, 'pos', ccy=currency, signed=false) }}</span>
+    </div>
+    <div class="stat-tile">
+      <span class="stat-label">💸 Expenses</span>
+      <span class="stat-value">{{ amount(summary.expense, 'neg', ccy=currency, signed=false) }}</span>
+    </div>
+    <div class="stat-tile">
+      <span class="stat-label">🏦 Savings</span>
+      <span class="stat-value">{{ amount(summary.savings, 'save', ccy=currency, signed=false) }}</span>
+    </div>
+    <div class="stat-tile">
+      <span class="stat-label">Daily avg</span>
+      <span class="stat-value">{{ amount(summary.daily_avg, 'neutral', ccy=currency) }}</span>
+    </div>
+    <div class="stat-tile">
+      <span class="stat-label">Savings rate</span>
+      {% set sr_pct = summary.savings_rate * 100 %}
+      <span class="stat-value"
+            style="color: {% if sr_pct >= 20 %}var(--money-pos){% elif sr_pct >= 10 %}var(--warn){% else %}var(--money-neg){% endif %}">
+        {{ "%.1f"|format(sr_pct) }}%
+      </span>
+    </div>
+    {% if summary.unaccounted is not none %}
+    <div class="stat-tile">
+      <span class="stat-label">Unaccounted</span>
+      <span class="stat-value">{{ amount(summary.unaccounted, 'neutral', ccy=currency) }}</span>
+    </div>
+    {% endif %}
+  </div>
+
+  {# 3-segment bar: expense / savings / remain #}
+  {% if summary.income > 0 or summary.expense > 0 %}
+  <div class="stat-bar" role="img"
+       aria-label="{{ type_split.expense_pct }}% expenses, {{ type_split.savings_pct }}% savings, {{ type_split.remain_pct }}% remaining">
+    <span class="seg-expense" style="width: {{ type_split.expense_pct }}%" title="Expenses: {{ type_split.expense_pct }}% ({{ '%.2f'|format(summary.expense) }} {{ currency }})"></span>
+    <span class="seg-save" style="width: {{ type_split.savings_pct }}%" title="Savings: {{ type_split.savings_pct }}% ({{ '%.2f'|format(summary.savings) }} {{ currency }})"></span>
+    <span class="seg-remain" style="width: {{ type_split.remain_pct }}%" title="Remaining: {{ type_split.remain_pct }}% ({{ '%.2f'|format(summary.net) }} {{ currency }})"></span>
+  </div>
+  {% endif %}
+</div>
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 2 — Warnings
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if warnings %}
+<div class="card">
+  <h2>Alerts</h2>
+  <ul class="warning-list">
+    {% for w in warnings %}
+    <li class="warning-item warning-item--{{ w.level }}">{{ w.message }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 3 — Category breakdown
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if categories %}
+<div class="card">
+  <h2>Category breakdown</h2>
+  {% include "_report_categories.html" %}
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 4 — Category trend
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if cat_trends.rows and cat_trends.periods | length > 1 %}
+<div class="card">
+  <h2>Category trend</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Category</th>
+          {% for lbl in cat_trends.periods %}<th class="num">{{ lbl }}</th>{% endfor %}
+          <th class="num">Trend</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% set max_v = cat_trends.max_val if cat_trends.max_val > 0 else 1 %}
+        {% for row in cat_trends.rows %}
+        <tr>
+          <td>
+            <span class="chip chip--cat" style="--cat: var(--cat-{{ row.color_idx }})">{{ row.name }}</span>
+          </td>
+          {% for v in row.values %}
+          <td class="num">{% if v > 0 %}{{ amount(v, 'neg', ccy=currency, signed=false) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          {% endfor %}
+          <td class="num">
+            {# SVG sparkline #}
+            {% set pts = row.values %}
+            {% set n = pts | length %}
+            <svg width="80" height="24" viewBox="0 0 80 24" aria-hidden="true" style="overflow:visible">
+              {% if n > 1 %}
+              {% set step = 80 / (n - 1) %}
+              <polyline
+                fill="none"
+                stroke="var(--cat-{{ row.color_idx }})"
+                stroke-width="1.5"
+                stroke-linejoin="round"
+                points="{% for v in pts %}{{ loop.index0 * step | round(1) }},{{ (24 - (v / max_v * 22)) | round(1) }} {% endfor %}"
+              />
+              {# Terminal dot #}
+              {% set last = pts[-1] %}
+              <circle
+                cx="{{ (n - 1) * step | round(1) }}"
+                cy="{{ (24 - (last / max_v * 22)) | round(1) }}"
+                r="2.5"
+                fill="var(--cat-{{ row.color_idx }})"
+              ><title>{{ row.name }}: {{ '%.2f'|format(last) }} {{ currency }}</title></circle>
+              {% endif %}
+            </svg>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 5 — Person breakdown
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if persons | length > 1 %}
+<div class="card">
+  <h2>By person</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Person</th>
+          <th class="num">Income</th>
+          <th class="num report-person-col">Expense</th>
+          <th class="num report-person-col">Savings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in persons %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td class="num">{% if p.income %}{{ amount(p.income, 'pos', ccy=currency, signed=false) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num report-person-col">{% if p.expense %}{{ amount(p.expense, 'neg', ccy=currency, signed=false) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num report-person-col">{% if p.savings %}{{ amount(p.savings, 'save', ccy=currency, signed=false) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight:700; border-top: 2px solid var(--border);">
+          <td>Total</td>
+          <td class="num">{{ amount(summary.income, 'pos', ccy=currency, signed=false) }}</td>
+          <td class="num report-person-col">{{ amount(summary.expense, 'neg', ccy=currency, signed=false) }}</td>
+          <td class="num report-person-col">{{ amount(summary.savings, 'save', ccy=currency, signed=false) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 6 — Type split + Recurring
+   ══════════════════════════════════════════════════════════════════════════ #}
+<div class="card">
+  <h2>Spend composition</h2>
+  <div class="stat-bar stat-bar--lg" role="img"
+       aria-label="{{ type_split.expense_pct }}% expenses, {{ type_split.savings_pct }}% savings, {{ type_split.remain_pct }}% remaining">
+    <span class="seg-expense" style="width: {{ type_split.expense_pct }}%" title="Expenses: {{ type_split.expense_pct }}% ({{ '%.2f'|format(summary.expense) }} {{ currency }})"></span>
+    <span class="seg-save"    style="width: {{ type_split.savings_pct }}%" title="Savings: {{ type_split.savings_pct }}% ({{ '%.2f'|format(summary.savings) }} {{ currency }})"></span>
+    <span class="seg-remain"  style="width: {{ type_split.remain_pct }}%" title="Remaining: {{ type_split.remain_pct }}% ({{ '%.2f'|format(summary.net) }} {{ currency }})"></span>
+  </div>
+  <div class="split-legend">
+    <span><span class="split-dot" style="background:var(--money-neg)"></span>Expenses {{ type_split.expense_pct }}%</span>
+    <span><span class="split-dot" style="background:var(--money-save)"></span>Savings {{ type_split.savings_pct }}%</span>
+    <span><span class="split-dot" style="background:var(--money-pos)"></span>Remaining {{ type_split.remain_pct }}%</span>
+  </div>
+
+  <hr style="border: none; border-top: 1px solid var(--border); margin: var(--space-4) 0;">
+
+  <div class="stat-grid">
+    <div class="stat-tile">
+      <span class="stat-label">🔁 Recurring</span>
+      <span class="stat-value">{{ amount(recurring.total, 'neutral', ccy=currency, signed=false) }}</span>
+      <span class="muted">{{ recurring.count }} transaction{% if recurring.count != 1 %}s{% endif %}</span>
+    </div>
+    <div class="stat-tile">
+      <span class="stat-label">✦ One-off</span>
+      <span class="stat-value">{{ amount(oneoff.total, 'neutral', ccy=currency, signed=false) }}</span>
+      <span class="muted">{{ oneoff.count }} transaction{% if oneoff.count != 1 %}s{% endif %}</span>
+    </div>
+  </div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 7 — Top transactions
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if top_txns %}
+<div class="card">
+  <h2>Top expenses</h2>
+  {% include "_report_top_txns.html" %}
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 8 — Daily spend chart
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if daily_spend %}
+<div class="card">
+  <h2>Daily spend</h2>
+  <div class="daily-chart {% if daily_spend | length > 20 %}daily-chart--compact{% endif %}">
+    {% for d in daily_spend %}
+    <div class="day-col">
+      <div class="day-bar"
+           style="height: {{ [d.pct_of_max, 2] | max }}%;
+                  background: {% if d.is_max %}var(--warn){% else %}var(--money-neg){% endif %};
+                  opacity: {% if d.amount == 0 %}0.15{% else %}1{% endif %};"
+           title="{{ d.date_str }}: {{ '%.2f'|format(d.amount) }} {{ currency }}"></div>
+      <span class="day-label" style="{% if d.is_today %}font-weight:700; color:var(--accent){% endif %}">
+        {{ d.day }}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 9 — Multi-period trend
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if trend.periods | length > 1 %}
+<div class="card">
+  <h2>Period trend</h2>
+  {% set tmax = trend.max_val if trend.max_val > 0 else 1 %}
+  <div class="trend-chart">
+    {% for i in range(trend.periods | length) %}
+    {% set is_current = i == trend.current_idx %}
+    <div class="trend-period {% if is_current %}trend-period--current{% endif %}">
+      <div class="trend-bars">
+        <div class="trend-bar trend-bar--income"
+             style="height: {{ (trend.income[i] / tmax * 100) | round(1) }}%"
+             title="{{ trend.short_labels[i] }} — Income: {{ '%.0f'|format(trend.income[i]) }} {{ currency }}"></div>
+        <div class="trend-bar trend-bar--expense"
+             style="height: {{ (trend.expense[i] / tmax * 100) | round(1) }}%"
+             title="{{ trend.short_labels[i] }} — Expense: {{ '%.0f'|format(trend.expense[i]) }} {{ currency }}"></div>
+        <div class="trend-bar trend-bar--save"
+             style="height: {{ (trend.savings[i] / tmax * 100) | round(1) }}%"
+             title="{{ trend.short_labels[i] }} — Savings: {{ '%.0f'|format(trend.savings[i]) }} {{ currency }}"></div>
+      </div>
+      <span class="trend-label" title="{{ trend.periods[i] }}">{{ trend.short_labels[i] }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="split-legend">
+    <span><span class="split-dot" style="background:var(--money-pos)"></span>Income</span>
+    <span><span class="split-dot" style="background:var(--money-neg)"></span>Expenses</span>
+    <span><span class="split-dot" style="background:var(--money-save)"></span>Savings</span>
+  </div>
+</div>
+{% endif %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   Section 10 — Currency mix
+   ══════════════════════════════════════════════════════════════════════════ #}
+{% if currency_mix %}
+<div class="card">
+  <h2>Currency mix</h2>
+  <div class="stat-bar stat-bar--lg" role="img" aria-label="Currency distribution">
+    {% for cm in currency_mix %}
+    <span style="width: {{ cm.pct }}%; background: var(--cat-{{ cm.color_idx }}); display:inline-block; height:100%; border-radius: inherit;"
+          title="{{ cm.code }}: {{ cm.pct }}%"></span>
+    {% endfor %}
+  </div>
+  <div class="table-scroll" style="margin-top: var(--space-3);">
+    <table>
+      <thead><tr><th>Currency</th><th class="num">Total ({{ currency }})</th><th class="num">Share</th></tr></thead>
+      <tbody>
+        {% for cm in currency_mix %}
+        <tr>
+          <td><span class="chip chip--cat" style="--cat: var(--cat-{{ cm.color_idx }})">{{ cm.code }}</span></td>
+          <td class="num">{{ amount(cm.total_base, 'neutral', ccy=currency, signed=false) }}</td>
+          <td class="num">{{ cm.pct }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+</div>{# end #report-content #}

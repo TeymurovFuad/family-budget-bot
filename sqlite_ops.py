@@ -446,6 +446,15 @@ def delete_cycle(conn: sqlite3.Connection, start_date: str) -> bool:
     return cur.rowcount == 1
 
 
+def rename_cycle(conn: sqlite3.Connection, start_date: str, new_label: str) -> bool:
+    cur = conn.execute(
+        f"UPDATE {TABLE_CYCLES} SET label = ? WHERE start_date = ?",
+        (new_label, start_date),
+    )
+    conn.commit()
+    return cur.rowcount == 1
+
+
 def list_cycles(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         f"SELECT start_date, label FROM {TABLE_CYCLES} ORDER BY start_date"
