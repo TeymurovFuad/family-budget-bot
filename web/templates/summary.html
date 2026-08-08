@@ -8,16 +8,11 @@
 </div>
 {% if cards %}
 {% set sel = cards[sel_i] %}
-{# #summary-body wraps everything that changes with the period. The forms
-   and nav links below use hx-select="#summary-body": the route keeps
-   returning the FULL page, htmx extracts just this fragment client-side —
-   no backend change, and every control still works as a plain GET.
-   hx-target/hx-select/hx-swap/hx-push-url sit ONCE here and are inherited
-   by every descendant hx-get (htmx attribute inheritance). #}
 <div id="summary-body" hx-target="#summary-body" hx-select="#summary-body"
      hx-swap="outerHTML" hx-push-url="true">
+
+{# ── Period nav ── #}
 <nav class="period-nav" aria-label="Period navigation">
-  {# cards are newest-first: "older" = index + 1, "newer" = index - 1 #}
   {% if sel_i + 1 < cards|length %}
   {% set older_url = "/?period=" ~ cards[sel_i + 1].start.isoformat() %}
   <a class="btn period-prev" href="{{ older_url }}" hx-get="{{ older_url }}">&larr; Older</a>
@@ -25,7 +20,11 @@
   <span class="btn period-prev disabled" aria-disabled="true">&larr; Older</span>
   {% endif %}
   <details class="period-picker">
-    <summary class="period-picker-toggle">{{ sel.label }} <span class="disclosure-chevron" aria-hidden="true">&#9662;</span></summary>
+    <summary class="period-picker-toggle">
+      {{ sel.label }}
+      <span class="period-nav-range">{{ sel.start.strftime("%#d %b") }}–{{ sel.end.strftime("%#d %b %Y") }}</span>
+      <span class="disclosure-chevron" aria-hidden="true">&#9662;</span>
+    </summary>
     <div class="period-picker-panel">
       <form method="get" action="/" hx-get="/">
         <select name="period" aria-label="Choose period">
@@ -50,74 +49,315 @@
   {% endif %}
 </nav>
 
-<div class="card card-primary">
-  <h2>{{ sel.label }}</h2>
-  <p class="muted period-range">{{ sel.start.isoformat() }} → {{ sel.end.isoformat() }}</p>
-  <div class="stat-hero">
-    <span class="stat-label">Net</span>
-    {{ amount(sel.net, 'pos' if sel.net >= 0 else 'neg', field='net', ccy=currency) }}
+{# ── Hero ── #}
+<div class="card summary-hero">
+  <div class="hero-period-head">
+    <span class="hero-icon" aria-hidden="true">📅</span>
+    <div>
+      <h2 class="hero-label">{{ sel.label }}</h2>
+      <p class="hero-sub">
+        {{ sel.start.strftime("%#d %b") }}–{{ sel.end.strftime("%#d %b %Y") }}
+        &middot;
+        {% if is_current_period %}Day {{ period_days_elapsed }} of {{ period_days_total }}
+        {% else %}{{ period_days_total }} days{% endif %}
+      </p>
+    </div>
   </div>
-  <div class="stat-grid">
-    <div class="stat-tile">
-      <span class="stat-label">Income</span>
-      <span class="stat-value">{{ amount(sel.income, 'pos', field='income', ccy=currency, signed=false) }}</span>
+  {% if is_current_period %}
+  {% set prog_pct = (period_days_elapsed / period_days_total * 100)|round(1) %}
+  <div class="cycle-progress" aria-label="Cycle progress: {{ prog_pct }}%">
+    <div class="cycle-progress-fill" style="width: {{ prog_pct }}%"></div>
+  </div>
+  <p class="cycle-progress-label">{{ prog_pct|int }}% of cycle elapsed</p>
+  {% endif %}
+  <div class="hero-net">
+    <span class="hero-net-label">NET BALANCE</span>
+    <div class="hero-net-amount">
+      {{ amount(sel.net, 'pos' if sel.net >= 0 else 'neg', field='net', ccy=currency, signed=true) }}
     </div>
-    <div class="stat-tile">
-      <span class="stat-label">Expenses</span>
-      <span class="stat-value">{{ amount(sel.expense, 'neg', field='expense', ccy=currency, signed=false) }}</span>
-    </div>
-    <div class="stat-tile">
-      <span class="stat-label">Savings</span>
-      <span class="stat-value">{{ amount(sel.savings, 'save', field='savings', ccy=currency) }}</span>
-    </div>
-    <div class="stat-tile">
-      <span class="stat-label">Daily avg</span>
-      <span class="stat-value">{{ amount(sel.daily_avg, 'neutral', field='daily_avg', ccy=currency) }}</span>
-    </div>
-    <div class="stat-tile">
-      <span class="stat-label">Savings rate</span>
-      <span class="stat-value" data-field="savings_rate">{{ "%.1f"|format(sel.savings_rate * 100) }}%</span>
-    </div>
-    {% if sel.unaccounted is not none %}
-    <div class="stat-tile">
-      <span class="stat-label">Unaccounted</span>
-      <span class="stat-value">{{ amount(sel.unaccounted, 'neutral', field='unaccounted', ccy=currency) }}</span>
+    <span class="hero-verdict">
+      {% if sel.net > 0 %}✅ You're ahead{% elif sel.net < 0 %}🔴 Over budget{% else %}➖ Breaking even{% endif %}
+    </span>
+  </div>
+</div>
+
+{# ── KPI tiles ── #}
+<div class="kpi-grid">
+  <div class="kpi-tile kpi-income">
+    <span class="kpi-icon" aria-hidden="true">💰</span>
+    <span class="kpi-label">Income</span>
+    <div class="kpi-amount">{{ amount(sel.income, 'pos', field='income', ccy=currency, signed=false) }}</div>
+    {% if prev_card %}
+    {% set inc_delta = sel.income - prev_card.income %}
+    <div class="kpi-secondary {{ 'delta-pos' if inc_delta >= 0 else 'delta-neg' }}">
+      {{ "▲" if inc_delta >= 0 else "▼" }}
+      {{ amount(inc_delta|abs, 'pos' if inc_delta >= 0 else 'neg', ccy=currency) }}
+      vs last period
     </div>
     {% endif %}
   </div>
-  {% if sel.income > 0 %}
-  {% set exp_pct = (sel.expense / sel.income * 100)|round(1) %}
-  {% set sav_pct = (sel.savings / sel.income * 100)|round(1) %}
-  <div class="stat-bar" role="img"
-       aria-label="Of income: {{ exp_pct }}% spent, {{ sav_pct }}% saved">
-    <span class="seg-expense" style="width: {{ [exp_pct, 100]|min }}%"></span>
-    <span class="seg-save" style="width: {{ [sav_pct, [100 - exp_pct, 0]|max]|min }}%"></span>
+
+  {% set exp_pct = (sel.expense / sel.income * 100)|round(1) if sel.income > 0 else 0 %}
+  <div class="kpi-tile kpi-expense">
+    <span class="kpi-icon" aria-hidden="true">💸</span>
+    <span class="kpi-label">Expenses</span>
+    <div class="kpi-amount">{{ amount(sel.expense, 'neg', field='expense', ccy=currency, signed=false) }}</div>
+    <div class="kpi-secondary">
+      {{ exp_pct }}% of income
+      <span class="kpi-mini-bar" aria-hidden="true">
+        <span class="kpi-mini-fill" style="width: {{ [exp_pct, 100]|min }}%"></span>
+      </span>
+    </div>
   </div>
-  {% endif %}
+
+  <div class="kpi-tile kpi-savings">
+    <span class="kpi-icon" aria-hidden="true">🏦</span>
+    <span class="kpi-label">Savings</span>
+    <div class="kpi-amount">{{ amount(sel.savings, 'save', field='savings', ccy=currency, signed=false) }}</div>
+    <div class="kpi-secondary">{{ "%.1f"|format(sel.savings_rate * 100) }}% saved</div>
+  </div>
+
+  <div class="kpi-tile kpi-net {{ 'kpi-net--pos' if sel.net >= 0 else 'kpi-net--neg' }}">
+    <span class="kpi-icon" aria-hidden="true">📊</span>
+    <span class="kpi-label">Net Balance</span>
+    <div class="kpi-amount">{{ amount(sel.net, 'pos' if sel.net >= 0 else 'neg', field='net', ccy=currency, signed=true) }}</div>
+    {% set daily_surplus = (sel.net / period_days_elapsed)|round(2) if period_days_elapsed > 0 else 0 %}
+    <div class="kpi-secondary">
+      {{ "Daily surplus:" if sel.net >= 0 else "Daily burn:" }}
+      {{ amount(daily_surplus|abs, 'pos' if daily_surplus >= 0 else 'neg', ccy=currency) }}
+    </div>
+  </div>
 </div>
 
-{% set history = cards[sel_i + 1 : sel_i + 4] %}
-{% if history %}
-<section class="summary-history" aria-label="Previous periods">
-  <h2 class="history-title muted">Previous periods</h2>
-  {% for c in history %}
-  {% set row_url = "/?period=" ~ c.start.isoformat() %}
-  <a class="history-row" href="{{ row_url }}" hx-get="{{ row_url }}">
-    <span class="history-label">{{ c.label }}</span>
-    <span class="history-range muted">{{ c.start.isoformat() }} → {{ c.end.isoformat() }}</span>
-    {# Deliberate deviation from the "label + net" spec: income/expense at a
-       glance is more useful for a quick scan, and the golden-master test
-       asserts every period's income is rendered — see PR description. #}
-    <span class="history-nums">
-      <span class="stat-value">{{ amount(c.income, 'pos', field='income', ccy=currency, signed=false) }}</span>
-      <span class="muted">/</span>
-      <span class="stat-value">{{ amount(c.expense, 'neg', field='expense', ccy=currency, signed=false) }}</span>
+{# ── Income allocation bar ── #}
+{% if sel.income > 0 %}
+{% set exp_pct2 = (sel.expense / sel.income * 100)|round(1) %}
+{% set sav_pct2 = (sel.savings / sel.income * 100)|round(1) %}
+{% set free_pct = [100 - exp_pct2 - sav_pct2, 0]|max %}
+<div class="income-bar-card card">
+  <h3 class="section-heading">📊 Income Allocation</h3>
+  <div class="income-bar" role="img"
+       aria-label="Of income: {{ exp_pct2 }}% spent, {{ sav_pct2 }}% saved, {{ free_pct }}% free">
+    <span class="seg seg-expense" style="width: {{ [exp_pct2, 100]|min }}%">
+      {% if exp_pct2 >= 12 %}<span class="seg-label">{{ exp_pct2 }}%</span>{% endif %}
     </span>
-  </a>
+    <span class="seg seg-savings" style="width: {{ [sav_pct2, [100 - exp_pct2, 0]|max]|min }}%">
+      {% if sav_pct2 >= 10 %}<span class="seg-label">{{ sav_pct2 }}%</span>{% endif %}
+    </span>
+    <span class="seg seg-free" style="width: {{ [free_pct, [100 - exp_pct2 - sav_pct2, 0]|max]|min }}%">
+      {% if free_pct >= 8 %}<span class="seg-label">{{ free_pct }}%</span>{% endif %}
+    </span>
+  </div>
+  <div class="income-bar-legend">
+    <span class="legend-dot legend-expense"></span> Expenses {{ exp_pct2 }}%
+    <span class="legend-dot legend-savings"></span> Savings {{ sav_pct2 }}%
+    <span class="legend-dot legend-free"></span> Free {{ free_pct }}%
+  </div>
+</div>
+{% endif %}
+
+{# ── Secondary stats strip ── #}
+<div class="stats-strip">
+  <div class="stat-chip">
+    <span class="stat-chip-icon" aria-hidden="true">📉</span>
+    <span class="stat-chip-label">Daily avg spend</span>
+    <span class="stat-chip-value">{{ amount(sel.daily_avg, 'neg', field='daily_avg', ccy=currency, signed=false) }}</span>
+  </div>
+  <div class="stat-chip">
+    <span class="stat-chip-icon" aria-hidden="true">🎯</span>
+    <span class="stat-chip-label">Savings rate</span>
+    <span class="stat-chip-value {{ 'rate-good' if sel.savings_rate >= 0.2 else ('rate-warn' if sel.savings_rate >= 0.1 else 'rate-bad') }}">
+      {{ "%.1f"|format(sel.savings_rate * 100) }}%
+    </span>
+  </div>
+  {% if sel.unaccounted is not none %}
+  <div class="stat-chip {{ 'chip-warn' if sel.unaccounted < 0 else '' }}">
+    <span class="stat-chip-icon" aria-hidden="true">{{ "⚠️" if sel.unaccounted < 0 else "🔍" }}</span>
+    <span class="stat-chip-label">Unaccounted</span>
+    <span class="stat-chip-value">{{ amount(sel.unaccounted, 'pos' if sel.unaccounted >= 0 else 'neg', field='unaccounted', ccy=currency, signed=true) }}</span>
+  </div>
+  {% endif %}
+  <div class="stat-chip">
+    <span class="stat-chip-icon" aria-hidden="true">🧾</span>
+    <span class="stat-chip-label">Transactions</span>
+    <span class="stat-chip-value stat-chip-plain">{{ txn_count }}</span>
+  </div>
+</div>
+
+{# ── Warnings ── #}
+{% if warnings %}
+<section class="warnings-panel" aria-label="Alerts">
+  {% for w in warnings %}
+  <div class="warning-pill warning-{{ w.kind }}" role="alert">
+    <span class="warning-icon" aria-hidden="true">{{ w.icon }}</span>
+    <span class="warning-text">{{ w.text }}</span>
+    <button class="warning-dismiss" aria-label="Dismiss"
+            onclick="this.closest('.warning-pill').remove()">✕</button>
+  </div>
   {% endfor %}
 </section>
 {% endif %}
+
+{# ── Category breakdown ── #}
+{% if cat_rows %}
+<section class="cat-breakdown card">
+  <h3 class="section-heading">💸 Top Spending Categories</h3>
+  {% set max_cat_amt = cat_rows[0].amount %}
+  {% for row in cat_rows %}
+  {% set bar_pct = (row.amount / max_cat_amt * 100)|round(1) if max_cat_amt > 0 else 0 %}
+  {% set bgt_pct = (row.budget / max_cat_amt * 100)|round(1) if row.budget and max_cat_amt > 0 else none %}
+  <div class="cat-row {{ 'cat-row--over' if row.over else '' }}">
+    <div class="cat-row-head">
+      <span class="cat-dot" style="background: var(--cat-{{ row.color_idx }})" aria-hidden="true"></span>
+      <span class="cat-name">{{ row.category }}</span>
+      <span class="cat-amount">{{ amount(row.amount, 'neg' if row.over else 'neutral', ccy=currency, signed=false) }}</span>
+    </div>
+    <div class="cat-bar-track" role="img" aria-label="{{ row.category }}: {{ row.pct_of_exp|round(0)|int }}% of expenses">
+      <span class="cat-bar-fill {{ 'cat-bar-over' if row.over else '' }}"
+            style="width: {{ bar_pct }}%; --cat-clr: var(--cat-{{ row.color_idx }})"></span>
+      {% if bgt_pct is not none %}
+      <span class="cat-budget-tick" style="left: {{ [bgt_pct, 100]|min }}%"
+            title="Budget: {{ row.budget|round(2) }} {{ currency }}"></span>
+      {% endif %}
+    </div>
+    <span class="cat-pct">{{ row.pct_of_exp|round(0)|int }}%</span>
+  </div>
+  {% endfor %}
+  <a class="link-soft" href="/report">View full report →</a>
+</section>
+{% endif %}
+
+{# ── Sparkline ── #}
+{% if spark_periods and spark_periods|length > 1 %}
+{% set sp = spark_periods %}
+{% set N = sp|length %}
+{% set W = 400 %}{% set H = 80 %}{% set pad_x = 20 %}{% set pad_y = 8 %}
+{% set usable_w = W - 2 * pad_x %}{% set usable_h = H - 2 * pad_y %}
+{% set all_vals = [] %}
+{% for p in sp %}{% if all_vals.append(p.income) %}{% endif %}{% if all_vals.append(p.expense) %}{% endif %}{% if all_vals.append(p.savings) %}{% endif %}{% endfor %}
+{% set vmax = (all_vals|max) if all_vals else 1 %}
+{% set vmax = vmax if vmax > 0 else 1 %}
+{% set pts = namespace(inc='', exp='', sav='') %}
+{% for p in sp %}
+{% set xi = pad_x + (loop.index0 / ([N - 1, 1]|max)) * usable_w %}
+{% set yi_inc = pad_y + (1 - p.income  / vmax) * usable_h %}
+{% set yi_exp = pad_y + (1 - p.expense / vmax) * usable_h %}
+{% set yi_sav = pad_y + (1 - p.savings / vmax) * usable_h %}
+{% set pts.inc = pts.inc ~ (xi|round(1)|string) ~ ',' ~ (yi_inc|round(1)|string) ~ ' ' %}
+{% set pts.exp = pts.exp ~ (xi|round(1)|string) ~ ',' ~ (yi_exp|round(1)|string) ~ ' ' %}
+{% set pts.sav = pts.sav ~ (xi|round(1)|string) ~ ',' ~ (yi_sav|round(1)|string) ~ ' ' %}
+{% endfor %}
+{% set last = sp[-1] %}
+{% set lx = pad_x + usable_w %}
+{% set ly_inc = pad_y + (1 - last.income  / vmax) * usable_h %}
+{% set ly_exp = pad_y + (1 - last.expense / vmax) * usable_h %}
+{% set ly_sav = pad_y + (1 - last.savings / vmax) * usable_h %}
+<section class="sparkline-card card">
+  <h3 class="section-heading">📈 Trend (last {{ N }} periods)</h3>
+  <svg class="period-sparkline" viewBox="0 0 {{ W }} {{ H }}"
+       aria-label="Income, expense and savings trend over last {{ N }} periods"
+       role="img" preserveAspectRatio="none">
+    <line x1="{{ pad_x }}" y1="{{ pad_y + usable_h / 2 }}"
+          x2="{{ W - pad_x }}" y2="{{ pad_y + usable_h / 2 }}"
+          stroke="var(--border-soft)" stroke-width="1" stroke-dasharray="4 4"/>
+    <polyline points="{{ pts.inc }}" fill="none" stroke="var(--money-pos)" stroke-width="2" stroke-linejoin="round"/>
+    <polyline points="{{ pts.exp }}" fill="none" stroke="var(--money-neg)" stroke-width="2" stroke-linejoin="round"/>
+    <polyline points="{{ pts.sav }}" fill="none" stroke="var(--money-save)" stroke-width="2" stroke-linejoin="round"/>
+    {% for p in sp %}
+    {% set xi = pad_x + (loop.index0 / ([N - 1, 1]|max)) * usable_w %}
+    <text x="{{ xi|round(1) }}" y="{{ H - 1 }}" text-anchor="middle" font-size="7" fill="var(--ink-soft)">{{ p.label[:3] }}</text>
+    {% endfor %}
+    <circle cx="{{ lx|round(1) }}" cy="{{ ly_inc|round(1) }}" r="4" fill="var(--money-pos)">
+      <title>Income {{ last.income|round(2) }}</title>
+    </circle>
+    <circle cx="{{ lx|round(1) }}" cy="{{ ly_exp|round(1) }}" r="4" fill="var(--money-neg)">
+      <title>Expense {{ last.expense|round(2) }}</title>
+    </circle>
+    <circle cx="{{ lx|round(1) }}" cy="{{ ly_sav|round(1) }}" r="4" fill="var(--money-save)">
+      <title>Savings {{ last.savings|round(2) }}</title>
+    </circle>
+  </svg>
+  <div class="spark-legend">
+    <span class="legend-dot" style="background:var(--money-pos)"></span> Income
+    <span class="legend-dot" style="background:var(--money-neg)"></span> Expenses
+    <span class="legend-dot" style="background:var(--money-save)"></span> Savings
+  </div>
+</section>
+{% endif %}
+
+{# ── History table ── #}
+{% if history_cards %}
+<section class="history-section card" aria-label="Previous periods">
+  <h3 class="section-heading">🗂 Previous Periods</h3>
+  <div style="overflow-x:auto">
+  <table class="history-table">
+    <thead>
+      <tr>
+        <th>Period</th>
+        <th class="num">Income</th>
+        <th class="num">Expenses</th>
+        <th class="num">Savings</th>
+        <th class="num">Net</th>
+        <th class="num">Δ Net</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in history_cards %}
+      {% set row_url = "/?period=" ~ c.start.isoformat() %}
+      {% if loop.index0 + 1 < history_cards|length %}
+        {% set net_delta = c.net - history_cards[loop.index0 + 1].net %}
+        {% set has_delta = true %}
+      {% else %}
+        {% set has_delta = false %}
+        {% set net_delta = 0 %}
+      {% endif %}
+      <tr class="history-tr" onclick="window.location='{{ row_url }}'" style="cursor:pointer">
+        <td class="history-period-label">
+          {{ c.label }}
+          <span class="history-range-sub">{{ c.start.strftime("%#d %b") }}–{{ c.end.strftime("%#d %b") }}</span>
+        </td>
+        <td class="num">{{ amount(c.income,  'pos',  ccy=currency, signed=false) }}</td>
+        <td class="num">{{ amount(c.expense, 'neg',  ccy=currency, signed=false) }}</td>
+        <td class="num">{{ amount(c.savings, 'save', ccy=currency, signed=false) }}</td>
+        <td class="num">{{ amount(c.net, 'pos' if c.net >= 0 else 'neg', ccy=currency, signed=true) }}</td>
+        <td class="num">
+          {% if has_delta %}
+          <span class="{{ 'delta-pos' if net_delta >= 0 else 'delta-neg' }}">
+            {{ "▲" if net_delta >= 0 else "▼" }}
+            {{ amount(net_delta|abs, 'pos' if net_delta >= 0 else 'neg', ccy=currency) }}
+          </span>
+          {% else %}
+          <span class="muted">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+{# ── Quick links ── #}
+<div class="quick-links card">
+  <a class="quick-link" href="/transactions">
+    <span class="quick-link-icon" aria-hidden="true">🧾</span>
+    <span>View transactions</span>
+    <span class="quick-link-arrow" aria-hidden="true">→</span>
+  </a>
+  <a class="quick-link" href="/report">
+    <span class="quick-link-icon" aria-hidden="true">📊</span>
+    <span>Full report</span>
+    <span class="quick-link-arrow" aria-hidden="true">→</span>
+  </a>
+  <a class="quick-link" href="/cycles">
+    <span class="quick-link-icon" aria-hidden="true">🔄</span>
+    <span>Manage cycles</span>
+    <span class="quick-link-arrow" aria-hidden="true">→</span>
+  </a>
 </div>
+
+</div>{# end #summary-body #}
 {% else %}
 <p>No data yet.</p>
 {% endif %}
