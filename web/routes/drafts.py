@@ -392,11 +392,23 @@ async def drafts_reanalyze_stream(request: Request, user_id: int):
 
         tasks = [asyncio.create_task(_run_one(idx)) for idx in idxs]
         pending = len(tasks)
+        # Circuit breaker: max keep-alives = 2× the per-row timeout budget.
+        # Prevents an infinite loop if pending somehow never reaches 0.
+        _max_keepalives = int(_REANALYZE_TIMEOUT_S / 10 * 2) + len(idxs)
+        _keepalives = 0
         try:
             while pending > 0:
                 try:
                     event_type, idx, data = await asyncio.wait_for(queue.get(), timeout=10.0)
                 except asyncio.TimeoutError:
+                    _keepalives += 1
+                    if _keepalives > _max_keepalives:
+                        log.warning(
+                            "Draft SSE: keep-alive circuit breaker fired after %d ticks "
+                            "(pending=%d user=%s) — breaking generator",
+                            _keepalives, pending, user_id,
+                        )
+                        break
                     yield ": keep-alive\n\n"
                     continue
 

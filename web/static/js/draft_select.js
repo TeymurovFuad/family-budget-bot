@@ -421,9 +421,13 @@
     }
   }
 
-  // Remove server-rendered and stream AI badge elements from a status cell.
+  // Remove AI badge elements from a status cell before injecting stream badges.
+  // Server-rendered .draft-preview-reason--inline (the pre-existing AI reason)
+  // is NOT removed here — only stream-injected .draft-stream-reason--inline is
+  // cleared. This means a failed/disconnected stream leaves prior reason text
+  // intact until the next full page load (Reviewer #1).
   function _clearAiBadges(statusCell) {
-    ['.draft-preview-badge', '.draft-preview-toggle', '.draft-preview-reason--inline', '.draft-stream-badge']
+    ['.draft-preview-badge', '.draft-preview-toggle', '.draft-stream-reason--inline', '.draft-stream-badge']
       .forEach(function(sel) {
         statusCell.querySelectorAll(sel).forEach(function(el) { el.remove(); });
       });
@@ -450,9 +454,11 @@
       badge.textContent = _streamBadgeText(status);
 
       // Show reason inline for error/timeout states.
+      // Uses draft-stream-reason--inline (not draft-preview-reason--inline) so
+      // _clearAiBadges only removes stream-injected reasons, not server-rendered ones.
       if (reason && (status === 'error' || status === 'timeout')) {
         var rs = document.createElement('span');
-        rs.className = 'draft-preview-reason draft-preview-reason--inline';
+        rs.className = 'draft-preview-reason draft-stream-reason--inline';
         rs.textContent = reason;
         statusCell.insertBefore(rs, statusCell.firstChild);
       }
@@ -498,6 +504,14 @@
 
   // Main SSE function — called by submitBulkAction('preview_ai').
   function startReanalyzeStream() {
+    // Always close any prior stream first — even if we return early below.
+    // This prevents a stale _activeStream from persisting across calls
+    // that hit an early-return guard (Reviewer #3).
+    if (_activeStream) {
+      _activeStream.close();
+      _activeStream = null;
+    }
+
     var form = bulkFormRef || byId('draft-bulk-form');
     if (!form) return;
     var userId = form.getAttribute('data-user-id');
@@ -531,13 +545,6 @@
     if (counter) {
       counter.setAttribute('aria-live', 'off');
       counter.textContent = 'Analysing… 0 / ' + total;
-    }
-
-    // Close any prior stream before opening a new one (prevents duplicate
-    // concurrent streams and save_user_draft races on double-click).
-    if (_activeStream) {
-      _activeStream.close();
-      _activeStream = null;
     }
 
     var es = new EventSource(url);

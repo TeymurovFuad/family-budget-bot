@@ -34,9 +34,41 @@ from sqlite_types import (
 
 log = logging.getLogger(__name__)
 
+# ── Connection helper ─────────────────────────────────────────────────────────
+# init_db() runs CREATE TABLE IF NOT EXISTS (schema DDL) on every call.
+# After the first startup call in web/app.py we only need a plain connect().
+# _db_initialized tracks whether that one-time init has happened in this
+# process; fallback to full init_db if it somehow hasn't (e.g. bot process).
+_db_initialized: bool = False
+
 
 def _conn():
+    if _db_initialized:
+        return sqlite_ops.connect(settings.SQLITE_DB_PATH)
     return sqlite_ops.init_db(settings.SQLITE_DB_PATH)
+
+
+# ── TTL caches for hot read-only data ────────────────────────────────────────
+# These change only when the user edits settings/rates.
+# 30s TTL is short enough that a change in settings reflects almost immediately,
+# but eliminates redundant DB round-trips on every page navigation.
+import time as _time_mod
+
+_REF_CACHE: dict | None = None
+_REF_CACHE_TS: float = 0.0
+_RATES_CACHE: dict | None = None
+_RATES_CACHE_TS: float = 0.0
+_CYCLES_CACHE: list | None = None
+_CYCLES_CACHE_TS: float = 0.0
+_CACHE_TTL: float = 30.0  # seconds
+
+
+def _ref_cache_invalidate() -> None:
+    """Call after any write that changes reference data (settings, categories, persons)."""
+    global _REF_CACHE, _RATES_CACHE, _CYCLES_CACHE
+    _REF_CACHE = None
+    _RATES_CACHE = None
+    _CYCLES_CACHE = None
 
 
 def _require_db() -> None:
@@ -830,7 +862,15 @@ def load_reference_data() -> dict:
     categories / persons / rates / goals tables:
 
       {months, txn_types, categories, persons, years, budgets, currencies}
+
+    Result is cached for _CACHE_TTL seconds to avoid a DB round-trip on
+    every page navigation. Call _ref_cache_invalidate() after writes.
     """
+    global _REF_CACHE, _REF_CACHE_TS
+    now = _time_mod.monotonic()
+    if _REF_CACHE is not None and (now - _REF_CACHE_TS) < _CACHE_TTL:
+        return _REF_CACHE
+
     _require_db()
     conn = _conn()
     try:
@@ -846,7 +886,7 @@ def load_reference_data() -> dict:
             f"WHERE year IS NOT NULL ORDER BY year")]
     finally:
         conn.close()
-    return {
+    result = {
         "months":     list(MONTH_NAMES),
         "txn_types":  [t.value for t in TransactionType],
         "categories": [r["name"] for r in cats],
@@ -856,6 +896,9 @@ def load_reference_data() -> dict:
                        if r["budget_base"] and r["budget_base"] > 0},
         "currencies": list(rates.keys()),
     }
+    _REF_CACHE = result
+    _REF_CACHE_TS = now
+    return result
 
 
 # ── Context-manager connection helper ─────────────────────────────────────────
@@ -897,8 +940,15 @@ RowMovedError = RowMismatchError
 # ── Sync reads ────────────────────────────────────────────────────────────────
 
 def load_rates() -> dict[str, float]:
+    global _RATES_CACHE, _RATES_CACHE_TS
+    now = _time_mod.monotonic()
+    if _RATES_CACHE is not None and (now - _RATES_CACHE_TS) < _CACHE_TTL:
+        return _RATES_CACHE
     with _get_conn() as conn:
-        return sqlite_ops.load_rates_dict(conn)
+        result = sqlite_ops.load_rates_dict(conn)
+    _RATES_CACHE = result
+    _RATES_CACHE_TS = now
+    return result
 
 
 def load_budgets() -> dict[str, float]:
@@ -910,10 +960,17 @@ def load_budgets() -> dict[str, float]:
 
 
 def load_cycles() -> list[tuple]:
+    global _CYCLES_CACHE, _CYCLES_CACHE_TS
+    now = _time_mod.monotonic()
+    if _CYCLES_CACHE is not None and (now - _CYCLES_CACHE_TS) < _CACHE_TTL:
+        return _CYCLES_CACHE
     from datetime import date as _date2
     with _get_conn() as conn:
-        return [(_date2.fromisoformat(r["start_date"]), r["label"])
-                for r in sqlite_ops.list_cycles(conn)]
+        result = [(_date2.fromisoformat(r["start_date"]), r["label"])
+                  for r in sqlite_ops.list_cycles(conn)]
+    _CYCLES_CACHE = result
+    _CYCLES_CACHE_TS = now
+    return result
 
 
 def load_salary_keywords() -> list[str]:
