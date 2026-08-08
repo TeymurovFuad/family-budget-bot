@@ -12,6 +12,7 @@ All writes go through storage_facade; the page redirects back to GET /cycles
 on success, or to GET /cycles?msg=...&level=error on validation failure.
 """
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta
 from urllib.parse import quote as _urlquote
@@ -116,6 +117,10 @@ async def cycles_add(
     except ValueError:
         return _redirect(f"Invalid date: '{start_date}'. Use YYYY-MM-DD format.")
 
+    today = datetime.now(settings.TIMEZONE).date()
+    if d > today:
+        return _redirect("Cycle start date cannot be in the future.")
+
     if len(label) > _MAX_LABEL:
         return _redirect(f"Label too long (max {_MAX_LABEL} characters).")
 
@@ -191,7 +196,8 @@ async def cycles_detect(
     try:
         df = load_transactions()
         existing = load_cycles()
-        candidates = detect_cycle_candidates(df, existing, extra or None)
+        loop = asyncio.get_event_loop()
+        candidates = await loop.run_in_executor(None, detect_cycle_candidates, df, existing, extra or None)
         if not candidates:
             # Fallback: largest income rows near the start of each uncovered month
             anchor = date(today.year, today.month, 1)

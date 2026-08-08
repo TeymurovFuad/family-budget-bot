@@ -6,7 +6,7 @@
 </div>
 
 {% if msg %}
-<p class="{{ 'error-msg' if level == 'error' else 'success-msg' }}">{{ msg }}</p>
+<p role="alert" class="{{ 'error-msg' if level == 'error' else 'success-msg' }}">{{ msg }}</p>
 {% endif %}
 
 {% if not enabled %}
@@ -24,7 +24,7 @@
   {% if progress_pct is not none %}
   <div class="cycle-progress" role="img"
        aria-label="Day {{ current.day }} of a typical {{ typical_length }}-day cycle">
-    <span style="width: {{ progress_pct }}%"></span>
+    <div class="cycle-progress-fill" style="width: {{ progress_pct }}%"></div>
   </div>
   <p class="muted">Typical cycle: {{ typical_length }} days</p>
   {% endif %}
@@ -79,7 +79,7 @@
           <form method="post" action="/cycles/{{ r.start.isoformat() }}/rename"
                 class="cycle-rename-form">
             <input type="text" name="label" value="{{ r.label }}" maxlength="64"
-                   class="input-text input-text--sm" required>
+                   class="input-text input-text--sm" required aria-label="New cycle name">
             <button type="submit" class="btn btn--sm">Save</button>
           </form>
         </details>
