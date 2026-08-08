@@ -27,6 +27,7 @@ from web.auth import AuthRedirect, validate_web_settings
 from web.routes import cycles as cycles_routes
 from web.routes import drafts as drafts_routes
 from web.routes import settings as settings_routes
+from web.routes import report as report_routes
 from web.routes import summary as summary_routes
 from web.routes import transactions as transactions_routes
 
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(currency_routes.router)
     app.include_router(theme_routes.router)
     app.include_router(summary_routes.router)
+    app.include_router(report_routes.router)
     app.include_router(transactions_routes.router)
     app.include_router(drafts_routes.router)
     app.include_router(cycles_routes.router)

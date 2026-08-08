@@ -1,0 +1,45 @@
+{% from "_macros.html" import amount, chip %}
+{# Category breakdown fragment — used inside report.html card and via /report/section/categories #}
+{% if categories %}
+{% for cat in categories %}
+<div class="cat-breakdown-row">
+  {# Color chip + name #}
+  <span class="chip chip--cat report-cat-name" style="--cat: var(--cat-{{ cat.color_idx }})">{{ cat.name }}</span>
+
+  {# Bar track #}
+  <div class="cat-bar-track">
+    <div class="cat-bar-fill"
+         style="width: {{ (cat.pct_of_expense * 100) | round(1) }}%;
+                background: var(--cat-{{ cat.color_idx }})"></div>
+    {# Budget tick marker #}
+    {% if cat.budget and cat.budget > 0 and cat.spend > 0 %}
+    {% set tick_pos = [(cat.budget / (cat.spend / cat.pct_of_expense) * 100) | round(1), 100] | min %}
+    <span class="cat-budget-tick"
+          style="left: {{ tick_pos }}%; background: var(--ink-soft);"
+          title="Budget: {{ '%.0f'|format(cat.budget) }} {{ currency }}"></span>
+    {% endif %}
+  </div>
+
+  {# Spend amount #}
+  <span style="min-width:5rem; text-align:right; white-space:nowrap;">
+    {{ amount(cat.spend, 'neg', ccy=currency, signed=false) }}
+  </span>
+
+  {# Budget pct or count #}
+  <span class="muted report-cat-count" style="min-width:4rem; text-align:right; font-size:var(--fs-sm);">
+    {% if cat.pct_of_budget is not none %}
+      {{ "%.0f"|format(cat.pct_of_budget * 100) }}% of budget
+    {% else %}
+      {{ cat.txn_count }} txn{% if cat.txn_count != 1 %}s{% endif %}
+    {% endif %}
+  </span>
+
+  {# OVER badge #}
+  {% if cat.pct_of_budget and cat.pct_of_budget > 1.0 %}
+  <span class="badge-over">OVER</span>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<p class="muted">No expense categories in this period.</p>
+{% endif %}
