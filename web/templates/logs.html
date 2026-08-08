@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Logs</h1>
+</div>
+
+<!-- Filter bar -->
+<form method="get" action="/logs" class="logs-toolbar">
+  <!-- Level chips: WARNING / ERROR / ALL -->
+  <div class="type-chips" role="group" aria-label="Log level">
+    {% for lv in ["WARNING", "ERROR", "ALL"] %}
+    <button type="submit" name="level" value="{{ lv }}"
+            class="chip {% if level == lv %}chip--active{% endif %}">{{ lv }}</button>
+    {% endfor %}
+  </div>
+
+  <!-- Date selector -->
+  <select name="date" aria-label="Log date" onchange="this.form.submit()">
+    {% for d in available_dates %}
+    <option value="{{ d }}" {% if d == selected_date %}selected{% endif %}>{{ d }}</option>
+    {% endfor %}
+  </select>
+
+  <!-- Logger selector -->
+  <select name="logger_filter" aria-label="Logger" onchange="this.form.submit()">
+    <option value="" {% if not logger_filter %}selected{% endif %}>All loggers</option>
+    {% for lg in loggers %}
+    <option value="{{ lg }}" {% if logger_filter == lg %}selected{% endif %}>{{ lg }}</option>
+    {% endfor %}
+  </select>
+
+  <!-- Search input -->
+  <input type="search" name="q" value="{{ q }}" placeholder="Search messages…" aria-label="Search log messages">
+
+  <!-- Preserve current level when date/logger changes -->
+  <input type="hidden" name="level" value="{{ level }}">
+</form>
+
+<!-- Count summary -->
+{% if file_missing %}
+<p class="muted">No log file for {{ selected_date }}.</p>
+{% else %}
+<p class="muted logs-summary">
+  {{ total_entries }} {{ level }} entr{{ 'y' if total_entries == 1 else 'ies' }}
+  {% if total_pages > 1 %} &mdash; page {{ page }} of {{ total_pages }}{% endif %}
+  {% if q %} matching <em>{{ q }}</em>{% endif %}
+</p>
+
+<!-- Log table -->
+{% if entries %}
+<div class="log-list">
+  {% for e in entries %}
+  <div class="log-entry log-{{ e.level|lower }}">
+    <span class="log-ts">{{ e.ts }}</span>
+    <span class="log-level">{{ e.level }}</span>
+    <span class="log-logger">{{ e.logger }}</span>
+    <p class="log-msg">{{ e.message }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Pagination -->
+<nav class="logs-page-nav">
+  {% if has_prev %}<a class="btn" href="?level={{ level }}&date={{ selected_date }}&q={{ q }}&logger_filter={{ logger_filter }}&page={{ page - 1 }}">← Newer</a>{% endif %}
+  <span class="muted">Page {{ page }} of {{ total_pages }}</span>
+  {% if has_next %}<a class="btn" href="?level={{ level }}&date={{ selected_date }}&q={{ q }}&logger_filter={{ logger_filter }}&page={{ page + 1 }}">Older →</a>{% endif %}
+</nav>
+{% else %}
+<p class="muted">No {{ level }} entries{% if q %} matching <em>{{ q }}</em>{% endif %} in this log file.</p>
+{% endif %}
+{% endif %}
+{% endblock %}
