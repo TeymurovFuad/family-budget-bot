@@ -1,5 +1,4 @@
-"""
-web/routes/report.py — GET /report — analytics report page.
+"""web/routes/report.py — GET /report — analytics report page.
 
 Provides a comprehensive analytics view for a selected period with:
 - Summary stats (income/expense/savings/net/daily_avg/savings_rate)
@@ -68,15 +67,20 @@ def _filter_df(
         & df["IsDone"]
     )
     sub = df[mask].copy()
+
     if txn_type and txn_type.lower() not in ("all", ""):
         type_map = {"income": "Income", "expense": "Expense", "savings": "Savings"}
         mapped = type_map.get(txn_type.lower(), txn_type)
         sub = sub[sub["Type"] == mapped]
+
     if person and person.lower() not in ("all", ""):
         sub = sub[sub["Person"].str.strip().str.lower() == person.strip().lower()]
+
     if categories:
-        cats_lower = [c.strip().lower() for c in categories]
-        sub = sub[sub["Category"].str.strip().str.lower().isin(cats_lower)]
+        cats_lower = [c.strip().lower() for c in categories if c.strip()]
+        if cats_lower:
+            sub = sub[sub["Category"].str.strip().str.lower().isin(cats_lower)]
+
     return sub
 
 
@@ -91,7 +95,8 @@ def build_report_context(
 ) -> dict[str, Any]:
     if today is None:
         today = datetime.now(settings.TIMEZONE).date()
-    categories = categories or []
+
+    categories = [c for c in (categories or []) if c and c.strip()]
 
     df = load_transactions()
     cycles_ledger = load_cycles() if settings.BUDGET_CYCLE else []
@@ -104,9 +109,12 @@ def build_report_context(
 
     # Newest-first for UI navigation (index 0 = most recent)
     periods_newest_first = list(reversed(all_periods))
-
     selected_index = 0
-    if selected_period:
+
+    if date_from_param and date_to_param and not selected_period:
+        # Custom date range takes priority when explicitly provided without period
+        pass
+    elif selected_period:
         for i, (s, _e, _lbl) in enumerate(periods_newest_first):
             if s.isoformat() == selected_period:
                 selected_index = i
@@ -191,6 +199,7 @@ def build_report_context(
     # ── Category trends (up to 6 prior periods, including selected) ────────
     trend_window = periods_newest_first[selected_index: selected_index + _CAT_TREND_PERIODS]
     trend_window = list(reversed(trend_window))  # oldest first
+
     cat_trend_periods_labels = [lbl for _, _, lbl in trend_window]
     cat_names_for_trend = [c["name"] for c in cat_list[:10]]
 
@@ -237,6 +246,7 @@ def build_report_context(
     expense_pct = min(expense / income_anchor * 100, 100)
     savings_pct = min(savings_val / income_anchor * 100, max(100 - expense_pct, 0))
     remain_pct = max(100 - expense_pct - savings_pct, 0)
+
     type_split = {
         "expense_pct": round(expense_pct, 1),
         "savings_pct": round(savings_pct, 1),
@@ -281,6 +291,7 @@ def build_report_context(
     daily_amounts = [float(exp_daily.get(d, 0.0)) for d in day_range]
     max_daily = max(daily_amounts) if daily_amounts else 0.0
     max_daily_safe = max_daily if max_daily > 0 else 1.0
+
     daily_spend: list[dict] = [
         {
             "day": d.day,
@@ -299,6 +310,7 @@ def build_report_context(
     trend_savings_vals: list[float] = []
     trend_labels: list[str] = []
     trend_short: list[str] = []
+
     for ts, te, tlbl in all_periods:
         t_sub = _filter_df(df, ts, te, "all", "all", [])
         trend_income_vals.append(float(t_sub[t_sub["Type"] == "Income"]["_base"].sum()))
@@ -306,8 +318,10 @@ def build_report_context(
         trend_savings_vals.append(float(t_sub[t_sub["Type"] == "Savings"]["_base"].sum()))
         trend_labels.append(tlbl)
         trend_short.append(ts.strftime("%b %y"))
+
     trend_max = max([0.0] + trend_income_vals + trend_expense_vals + trend_savings_vals)
     current_idx = len(all_periods) - 1 - selected_index
+
     trend = {
         "periods": trend_labels,
         "short_labels": trend_short,
@@ -344,41 +358,86 @@ def build_report_context(
     ]
     if over_cats:
         warnings.append({"level": "error", "message": f"{', '.join(over_cats)} over budget"})
+
     if net < 0:
         warnings.append({
             "level": "error",
             "message": f"Expenses exceeded income by {abs(net):.0f} {settings.DISPLAY_CURRENCY}",
         })
+
     if income > 0 and savings_rate < 0.05:
         warnings.append({
             "level": "warn",
             "message": f"Savings rate is {savings_rate*100:.1f}% — below 5% target",
         })
+
     if income > 0 and days_elapsed > 0 and daily_avg > income / days_elapsed * 1.1:
         warnings.append({"level": "warn", "message": "Daily spending is running above income pace"})
+
     if income == 0:
         warnings.append({"level": "warn", "message": "No income recorded for this period"})
 
-    # ── Period navigation ──────────────────────────────────────────────────
-    def _make_url(idx: int) -> str:
-        s = periods_newest_first[idx][0]
-        return f"/report?period={s.isoformat()}"
+    # ── URL helper to retain active filters across period navigation ───────
+    def _make_report_url(p_iso: str | None = None, t_val: str = "all", pers_val: str = "all", cats_val: list[str] | None = None) -> str:
+        cats_val = cats_val or []
+        params = []
+        if p_iso:
+            params.append(f"period={p_iso}")
+        if t_val and t_val.lower() != "all":
+            params.append(f"type={t_val.lower()}")
+        if pers_val and pers_val.lower() != "all":
+            params.append(f"person={pers_val}")
+        for c in cats_val:
+            params.append(f"category={c}")
+        return "/report?" + "&".join(params) if params else "/report"
 
-    prev_url = _make_url(selected_index + 1) if selected_index + 1 < len(periods_newest_first) else None
-    next_url = _make_url(selected_index - 1) if selected_index > 0 else None
+    cur_period_iso = periods_newest_first[selected_index][0].isoformat()
+
+    prev_url = _make_report_url(
+        periods_newest_first[selected_index + 1][0].isoformat(),
+        txn_type, person, categories
+    ) if selected_index + 1 < len(periods_newest_first) else None
+
+    next_url = _make_report_url(
+        periods_newest_first[selected_index - 1][0].isoformat(),
+        txn_type, person, categories
+    ) if selected_index > 0 else None
+
     available_periods_nav = [
         {
             "label": lbl,
-            "url": f"/report?period={s.isoformat()}",
+            "value": s.isoformat(),
+            "url": _make_report_url(s.isoformat(), txn_type, person, categories),
             "is_selected": i == selected_index,
         }
         for i, (s, _e, lbl) in enumerate(periods_newest_first)
     ]
+
     period_nav = {
         "prev_url": prev_url,
         "next_url": next_url,
         "available_periods": available_periods_nav,
+        "selected_period": cur_period_iso,
     }
+
+    # ── Active filter chips with accurate clear URLs ───────────────────────
+    active_chips = []
+    if txn_type and txn_type.lower() != "all":
+        active_chips.append({
+            "label": txn_type.capitalize(),
+            "clear_url": _make_report_url(cur_period_iso, "all", person, categories),
+        })
+    if person and person.lower() != "all":
+        active_chips.append({
+            "label": person,
+            "clear_url": _make_report_url(cur_period_iso, txn_type, "all", categories),
+        })
+    for cat in categories:
+        remaining_cats = [c for c in categories if c != cat]
+        active_chips.append({
+            "label": cat,
+            "clear_url": _make_report_url(cur_period_iso, txn_type, person, remaining_cats),
+        })
 
     # ── Filter lists ───────────────────────────────────────────────────────
     all_persons = sorted(df["Person"].dropna().unique().tolist()) if "Person" in df.columns else []
@@ -392,7 +451,6 @@ def build_report_context(
         "date_to": date_to,
         "days_elapsed": days_elapsed,
         "currency": settings.DISPLAY_CURRENCY,
-
         "summary": summary,
         "categories": cat_list,
         "cat_trends": cat_trends,
@@ -406,7 +464,6 @@ def build_report_context(
         "currency_mix": currency_mix,
         "goals": None,
         "warnings": warnings,
-
         "persons_list": all_persons,
         "categories_list": all_categories,
         "txn_types": ["Income", "Expense", "Savings"],
@@ -415,6 +472,7 @@ def build_report_context(
             "person": person,
             "categories": categories,
         },
+        "active_chips": active_chips,
         "period_nav": period_nav,
     }
 
@@ -424,8 +482,10 @@ def _apply_display_currency(ctx: dict, target: str) -> dict:
     display = str(settings.DISPLAY_CURRENCY).strip().upper()
     target = str(target or "").strip().upper() or display
     ctx["currency"] = target
+
     if target == display:
         return ctx
+
     rates = load_rates()
     if not rates.get(target):
         ctx["currency"] = display
@@ -470,6 +530,7 @@ def _apply_display_currency(ctx: dict, target: str) -> dict:
     # Daily spend — recalculate pct after conversion
     for d in ctx["daily_spend"]:
         d["amount"] = conv(d["amount"]) or 0.0
+
     max_daily = max((d["amount"] for d in ctx["daily_spend"]), default=0.0)
     max_daily_safe = max_daily if max_daily > 0 else 1.0
     for d in ctx["daily_spend"]:
@@ -497,7 +558,7 @@ async def report(
     date_to: str = "",
     txn_type: str = Query(default="all", alias="type"),
     person: str = "all",
-    category: list[str] | None = None,
+    category: list[str] | None = Query(default=None),
 ):
     kwargs: dict = {}
     if period:
@@ -509,10 +570,14 @@ async def report(
         if jt:
             kwargs["date_to_param"] = jt
 
+    cat_list = category or []
+    if isinstance(cat_list, str):
+        cat_list = [cat_list]
+
     ctx = build_report_context(
         txn_type=txn_type or "all",
         person=person or "all",
-        categories=list(category) if category else [],
+        categories=cat_list,
         **kwargs,
     )
     ctx["active_filters"]["date_from"] = date_from
@@ -527,8 +592,7 @@ async def report(
 @router.get(
     "/report/section/categories",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_session)],
-)
+    dependencies=[Depends(require_session)],)
 async def report_categories(
     request: Request,
     period: str = "",
@@ -536,7 +600,7 @@ async def report_categories(
     date_to: str = "",
     txn_type: str = Query(default="all", alias="type"),
     person: str = "all",
-    category: list[str] | None = None,
+    category: list[str] | None = Query(default=None),
 ):
     kwargs: dict = {}
     if period:
@@ -548,10 +612,14 @@ async def report_categories(
         if jt:
             kwargs["date_to_param"] = jt
 
+    cat_list = category or []
+    if isinstance(cat_list, str):
+        cat_list = [cat_list]
+
     ctx = build_report_context(
         txn_type=txn_type or "all",
         person=person or "all",
-        categories=list(category) if category else [],
+        categories=cat_list,
         **kwargs,
     )
     ctx = _apply_display_currency(ctx, get_session_currency(request))
