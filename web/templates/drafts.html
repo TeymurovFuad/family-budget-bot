@@ -42,7 +42,7 @@
 
 {% if selected_user_id is not none %}
   <div class="drafts-content">
-    <form id="draft-bulk-form" class="draft-actions" method="post" action="/drafts/{{ selected_user_id }}/bulk-update">
+    <form id="draft-bulk-form" class="draft-actions" method="post" action="/drafts/{{ selected_user_id }}/bulk-update" data-user-id="{{ selected_user_id }}">
       <div class="bulk-bar bulk-bar--drafts" id="draft-bulk-bar" aria-live="polite">
 
         {# ── Selection header ── #}

@@ -5,6 +5,7 @@ returns to Telegram to save/cancel the draft.
 """
 
 import asyncio
+import json
 import logging
 import time as _time
 from collections import Counter
@@ -12,7 +13,7 @@ from collections.abc import Sequence
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from ai_parser import get_peak_hours_status, parse_quick
 from bulk_drafts import archive_user_draft, list_user_drafts, load_user_draft, save_user_draft
@@ -307,6 +308,140 @@ async def drafts_page(request: Request):
         "row_error": request.query_params.get("row_error", ""),
     }
     return request.app.state.templates.TemplateResponse(request, "drafts.html", ctx)
+
+
+@router.get("/drafts/{user_id}/reanalyze-stream", dependencies=[Depends(require_session)])
+async def drafts_reanalyze_stream(request: Request, user_id: int):
+    """SSE endpoint — streams per-row AI analysis progress in real time.
+
+    Query params:
+      row_idx     (repeatable) — indices of rows to analyse
+      ai_instruction           — optional free-text instruction for the AI
+    """
+    rows = load_user_draft(user_id)
+    if not rows:
+        async def _err():
+            yield f'event: error\ndata: {json.dumps({"message": "Draft not found."})}\n\n'
+        return StreamingResponse(_err(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    ref = load_reference_data()
+    category_types = load_category_types()
+    categories_by_type = _build_categories_by_type(ref, category_types)
+    raw_idxs = request.query_params.getlist("row_idx")
+    idxs = _parse_selected_indices(raw_idxs, len(rows))
+    instruction = str(request.query_params.get("ai_instruction", "") or "").strip()
+
+    if not idxs:
+        async def _no_rows():
+            yield f'event: error\ndata: {json.dumps({"message": "No rows selected."})}\n\n'
+        return StreamingResponse(_no_rows(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    async def generate():
+        loop = asyncio.get_running_loop()
+        semaphore = asyncio.Semaphore(_REANALYZE_MAX_PARALLEL)
+        queue: asyncio.Queue[tuple[str, int, dict | None]] = asyncio.Queue()
+        save_lock = asyncio.Lock()
+        stats = {"changed": 0, "unchanged": 0, "failed": 0, "timed_out": 0, "skipped": 0, "invalid": 0}
+
+        async def _run_one(idx: int) -> None:
+            row = rows[idx]
+            if not isinstance(row, dict):
+                await queue.put(("result", idx, {
+                    "status": "unchanged", "reason": "Row is not editable.",
+                    "changed_fields": [], "proposed": {}, "is_invalid": False,
+                }))
+                return
+            if row.get("dropped"):
+                await queue.put(("result", idx, {
+                    "status": "skipped", "reason": "Row is dropped.",
+                    "changed_fields": [], "proposed": {}, "is_invalid": False,
+                }))
+                return
+            async with semaphore:
+                await queue.put(("analyzing", idx, None))
+                try:
+                    text = _build_reanalyze_text(row, instruction)
+                    parsed = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda t=text: parse_quick(t, ref)),
+                        timeout=_REANALYZE_TIMEOUT_S,
+                    )
+                    preview = _compute_preview_for_row(
+                        row, ref, categories_by_type, instruction, parsed=parsed
+                    )
+                except asyncio.TimeoutError:
+                    preview = {
+                        "status": "timeout", "reason": "AI preview timed out.",
+                        "changed_fields": [], "proposed": {}, "is_invalid": False,
+                    }
+                except Exception as exc:
+                    err = _preview_error_reason(exc)
+                    log.warning("Draft SSE preview failed user=%s row=%s: %s", user_id, idx, err, exc_info=True)
+                    preview = {
+                        "status": "error", "reason": f"AI preview failed: {err}",
+                        "changed_fields": [], "proposed": {}, "is_invalid": False,
+                    }
+            # Save before queue.put: if the client refreshes mid-stream the
+            # generator is cancelled but this file-write already happened, so
+            # the page reload shows the correct badge for this row.
+            async with save_lock:
+                rows[idx]["_ai_preview"] = preview
+                save_user_draft(user_id, rows)
+            await queue.put(("result", idx, preview))
+
+        tasks = [asyncio.create_task(_run_one(idx)) for idx in idxs]
+        pending = len(tasks)
+        try:
+            while pending > 0:
+                try:
+                    event_type, idx, data = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                if event_type == "analyzing":
+                    yield f"event: analyzing\ndata: {json.dumps({'idx': idx})}\n\n"
+
+                elif event_type == "result":
+                    pending -= 1
+                    preview = data
+                    status = str(preview.get("status") or "")
+
+                    # Accumulate stats
+                    if status == "changed":
+                        stats["changed"] += 1
+                    elif status == "error":
+                        stats["failed"] += 1
+                    elif status == "timeout":
+                        stats["timed_out"] += 1
+                    elif status == "skipped":
+                        stats["skipped"] += 1
+                    else:
+                        stats["unchanged"] += 1
+                    if preview.get("is_invalid"):
+                        stats["invalid"] += 1
+
+                    yield f"event: result\ndata: {json.dumps({'idx': idx, **preview})}\n\n"
+
+            yield f"event: done\ndata: {json.dumps(stats)}\n\n"
+            log.info(
+                "Draft SSE reanalyze: user=%s rows=%s changed=%s unchanged=%s "
+                "failed=%s timed_out=%s skipped=%s",
+                user_id, len(idxs),
+                stats["changed"], stats["unchanged"],
+                stats["failed"], stats["timed_out"], stats["skipped"],
+            )
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/drafts/{user_id}/bulk-update", dependencies=[Depends(require_session)])

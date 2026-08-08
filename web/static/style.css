@@ -868,6 +868,29 @@ dialog.modal::backdrop {
 .draft-row--ai-changed { border-left: 3px solid var(--accent); }
 .draft-row--ai-error   { border-left: 3px solid var(--money-neg); }
 
+/* ── SSE stream status badges ───────────────────────────────────────────────── */
+@keyframes draft-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+.draft-stream-badge {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+}
+.draft-stream-badge--pending   { color: var(--ink-soft); }
+.draft-stream-badge--analyzing { color: var(--accent); animation: draft-pulse 1.2s ease-in-out infinite; }
+.draft-stream-badge--changed   { color: var(--accent); }
+.draft-stream-badge--unchanged { color: var(--ink-soft); }
+.draft-stream-badge--error     { color: var(--money-neg); }
+.draft-stream-badge--timeout   { color: var(--money-neg); }
+.draft-stream-badge--skipped   { color: var(--ink-soft); }
+
+/* Summary bar variants for stream states */
+.draft-summary-status--pending   { color: var(--ink-soft); }
+.draft-summary-status--analyzing { color: var(--accent); animation: draft-pulse 1.2s ease-in-out infinite; }
+
 /* Bulk-bar tip — visible at all widths */
 .draft-bulk-tip {
   margin: 0;
@@ -901,11 +924,13 @@ dialog.modal::backdrop {
  * JS collapses mobile rows immediately via an inline script after the table.
  */
 
-/* Summary bar: hidden by default (expanded state), shown only when collapsed */
-.draft-cell--summary { display: none; }
+/* Summary bar: hidden by default (expanded state), shown only when collapsed.
+   Use .draft-table ancestor to raise specificity above the mobile
+   `.draft-table td { display: block }` rule that would otherwise override this. */
+.draft-table .draft-cell--summary { display: none; }
 
 .draft-row--collapsed .draft-cell--summary {
-  display: block;
+  display: block !important;
   padding: 0;
   border-bottom: none;
 }
